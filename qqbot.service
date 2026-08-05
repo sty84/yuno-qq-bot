@@ -1,0 +1,23 @@
+[Unit]
+Description=QQ Bot (aiagent)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aiagent
+Group=aiagent
+WorkingDirectory=/home/ubuntu/qq-bot
+ExecStart=/home/ubuntu/qq-bot/venv/bin/python /home/ubuntu/qq-bot/bot.py
+StandardOutput=append:/home/ubuntu/qq-bot/data/bot.log
+StandardError=append:/home/ubuntu/qq-bot/data/bot.log
+Restart=always
+RestartSec=5
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/qq-bot/data
+PrivateTmp=true
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

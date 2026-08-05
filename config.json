@@ -1,0 +1,25 @@
+{
+  "allowed_paths": ["/home/ubuntu/qq-bot/data"],
+  "allow_bot_restart": true,
+  "default_allow": ["list"],
+  "report": {
+    "enabled": false,
+    "hour": 9,
+    "minute": 0,
+    "anomaly_immediate": true
+  },
+  "random_events": {
+    "enabled": false,
+    "group_openid": "",
+    "min_interval_min": 60,
+    "max_interval_min": 240
+  },
+  "balance_alert": {
+    "enabled": false,
+    "threshold": 2.0,
+    "check_interval_hours": 6,
+    "target_type": "group",
+    "target": ""
+  },
+  "containers": []
+}

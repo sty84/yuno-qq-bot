@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""qqbot-ctl —— 机器人唯一的容器操作入口（白名单脚本，由 aiagent 通过 sudo 调用）。"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+
+CONFIG = os.getenv("QQBOT_CONFIG", "/home/ubuntu/qq-bot/config.json")
+ACTIONS = ("start", "stop", "restart")
+
+
+def parse_config_value(section, key, raw):
+    """按白名单校验并转换配置值；返回 (值, 错误信息)。"""
+    rules = {
+        ("report", "enabled"): ("bool",),
+        ("report", "hour"): ("int", 0, 23),
+        ("report", "minute"): ("int", 0, 59),
+        ("report", "anomaly_immediate"): ("bool",),
+        ("random_events", "enabled"): ("bool",),
+        ("random_events", "group_openid"): ("str",),
+        ("random_events", "min_interval_min"): ("int", 1),
+        ("random_events", "max_interval_min"): ("int", 1),
+        ("balance_alert", "enabled"): ("bool",),
+        ("balance_alert", "threshold"): ("float",),
+        ("balance_alert", "check_interval_hours"): ("int", 1),
+        ("balance_alert", "target_type"): ("choice", "group", "c2c"),
+        ("balance_alert", "target"): ("str",),
+        ("allow_bot_restart", ""): ("bool",),
+    }
+    rule = rules.get((section, key))
+    if rule is None:
+        return None, f"不允许修改 {section}.{key}"
+    kind = rule[0]
+    if kind == "bool":
+        return str(raw).strip().lower() in ("true", "1", "yes"), None
+    if kind == "str":
+        return raw.strip(), None
+    if kind == "int":
+        try:
+            v = int(raw)
+        except Exception:
+            return None, "需要整数"
+        if len(rule) > 1 and v < rule[1]:
+            return None, f"不能小于 {rule[1]}"
+        if len(rule) > 2 and v > rule[2]:
+            return None, f"不能大于 {rule[2]}"
+        return v, None
+    if kind == "float":
+        try:
+            return float(raw), None
+        except Exception:
+            return None, "需要数字"
+    if kind == "choice":
+        if raw.strip() not in rule[1:]:
+            return None, "只能是 " + "/".join(rule[1:])
+        return raw.strip(), None
+    return None, "未知类型"
+
+
+def write_config(cfg):
+    """原子写入 config.json（临时文件 + rename），避免写坏。"""
+    tmp = CONFIG + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, CONFIG)
+
+
+def load_config():
+    with open(CONFIG, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def find_entry(cfg, keyword: str):
+    keyword = keyword.lower()
+    for entry in cfg.get("containers", []):
+        if keyword in str(entry.get("keyword", "")).lower():
+            return entry
+    return None
+
+
+def run(cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        print(f"操作超时：{' '.join(cmd)}")
+        sys.exit(1)
+
+
+def main():
+    args = sys.argv[1:]
+
+    # qqbot-ctl config-set <段> <键> <值>：白名单校验后原子修改配置
+    if len(args) >= 4 and args[0] == "config-set":
+        section, key, raw = args[1], args[2], " ".join(args[3:])
+        if section in ("allowed_paths", "default_allow"):
+            print("列表类配置请手动编辑 config.json。")
+            return 2
+        value, err = parse_config_value(section, key, raw)
+        if err:
+            print(err)
+            return 2
+        cfg = load_config()
+        if section == "allow_bot_restart":
+            cfg[section] = value
+        else:
+            cfg.setdefault(section, {})[key] = value
+        write_config(cfg)
+        print(f"已修改 {section}.{key} = {json.dumps(value, ensure_ascii=False)}")
+        return 0
+
+    # qqbot-ctl add <关键词> <路径>：由 root 校验并写入 config.json（机器人只读配置）
+    if len(args) >= 3 and args[0] == "add":
+        keyword, path = args[1], args[2]
+        if not re.fullmatch(r"[a-z0-9_\-]+", keyword):
+            print("关键词只能包含字母、数字、下划线和中划线。")
+            return 2
+        if not path.startswith("/"):
+            print("路径必须是绝对路径（以 / 开头）。")
+            return 2
+        if not os.path.isdir(path):
+            print(f"路径不存在：{path}")
+            return 2
+        cfg = load_config()
+        for entry in cfg.get("containers", []):
+            if entry.get("keyword") == keyword:
+                print(f"关键词 {keyword} 已存在，先 remove 再添加。")
+                return 2
+        cfg.setdefault("containers", []).append({
+            "keyword": keyword,
+            "path": path.rstrip("/"),
+            "allow": ["list", "start", "stop", "restart"],
+        })
+        write_config(cfg)
+        print(f"已添加：{keyword} -> {path}（允许 start/stop/restart）")
+        return 0
+
+    # qqbot-ctl remove <关键词>：由 root 校验并从 config.json 删除
+    if len(args) == 2 and args[0] == "remove":
+        keyword = args[1]
+        cfg = load_config()
+        kept = [e for e in cfg.get("containers", []) if e.get("keyword") != keyword]
+        if len(kept) == len(cfg.get("containers", [])):
+            print(f"没找到关键词：{keyword}")
+            return 2
+        cfg["containers"] = kept
+        write_config(cfg)
+        print(f"已删除：{keyword}")
+        return 0
+
+    # qqbot-ctl <关键词> logs：取该项目的容器日志（供日报/告警使用）
+    if len(args) == 2 and args[1] == "logs":
+        keyword = args[0]
+        cfg = load_config()
+        entry = find_entry(cfg, keyword)
+        if not entry:
+            print(f"关键词不在白名单内：{keyword}")
+            return 2
+        p = entry.get("path", "")
+        compose = os.path.join(p, "docker-compose.yml")
+        if not os.path.exists(compose):
+            compose = os.path.join(p, "docker-compose.yaml")
+        if not os.path.exists(compose):
+            print(f"找不到 docker-compose 文件：{p}")
+            return 2
+        proc = run(["docker", "compose", "-f", compose, "logs", "--tail", "100", "--no-color"])
+        out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        print(out[:2000] if out else "(容器暂无日志)")
+        return proc.returncode
+
+    # qqbot-ctl list：列出 config.json 登记的所有容器
+    if len(args) == 1 and args[0] == "list":
+        cfg = load_config()
+        entries = cfg.get("containers", [])
+        if not entries:
+            print("config.json 里没有登记容器。")
+            return 0
+        lines = []
+        for entry in entries:
+            p = entry.get("path", "")
+            if not p or not os.path.isdir(p):
+                lines.append(f"[跳过] {entry.get('keyword')}：目录不存在 {p}")
+                continue
+            compose = os.path.join(p, "docker-compose.yml")
+            if not os.path.exists(compose):
+                compose = os.path.join(p, "docker-compose.yaml")
+            if not os.path.exists(compose):
+                lines.append(f"[跳过] {entry.get('keyword')}：找不到 docker-compose 文件 {p}")
+                continue
+            proc = run([
+                "docker", "compose", "-f", compose, "ps", "-a",
+                "--format", "{{.Names}}|{{.Status}}",
+            ])
+            rows = [r.strip() for r in (proc.stdout or "").splitlines() if r.strip()]
+            if rows:
+                for raw in rows:
+                    name, _, status = raw.partition("|")
+                    if "Up" in status:
+                        state = "运行中"
+                    elif "Exited" in status:
+                        state = "已停止"
+                    else:
+                        state = status[:40] or "未知"
+                    lines.append(f"{entry.get('keyword')} · {name} [{state}]")
+            else:
+                lines.append(f"{entry.get('keyword')} · （暂无容器）")
+        print("\n".join(lines) if lines else "config.json 里没有登记容器。")
+        return 0
+
+    if len(args) != 2:
+        print("用法：qqbot-ctl list | qqbot-ctl <关键词> <start|stop|restart>")
+        return 2
+
+    keyword, action = args
+    if action not in ACTIONS:
+        print(f"不支持的操作：{action}")
+        return 2
+    if not keyword.isalnum() and not all(c.isalnum() or c in "_-" for c in keyword):
+        print("关键词只能包含字母、数字、下划线和中划线。")
+        return 2
+
+    cfg = load_config()
+    entry = find_entry(cfg, keyword)
+    if not entry:
+        print(f"关键词不在白名单内：{keyword}")
+        return 2
+    allow = entry.get("allow") or cfg.get("default_allow") or []
+    if action not in allow:
+        print(f"config.json 未允许该操作：{keyword}/{action}")
+        return 2
+
+    p = entry.get("path", "")
+    compose = os.path.join(p, "docker-compose.yml")
+    if not os.path.exists(compose):
+        compose = os.path.join(p, "docker-compose.yaml")
+    if not os.path.exists(compose):
+        print(f"找不到 docker-compose 文件：{p}")
+        return 2
+
+    mapping = {"start": ["up", "-d"], "stop": ["stop"], "restart": ["restart"]}
+    proc = run(["docker", "compose", "-f", compose] + mapping[action])
+    out = (proc.stdout or "").strip()
+    err = (proc.stderr or "").strip()
+    if proc.returncode != 0:
+        print(f"{keyword} {action} 失败：\n{(out + '\n' + err).strip()[:1500]}")
+        return proc.returncode
+    result = f"{keyword} {action} 完成"
+    if out:
+        result += "\n" + out[:1500]
+    print(result)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
