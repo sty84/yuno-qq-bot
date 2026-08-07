@@ -1,4 +1,10 @@
 qq-botpy>=1.1.5
 openai>=1.30.0
 python-dotenv>=1.0.0
-docker>=7.0.0
+mcp>=1.0.0
+# 本地向量化（云端本地计算）：小内存/无 GPU 服务器建议先装 CPU 版 torch 再装本依赖：
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# 否则会随 sentence-transformers 安装全量（含 CUDA）torch，体积约 2.5GB
+sentence-transformers>=2.7.0
+# 可选：jieba 用于 BM25 中文分词（纯 Python，装了就自动启用，否则用二元组回退）
+# jieba>=0.42.1

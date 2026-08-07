@@ -1,179 +1,214 @@
-# YUNO AI —— QQ 官方机器人（DeepSeek 驱动）
+# YUNO AI 2.0 —— 成长型 Agent Memory System
 
-一个跑在 Linux 服务器上的 QQ 官方群聊机器人：群里 @ 她，她会以设定的人设（默认：BanG Dream! 梦限大 MewType 的 DJ 千石由乃）调用 DeepSeek 回答。
+> QQ 里聊天，App 里管理，MCP 串起所有能力。**记忆不是聊天记录，而是 AI 的长期认知。**
 
-采用**插件架构 + 专用账号 + 白名单权限**：核心只负责连接和路由，所有功能以插件形式放在 `plugins/` 目录，扩展功能不用改核心。
+YUNO 2.0 是一个把 **AI 长期记忆 / 人格成长 / 关系系统 / 决策辅助** 做成完整认知闭环的 QQ 机器人，
+同时把记忆系统抽成可独立接入任意 Agent 的 **Python SDK + FastAPI 服务**。
+
+```mermaid
+flowchart LR
+    QQ[QQ 聊天前台 bot.py] --> AG[agent.ask 人格+记忆+LLM]
+    SDK[Python SDK / FastAPI yuno_memory] --> AG
+    HER[Hermes / 其他 Agent] -->|HTTP / MCP| SDK
+    AG --> MEM[memory/ 统一记忆系统]
+    MEM --> DB[(SQLite data/bot.db)]
+```
+
+---
+
+## 与 1.0 相比的变化
+
+| 维度 | 1.x | 2.0 |
+|---|---|---|
+| 记忆 | 分场景简单事实列表 | 统一记忆认知系统：用户/AI/人物同表同格式，可信度演化、时间推理、遗忘巩固 |
+| 检索 | 关键词 LIKE | 7 路融合检索（BM25/FTS/向量/图谱/结构化/Rules/议题）+ 重排 + MMR |
+| 纠错 | 无 | 调查机制：不盲从，update/keep/uncertain 三选一，历史可回滚 |
+| 人格 | 固定 prompt | 结构化人设字段（身份/性格/经历/动机）+ 核心不可变/自适应成长分层 |
+| 关系 | 无 | AI-用户关系状态机（trust/familiarity/stage，行为证据驱动） |
+| 决策 | 无 | 一次一问的真人式顾问（结合记忆、考虑现实约束、去模板化） |
+| 管理 | 指令暴露在 QQ 聊天 | 管理迁出 QQ（App + MCP 能力层），QQ 只聊天 |
+| 接入 | 只能 QQ | Python SDK + FastAPI，任意 Agent 可接入同一份记忆 |
+| 工程化 | 无测试 | 32 套自动化测试、记忆轨迹导出、五维人工评分、评测基线闭环 |
 
 ## 功能一览
 
-| 分类 | 功能 |
-|---|---|
-| 聊天 | 角色人设对话、情绪系统、自动记忆（按场景隔离） |
-| 查询 | `/状态`（负载/CPU/内存/磁盘/运行时间）、`/天气`、`/余额` |
-| 记忆 | 自动提取关键信息、`/记住`、`/我的记忆`、`/群记忆`、`/清除记忆` |
-| 身份 | `/绑定`（群 ↔ 私聊同一个人）、`/解绑`、`/昵称` |
-| 游戏 | `/成语` 成语接龙（支持外部大词库）、`/答题`、`/排名` |
-| 管理 | `/容器` 启停（白名单）、`/写文件`、`/读文件`、`/命令` AI 执行、`/报告` |
-| 后台 | 定时日报邮件、异常告警邮件、低余额提醒、随机主动消息（默认关闭） |
+### QQ 端
 
-## 架构
+- 人设对话（DeepSeek，慵懒毒舌角色千石由乃，自带心情与表达适配）
+- 自动记忆：信息增益触发提取、玩笑/临时情绪/敏感信息过滤、纠错调查
+- 决策顾问：`要不要/该不该/怎么选…` 触发一次一问的咨询流程
+- 目标管理：`/目标`、`/目标列表`、`/目标完成`
+- 人物设定：`/设定 <角色名>` 自动生成档案入记忆
+- 游戏与播报：`/成语`、`/答题`、`/排名`、群动态播报
+- 记忆指令：`/我的记忆`、`/群记忆`、`/忘记`、`/公开`、`/我的风格`
 
-```
-bot.py                  核心：QQ 连接、消息路由、插件加载、分段回复
-plugins/
-  _shared.py            共享基础层（配置、AI 调用、容器/文件/邮件等）
-  _db.py                SQLite 数据层（记忆/分数/昵称/绑定/状态）
-  info.py               查询监控插件
-  manage.py             服务器管理插件
-  memory.py             记忆与身份插件
-  games.py              娱乐互动插件
-qqbot-ctl               宿主机白名单脚本（root 校验后操作 Docker）
-install.sh              一键安装（创建 aiagent 账号 + systemd + 依赖）
-qqbot.service           systemd 服务单元
-logrotate-qqbot.conf    日志轮转（每日、保留 7 天）
-```
+### 记忆系统（memory/）
 
-安全模型：机器人以专用账号 `aiagent` 跑在宿主机（无 docker.sock）；容器操作经 `sudo → qqbot-ctl → config.json 白名单` 校验；文件读写限定在 data 目录；敏感指令仅管理员（`ADMIN_OPENIDS`）可用。
+统一记忆 + 7 路检索 + 贝叶斯可信度 + 时间推理 + 人脑式遗忘 + 议题化 + 事件图谱 +
+自我反思 + 世界模型 + 表达理解 + 轨迹评分闭环。详见 [memory/README.md](memory/README.md)。
 
-## 快速开始
+### SDK / HTTP（yuno_memory/）
+
+任意 Python 程序或 Agent 接入同一套记忆。详见 [docs/SDK-使用.md](docs/SDK-使用.md)。
+
+### MCP（tools.py mcp / hermes/）
+
+服务管理、配置、审计、记忆读写、播报能力封装为 MCP 工具，供 Hermes 或管理 App 调用。
+
+## 安装部署（Debian/Ubuntu 服务器）
 
 ### 前置条件
 
-1. [q.qq.com](https://q.qq.com) 完成个人/企业认证并创建机器人，拿到 `AppID`、`AppSecret`，把服务器公网 IP 加入后台 IP 白名单。
+1. [q.qq.com](https://q.qq.com) 创建机器人，拿到 `AppID` / `AppSecret`。
 2. [platform.deepseek.com](https://platform.deepseek.com) 创建 API Key。
-3. 一台 Linux 服务器（示例路径 `/home/ubuntu/qq-bot`，可用环境变量 `QQBOT_DIR` 覆盖）。
+3. Linux 服务器（示例路径 `/home/ubuntu/qq-bot`）。
 
-### 部署
+### 步骤
 
 ```bash
-# 1. 上传本项目到服务器（示例）
-scp -r qq-bot-github ubuntu@<你的服务器IP>:~
+# 1) 上传代码并进入目录
+scp -r qq-bot-github ubuntu@<服务器IP>:~
 mv ~/qq-bot-github ~/qq-bot && cd ~/qq-bot
 
-# 2. 配置密钥
+# 2) 配置 .env（完整变量见 .env.example）
 cp .env.example .env
-nano .env          # 填 APPID / SECRET / DEEPSEEK_API_KEY / ADMIN_OPENIDS
+nano .env    # 填 APPID / SECRET / DEEPSEEK_API_KEY / ADMIN_OPENIDS
 
-# 3. 一键安装（自动创建 aiagent 账号、装依赖、装 systemd 服务）
+# 3) 先装 CPU 版 torch（避免 install.sh 拉取 2.5GB CUDA 版）
+python3 -m venv venv
+./venv/bin/pip install torch -i https://pypi.tuna.tsinghua.edu.cn/simple -f https://mirrors.aliyun.com/pytorch-wheels/cpu
+./venv/bin/python -c "import torch; print(torch.__version__)"   # 应带 +cpu
+
+# 4) 一键安装（创建 aiagent 账号、systemd 服务、sudoers、日志轮转）
 bash install.sh
-
-# 4. 验证
-systemctl status qqbot
-sudo tail -n 20 ~/qq-bot/data/bot.log    # 应看到 4 个插件加载 + 登录成功 + 心跳
 ```
 
-> 若服务器报 `Permission denied`，说明家目录权限太紧：
-> `sudo setfacl -m u:aiagent:x /home/ubuntu 2>/dev/null || sudo chmod o+x /home/ubuntu`
->
-> 若报 `ensurepip is not available`：`sudo apt install -y python3-venv`，再重跑 `bash install.sh`。
+### 启用记忆核心（config.json 默认关闭）
+
+```bash
+sudo python3 - <<'EOF'
+import json
+p = '/home/ubuntu/qq-bot/config.json'
+c = json.load(open(p, encoding='utf-8'))
+core = c['memory']['core']
+core['enabled'] = True
+core.setdefault('analysis', {}).update({'llm': True, 'min_interval_s': 300})
+core.setdefault('world', {}).update({'enabled': True, 'budget_chars': 400, 'cache_ttl_s': 600, 'llm_investigate': True, 'investigate_throttle_s': 600})
+core.setdefault('trace', {}).update({'enabled': True, 'retention_days': 7})
+c.setdefault('chat_bridge', {}).update({'enabled': True, 'timeout_s': 2.5, 'min_interval_s': 90})
+json.dump(c, open(p, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+print('config ok')
+EOF
+
+# 5) 补 .env 的模型下载配置
+cat >> .env <<'EOF'
+HF_HOME=/home/ubuntu/qq-bot/data/hf_cache
+HF_ENDPOINT=https://hf-mirror.com
+EOF
+
+# 6) 启动并初始化
+sudo systemctl restart qqbot
+sudo -u aiagent ./venv/bin/python tools.py memory-embed
+sudo -u aiagent ./venv/bin/python tools.py memory-grow --dry-run
+```
 
 ### 配置管理员
 
-私聊机器人发 `/我的ID`，把返回的 `user_openid` 填入 `.env` 的 `ADMIN_OPENIDS=`，然后 `sudo systemctl restart qqbot`。
+私聊机器人发任意消息，然后：
+
+```bash
+sudo grep "\[引导\]" /home/ubuntu/qq-bot/data/bot.log | tail -1
+```
+
+把返回的 `user_openid` 填入 `.env` 的 `ADMIN_OPENIDS=`，重启生效。
+
+### 定时维护（备份 + 每日成长）
+
+```bash
+printf '0 3 * * * cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py backup >> data/cron.log 2>&1\n30 3 * * * cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py memory-grow >> data/cron.log 2>&1\n' | sudo -u aiagent crontab -
+```
 
 ## 配置说明
 
-### .env（密钥与基础设置）
+### .env（密钥与运行设置）
 
 | 变量 | 说明 |
 |---|---|
-| `APPID` / `SECRET` | q.qq.com 开发设置中的机器人凭证 |
-| `DEEPSEEK_API_KEY` | DeepSeek API Key |
-| `SYSTEM_PROMPT` | 机器人人设（可自定义） |
-| `ADMIN_OPENIDS` | 管理员 openid，多个用英文逗号分隔 |
-| `SMTP_*` / `MAIL_TO` | 邮件日报（可选，`SMTP_PASS` 填邮箱授权码） |
+| `APPID` / `SECRET` | q.qq.com 机器人凭证 |
+| `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL` | DeepSeek 接入 |
+| `SYSTEM_PROMPT` | 覆盖 persona.md 的人设（一般不填） |
+| `ADMIN_OPENIDS` | 管理员 openid（逗号分隔） |
+| `EMBEDDING_API_KEY` | 云端 embedding API 密钥（provider=openai_compatible 时） |
+| `HF_HOME` / `HF_ENDPOINT` | 模型下载目录 / 国内镜像 |
+| `AGENT_ID` | 多 Agent 人格命名空间（可选） |
+| `MEMORY_KEY` | 高隐私记忆 AES-GCM 加密密钥（可选） |
+| `CONFIG_PATH` / `QQBOT_CONFIG` | 覆盖配置路径（可选） |
 
-### config.json（权限与后台开关）
+### config.json（关键段）
 
 | 段 | 说明 |
 |---|---|
-| `allowed_paths` | 允许读写文件的路径（默认 data 目录） |
-| `containers` | 允许管理的容器白名单（关键词/路径/允许操作） |
-| `report` | 定时日报邮件（`enabled`/`hour`/`minute`/`anomaly_immediate`） |
-| `random_events` | 随机主动消息（`enabled`/`group_openid`/间隔） |
-| `balance_alert` | 低余额提醒（`enabled`/`threshold`/`target_type`/`target`） |
+| `memory.core.enabled` | 记忆核心总开关（必须 true） |
+| `memory.core.weights` | 7 路检索融合权重 |
+| `memory.core.policy` | 遗忘/巩固/贝叶斯似然比参数 |
+| `memory.core.analysis` | 情绪 LLM 兜底开关与节流 |
+| `memory.core.world` | 用户中心世界模型（预算/调查开关） |
+| `memory.core.trace` | 记忆轨迹记录与保留期 |
+| `chat_bridge` | 慢响应衔接语开关 |
+| `services` | MCP 服务注册表（管理 App / Hermes 用） |
 
-配置在服务器上修改（改完最多 5 分钟自动生效，或重启服务立即生效）：
-
-```bash
-# 推荐：走白名单脚本（带校验、原子写）
-sudo qqbot-ctl config-set report enabled true
-sudo qqbot-ctl config-set balance_alert target_type c2c
-
-# 或手动编辑
-sudo nano ~/qq-bot/config.json
-```
-
-添加要管理的容器：
-
-```bash
-/容器 添加 关键词 /home/ubuntu/项目目录   # QQ 私聊（管理员）
-```
-
-## 指令参考
-
-**所有人可用（群聊需 @ 机器人）：**
+## 常用指令
 
 | 指令 | 说明 |
 |---|---|
-| 直接聊天 | DeepSeek 按人设回复（带记忆与心情） |
+| 直接聊天 | 人设对话（带记忆、心情、表达适配） |
 | `/帮助` | 指令菜单 |
-| `/状态` | 服务器负载、CPU、内存、磁盘、运行时间 |
-| `/天气 城市` | 查天气（默认上海） |
-| `/记住 内容` | 手动补充记忆 |
-| `/我的记忆` / `/群记忆` | 查看当前场景/本群记忆 |
-| `/清除记忆` | 清除当前场景记忆 |
-| `/昵称 名字` | 设置排行榜昵称（绑定后跨场景同步） |
-| `/绑定` / `/解绑` | 群 ↔ 私聊身份对应（绑定成功群里自动公告） |
-| `/成语` / `/答题` / `/排名` | 游戏与排行榜（游戏中发「结束」退出） |
-| `/我的ID` | 查看自己的 openid |
+| `/目标 内容` / `/目标列表` / `/目标完成 内容` | 目标管理 |
+| `/设定 角色名` | 生成人物档案入记忆 |
+| `/我的记忆` / `/群记忆` / `/我的风格` | 查看记忆 / 表达画像 |
+| `/忘记 关键词` / `/公开 关键词` | 隐私控制 |
+| `/绑定` / `/解绑` / `/昵称 名字` | 身份 |
+| `/成语` / `/答题` / `/排名` | 游戏 |
 
-**仅管理员：**
+## SDK 与 HTTP 服务
 
-| 指令 | 说明 |
-|---|---|
-| `/容器 列表/启动/停止/重启/添加/删除` | 白名单容器管理 |
-| `/写文件 文件名 内容` / `/读文件 文件名` | data 目录内文件读写 |
-| `/命令 你的要求` | AI 按自然语言执行白名单动作 |
-| `/余额` / `/余额 测试` | 查余额 / 测试低余额提醒通道 |
-| `/报告 现在` / `/报告 测试` | 立即生成日报 / 发测试邮件 |
-| `/重启` | 重启机器人服务 |
-
-## 数据与存储
-
-所有运行时数据在 `data/` 目录，存储在 SQLite（`bot.db`）：记忆、绑定关系、分数、昵称、心情、群列表。首次启动会自动把旧版 JSON 数据迁移进来。删除 `bot.db` 即重置全部数据（注意同时删除旧 JSON 文件，否则会再次迁移）。
-
-日志写入 `data/bot.log`，每日轮转、保留 7 天。
-
-## 开发新插件
-
-在 `plugins/` 放一个 `.py` 文件，核心自动加载。插件协议：
-
-```python
-from plugins import _shared
-
-NAME = "我的插件"
-HELP = "/新指令 —— 说明"
-
-COMMANDS = {"/新指令": handler}   # 处理函数可返回 str/None 或协程
-
-def handler(text, ctx):
-    # ctx: is_admin / chat_key / user_key / scene / api / config ...
-    return "hello"
-
-def chat_context(ctx): ...        # 可选：注入聊天上下文
-def game_try(ctx, text): ...      # 可选：非指令消息交给游戏
-async def after_chat(ctx, text, reply): ...  # 可选：AI 回复后钩子
-def loops(make_ctx): ...          # 可选：后台协程
+```bash
+python -m yuno_memory --host 127.0.0.1 --port 8457 --data-dir ./data --api-key <key> --embedder local
 ```
 
-## 常见问题
+详见 [docs/SDK-使用.md](docs/SDK-使用.md)。
 
-- **连不上 / 401**：检查 `.env` 的 AppID/AppSecret、后台 IP 白名单。
-- **群聊不响应**：官方机器人只接收被 @ 的消息；上线前仅沙箱环境可用（个人开发者沙箱群可能受限，可先用私聊测试）。
-- **pip 安装失败**：install.sh 已使用清华源；仍失败可手动 `sudo -u aiagent ./venv/bin/pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt`。
-- **权限不足 / 上传失败**：`~/qq-bot` 归 aiagent 所有，更新文件先 `sudo chown -R ubuntu:ubuntu ~/qq-bot`，传完恢复 `sudo chown -R aiagent:aiagent ~/qq-bot` 并重置 config.json 为 `root:aiagent 640`。
+## 测试与维护
 
-## 免责声明
+```bash
+sudo -u aiagent ./venv/bin/python tools.py memory-governance   # 记忆治理报告
+sudo -u aiagent ./venv/bin/python tools.py memory-trace-md --limit 20  # 记忆轨迹
+sudo -u aiagent ./venv/bin/python tools.py data-export         # 全量数据打包
+sudo -u aiagent ./venv/bin/python tools.py memory-trace-review <id> --extraction 5 --decision 4  # 人工评分
+```
 
-本项目仅供学习交流。请遵守 QQ 机器人开放平台与 DeepSeek 服务条款；审核资料中请勿填写与 AI/大模型相关的描述。
+自动化测试与评测闭环见 [docs/Agent-OS-v6-系统测试报告.md](docs/Agent-OS-v6-系统测试报告.md)。
+
+## 文档索引
+
+| 文档 | 内容 |
+|---|---|
+| [memory/README.md](memory/README.md) | 记忆系统框架、算法、设计决策、瓶颈 |
+| [docs/Agent-OS-v6-架构评审.md](docs/Agent-OS-v6-架构评审.md) | 第三方架构评审 |
+| [docs/Agent-OS-v6-系统测试报告.md](docs/Agent-OS-v6-系统测试报告.md) | 16 项能力测试报告 |
+| [docs/ML-训练路线.md](docs/ML-训练路线.md) | 机器学习训练路线（v11→v17） |
+| [docs/SDK-使用.md](docs/SDK-使用.md) | SDK / HTTP 接入指南 |
+| [docs/详细设计.md](docs/详细设计.md) | 2.0 管理 App 需求设计 |
+
+## 未来方向
+
+- 跑真实数据建立评测基线：权重网格搜索、置信度回归、LTR 排序、提取门控（服务器 CPU 可训）
+- 2060S 微调 embedding / reranker
+- Bandit 在线调权（带评测门防漂移）
+- 记忆系统 SDK 化已完成，下一步接入 Hermes 与多平台
+
+详见 [docs/ML-训练路线.md](docs/ML-训练路线.md)。
+
+## License
+
+[LICENSE](LICENSE)

@@ -16,6 +16,9 @@ echo "==> 加固：config.json 改为 root 所有、aiagent 只读"
 sudo chown root:aiagent "$BOT_DIR/config.json"
 sudo chmod 640 "$BOT_DIR/config.json"
 
+echo "==> 保证 aiagent 能进入 BOT_DIR 的父目录（home 目录为 700 时 sudo -u aiagent 会报 Permission denied）"
+sudo chmod o+x "$(dirname "$BOT_DIR")" 2>/dev/null || true
+
 echo "==> 安装 Python 依赖（清华源）"
 sudo -u aiagent python3 -m venv "$BOT_DIR/venv"
 sudo -u aiagent "$BOT_DIR/venv/bin/pip" install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r "$BOT_DIR/requirements.txt"

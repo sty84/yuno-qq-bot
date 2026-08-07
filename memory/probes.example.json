@@ -1,0 +1,20 @@
+[
+  {
+    "query": "我最近的项目怎么样了",
+    "expected": ["正在开发 MCP 项目并部署到服务器"],
+    "scope": "c2c:user1",
+    "category": "event"
+  },
+  {
+    "query": "那个项目进展如何",
+    "expected": ["正在开发 MCP 项目并部署到服务器"],
+    "scope": "c2c:user1",
+    "category": "coref"
+  },
+  {
+    "query": "我喜欢吃什么",
+    "expected": ["喜欢白巧克力"],
+    "scope": "c2c:user1",
+    "category": "attribute"
+  }
+]

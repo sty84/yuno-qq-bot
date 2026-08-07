@@ -6,3 +6,12 @@ venv/
 bot.log
 *.bak
 .DS_Store
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+*.tar.gz
+*.sqlite
+memory-data/
+.pytest_cache/
+.coverage

@@ -1,12 +1,15 @@
 {
   "allowed_paths": ["/home/ubuntu/qq-bot/data"],
-  "allow_bot_restart": true,
-  "default_allow": ["list"],
-  "report": {
+  "default_allow": ["list", "status"],
+  "services": [],
+  "chat_bridge": {
+    "enabled": true,
+    "timeout_s": 2.5,
+    "min_interval_s": 90
+  },
+  "health_check": {
     "enabled": false,
-    "hour": 9,
-    "minute": 0,
-    "anomaly_immediate": true
+    "interval_s": 300
   },
   "random_events": {
     "enabled": false,
@@ -14,12 +17,116 @@
     "min_interval_min": 60,
     "max_interval_min": 240
   },
-  "balance_alert": {
-    "enabled": false,
-    "threshold": 2.0,
-    "check_interval_hours": 6,
-    "target_type": "group",
-    "target": ""
+  "notify": {
+    "allow_targets": []
   },
-  "containers": []
+  "audit": {
+    "enabled": true,
+    "max_entries": 5000
+  },
+  "app": {
+    "enabled": false,
+    "bind": "127.0.0.1:8456",
+    "token_ttl_hours": 12
+  },
+  "mcp": {
+    "enabled": true,
+    "servers": {},
+    "admin_allow": []
+  },
+  "ws": {
+    "enabled": false,
+    "path": "/ws/{device_id}",
+    "heartbeat_timeout_s": 90,
+    "device_token_env": "DEVICE_TOKEN"
+  },
+  "multimodal": {
+    "enabled": false,
+    "max_requests_per_hour": 10
+  },
+  "memory": {
+    "embedder": {
+      "provider": "local",
+      "model": "BAAI/bge-small-zh-v1.5",
+      "device": "auto",
+      "base_url": "",
+      "api_key_env": "EMBEDDING_API_KEY"
+    },
+    "core": {
+      "enabled": false,
+      "top_k": 5,
+      "min_score": 0.25,
+      "throttle_s": 60,
+      "context_budget_chars": 2000,
+      "query": {
+        "rewrite_llm": false,
+        "multi_query": true
+      },
+      "rerank": {
+        "enabled": true,
+        "mode": "light",
+        "cross_model": "BAAI/bge-reranker-base"
+      },
+      "mmr": {
+        "enabled": true,
+        "lambda": 0.7
+      },
+      "cache": {
+        "enabled": true,
+        "ttl_s": 60
+      },
+      "telemetry": {
+        "query_log": true
+      },
+      "session": {
+        "window_min": 1440,
+        "llm": false
+      },
+      "reflection": {
+        "enabled": true,
+        "llm": true
+      },
+      "analysis": {
+        "llm": true,
+        "min_interval_s": 300
+      },
+      "world": {
+        "enabled": true,
+        "budget_chars": 400,
+        "cache_ttl_s": 600,
+        "llm_investigate": true,
+        "investigate_throttle_s": 600
+      },
+      "trace": {
+        "enabled": true,
+        "retention_days": 7
+      },
+      "weights": {
+        "lexical": 0.6,
+        "vector": 0.7,
+        "graph": 0.4,
+        "structured": 0.3,
+        "rules": 0.5,
+        "topics": 0.4,
+        "policy": 0.25,
+        "confidence": 0.2
+      },
+      "vector_index": {
+        "nlist": 8,
+        "nprobe": 2
+      },
+      "policy": {
+        "decay_days": 90,
+        "prune_importance": 0.15,
+        "ai_experience_min_importance": 0.75,
+        "confirm_lr": 2.0,
+        "dispute_lr": 0.3,
+        "conflict_lr": 0.5,
+        "forget_days": 120,
+        "fuzzy_strength": 0.15,
+        "promote_min_access": 3,
+        "promote_min_importance": 0.6
+      }
+    }
+  }
 }

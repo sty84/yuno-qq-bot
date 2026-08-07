@@ -1,7 +1,6 @@
-"""记忆系统插件：按 ID 分文件、自动提取、场景隔离、私聊/群身份绑定"""
+"""记忆与身份插件：分场景记忆、自动提取、群 ↔ 私聊绑定。"""
 
 import asyncio
-import json
 import random
 import re
 import time
@@ -9,67 +8,103 @@ from datetime import datetime
 
 from plugins import _db
 from plugins import _shared
+import memory
 
 NAME = "记忆系统"
 HELP = (
-    "/记住 内容｜/我的记忆｜/群记忆｜/清除记忆｜/昵称 名字｜"
-    "/绑定（群里生成码，私聊 /绑定 群ID 码）｜/解绑"
+    "/我的记忆｜/群记忆｜/昵称 名字｜"
+    "/绑定（群里生成码，私聊 /绑定 群ID 码）｜/解绑｜"
+    "/忘记 关键词（不再提起相关记忆）｜/公开 关键词（允许跨场景提起）"
 )
 
 _binding_codes = {}
 _last_extract = {}
+_sess_buffer = {}   # key -> {"texts": [...], "reply": str, "last": ts} 低信息消息缓存
+_last_group_extract = {}
+IGT_FLUSH_SEC = 600
+IGT_MAX_BUFFER = 5
+IGT_THRESHOLD = 0.3
 
 
 def _safe_id(value):
     return re.sub(r"[^A-Za-z0-9_\-]", "_", value or "unknown")[:64]
 
 
-def nice_fact(fact) -> str:
-    """把可能残留的 {'info': '...'} 格式清洗成纯文本。"""
-    s = str(fact).strip()
-    m = re.match(r"^\{['\"]info['\"]\s*:\s*['\"](.*?)['\"]\s*\}$", s, re.S)
-    if m:
-        return m.group(1).strip()
-    return s
+nice_fact = memory.nice_fact
 
 
 def load_user_memory(ukey):
     return {
-        "facts": _db.facts_get("c2c", str(ukey)),
-        "updated_at": _db.facts_updated_at("c2c", str(ukey)),
+        "facts": _db.memory_get(f"c2c:{ukey}"),
+        "updated_at": _db.memory_updated_at(f"c2c:{ukey}"),
     }
 
 
-def save_user_memory(ukey, data):
-    _db.facts_replace("c2c", str(ukey), data.get("facts", []), data.get("updated_at", ""))
+def save_user_memory(ukey, data, embeddings=None):
+    _db.memory_replace_preserve(f"c2c:{ukey}", "", data.get("facts", []), data.get("updated_at", ""))
 
 
 def load_group_memory(gid):
     key = str(gid)
     return {
-        "facts": _db.facts_get("group_all", key),
+        "facts": _db.memory_get(f"group_all:{key}"),
         "message_count": _db.kv_get("group", f"{key}:count", 0),
-        "updated_at": _db.facts_updated_at("group_all", key),
+        "updated_at": _db.memory_updated_at(f"group_all:{key}"),
     }
 
 
-def save_group_memory(gid, data):
+def save_group_memory(gid, data, embeddings=None):
     key = str(gid)
-    _db.facts_replace("group_all", key, data.get("facts", []), data.get("updated_at", ""))
+    scope = f"group_all:{key}"
+    _db.memory_replace_preserve(scope, "", data.get("facts", []), data.get("updated_at", ""))
     _db.kv_set("group", f"{key}:count", data.get("message_count", 0))
 
 
 def load_member_memory(gid, mid):
     return {
-        "facts": _db.facts_get("group", f"{gid}:{mid}"),
-        "updated_at": _db.facts_updated_at("group", f"{gid}:{mid}"),
+        "facts": _db.memory_get(f"group:{gid}", str(mid)),
+        "updated_at": _db.memory_updated_at(f"group:{gid}", str(mid)),
     }
 
 
-def save_member_memory(gid, mid, data):
-    _db.facts_replace("group", f"{gid}:{mid}", data.get("facts", []), data.get("updated_at", ""))
+def save_member_memory(gid, mid, data, embeddings=None):
+    scope, sk = f"group:{gid}", str(mid)
+    _db.memory_replace_preserve(scope, sk, data.get("facts", []), data.get("updated_at", ""))
 
 
+def load_scene_memory(message):
+    kind, k1, k2 = _shared.scene_memory_keys(message)
+    return load_member_memory(k1, k2) if kind == "group" else load_user_memory(k1)
+
+
+def save_scene_memory(message, data, embeddings=None):
+    kind, k1, k2 = _shared.scene_memory_keys(message)
+    if kind == "group":
+        save_member_memory(k1, k2, data, embeddings)
+    else:
+        save_user_memory(k1, data, embeddings)
+
+
+merge_facts = memory.merge_facts
+
+
+def clear_memory(kind, key):
+    """后台调试用：按场景清空记忆。kind: user / member / group。"""
+    if kind == "user":
+        _db.memory_clear(f"c2c:{key}")
+    elif kind == "member":
+        if ":" not in str(key):
+            return False
+        gid, _, mid = str(key).partition(":")
+        _db.memory_clear(f"group:{gid}", mid)
+    elif kind == "group":
+        _db.memory_clear(f"group_all:{key}")
+    else:
+        return False
+    return True
+
+
+# ===== 绑定 =====
 def bind_user_to_member(uid, gid, mid):
     _db.binding_set(uid, gid, mid)
 
@@ -94,120 +129,26 @@ def unbind_user_group(uid, gid):
     return existed
 
 
-def merge_facts(existing, new, cap=30):
-    seen = set(existing)
-    out = list(existing)
-    for fact in new:
-        fact = nice_fact(fact).strip()
-        if fact and fact not in seen:
-            seen.add(fact)
-            out.append(fact)
-    return out[-cap:]
+# ===== 自动提取（实现已迁至 memory/extract.py）=====
+extract_facts = memory.extract_facts
 
 
-def load_scene_memory(message):
-    kind, k1, k2 = _shared.scene_memory_keys(message)
-    if kind == "group":
-        return load_member_memory(k1, k2)
-    return load_user_memory(k1)
-
-
-def save_scene_memory(message, data):
-    kind, k1, k2 = _shared.scene_memory_keys(message)
-    if kind == "group":
-        save_member_memory(k1, k2, data)
-    else:
-        save_user_memory(k1, data)
-
-
-def add_scene_fact(message, fact):
-    data = load_scene_memory(message)
-    data["facts"] = merge_facts(data.get("facts", []), [fact])
-    data["updated_at"] = datetime.now().isoformat(timespec="seconds")
-    save_scene_memory(message, data)
-
-
-def clear_scene_memory(message):
-    kind, k1, k2 = _shared.scene_memory_keys(message)
-    if kind == "group":
-        _db.facts_replace("group", f"{k1}:{k2}", [])
-    else:
-        _db.facts_replace("c2c", k1, [])
-
-
-EXTRACT_SYSTEM_PROMPT = (
-    "你是信息提取器。请从对话中提取值得长期记住的关键信息："
-    "关于用户的姓名、喜好、习惯、身份、经历、约定；关于群聊的主题、成员特点、重要事件。"
-    "只输出一个 JSON 字符串数组，每项是一句简短陈述（不超过25字），"
-    "例如 [\"喜欢白巧克力\", \"养了一只猫\"]。禁止输出对象或键值对。"
-    "没有值得记的信息就输出 []。不要输出任何其他内容。"
-)
-
-
-def _norm_extract_item(item) -> str:
-    if isinstance(item, dict):
-        for key in ("info", "fact", "content", "text", "name"):
-            if item.get(key):
-                return str(item[key]).strip()
-        values = [str(v).strip() for v in item.values() if str(v).strip()]
-        return values[0] if values else ""
-    return str(item).strip()
-
-
-def extract_facts(conversation):
-    try:
-        resp = _shared.deepseek.chat.completions.create(
-            model=_shared.DEEPSEEK_MODEL,
-            messages=[
-                {"role": "system", "content": EXTRACT_SYSTEM_PROMPT},
-                {"role": "user", "content": conversation},
-            ],
-            max_tokens=300,
-            temperature=0.2,
-        )
-        raw = (resp.choices[0].message.content or "").strip()
-        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.S).strip()
-        start, end = raw.find("["), raw.rfind("]")
-        if start < 0 or end < 0:
-            return []
-        data = json.loads(raw[start:end + 1])
-        facts = []
-        for x in data:
-            cleaned = nice_fact(_norm_extract_item(x))
-            if cleaned:
-                facts.append(cleaned)
-        return facts[:5]
-    except Exception:
-        return []
-
-
-def cmd_remember(text, ctx):
-    fact = text[len("/记住"):].strip()
-    if not fact:
-        return "用法：/记住 内容，例如：/记住 我喜欢吃白巧克力"
-    add_scene_fact(ctx.message, fact)
-    return "记住了～"
+# ===== 指令 =====
+def _show_facts(title, facts):
+    shown = [nice_fact(f) for f in facts[-10:]]
+    return title + "：\n" + ("\n".join("- " + f for f in shown) if shown else "（还没有记住什么）")
 
 
 def cmd_my_memory(text, ctx):
-    data = load_scene_memory(ctx.message)
-    facts = data.get("facts", [])
-    label = "你在本群的记忆" if ctx.scene[0] == "group" else "你在私聊中的记忆"
-    shown = [nice_fact(f) for f in facts[-10:]]
-    return label + "：\n" + ("\n".join("- " + f for f in shown) if shown else "（还没有记住什么）")
+    kind = ctx.scene[0]
+    facts = load_scene_memory(ctx.message).get("facts", [])
+    return _show_facts("你在本群的记忆" if kind == "group" else "你在私聊中的记忆", facts)
 
 
 def cmd_group_memory(text, ctx):
     if ctx.scene[0] != "group":
         return "这个指令只能在群里使用。"
-    facts = load_group_memory(ctx.scene[1]).get("facts", [])
-    shown = [nice_fact(f) for f in facts[-10:]]
-    return "本群的记忆：\n" + ("\n".join("- " + f for f in shown) if shown else "（还没有记录什么）")
-
-
-def cmd_clear_memory(text, ctx):
-    clear_scene_memory(ctx.message)
-    return "已清除" + ("本群" if ctx.scene[0] == "group" else "私聊") + "中关于你的记忆。"
+    return _show_facts("本群的记忆", load_group_memory(ctx.scene[1]).get("facts", []))
 
 
 def cmd_nickname(text, ctx):
@@ -219,8 +160,7 @@ def cmd_nickname(text, ctx):
     kind, k1, k2 = ctx.scene
     synced = False
     if kind == "group":
-        uid = find_user_for_member(k1, k2)
-        if uid:
+        if uid := find_user_for_member(k1, k2):
             _shared.set_nickname(uid, name)
             synced = True
     else:
@@ -243,13 +183,13 @@ async def post_group_notice(ctx, gid, uid, mid):
         print(f"群公告发送失败：{e}")
 
 
-def cmd_bind(text, ctx):
+async def cmd_bind(text, ctx):
     kind, k1, k2 = ctx.scene
     if kind == "group":
         now_t = time.time()
         for code in [c for c, v in _binding_codes.items() if v["expire"] < now_t]:
             _binding_codes.pop(code, None)
-        code = f"{random.randint(100000, 999999)}"
+        code = str(random.randint(100000, 999999))
         _binding_codes[code] = {"group_id": k1, "member_openid": k2, "expire": now_t + 300}
         return (
             f"绑定码：{code}（5 分钟内有效）\n"
@@ -274,7 +214,7 @@ def cmd_bind(text, ctx):
             return "群ID不匹配，请核对后再试。"
         bind_user_to_member(k1, gid, info["member_openid"])
         if ctx.api is not None:
-            asyncio.create_task(post_group_notice(ctx, gid, k1, info["member_openid"]))
+            await post_group_notice(ctx, gid, k1, info["member_openid"])
         return "绑定成功！之后我就知道私聊的你和该群里的是同一个人，但两边的记忆会分开保存。"
     return "用法（私聊）：/绑定 群ID 绑定码　或　/绑定 状态"
 
@@ -291,87 +231,233 @@ def cmd_unbind(text, ctx):
     return "已解除该群的绑定。" if ok else "没有找到该群的绑定记录。"
 
 
+def cmd_forget(text, ctx):
+    """用户主动遗忘：把相关记忆可信度压到 0.05（不再被召回）。"""
+    keyword = text[len("/忘记"):].strip()
+    kind, k1, k2 = ctx.scene
+    scope, key = (f"group:{k1}", k2) if kind == "group" else (f"c2c:{k1}", "")
+    removed = 0
+    for r in _db.memory_rows(scope, key):
+        if keyword and keyword not in r["fact"]:
+            continue
+        _db.memory_set_confidence(scope, key, r["fact"], 0.05)
+        removed += 1
+    return f"已忘记 {removed} 条相关记忆。" if removed else "没有找到相关记忆。"
+
+
+def cmd_publicize(text, ctx):
+    """用户明确允许公开：标记 audience=public，可跨场景提起。"""
+    keyword = text[len("/公开"):].strip()
+    kind, k1, k2 = ctx.scene
+    scope, key = (f"group:{k1}", k2) if kind == "group" else (f"c2c:{k1}", "")
+    done = 0
+    for r in _db.memory_rows(scope, key):
+        if keyword and keyword not in r["fact"]:
+            continue
+        memory.publicize(scope, key, r["fact"])
+        done += 1
+    return f"已标记 {done} 条记忆可公开。" if done else "没有找到相关记忆。"
+
+
+async def cmd_character(text, ctx):
+    """/设定 人物名：自动生成人物设定/经历档案并存入记忆。"""
+    parts = (text or "").strip().split(None, 1)
+    name = parts[1].strip() if len(parts) > 1 else ""
+    if not name:
+        return "用法：/设定 人物名（例如：/设定 千石由乃）"
+    info = await asyncio.to_thread(memory.character_build, name)
+    if info.get("error"):
+        return f"《{name}》档案生成失败：{info['error']}"
+    return f"已收录《{name}》：{info['added']} 条设定/经历入库（可信度 70%，说错了可以纠正我）"
+
+
+def _print_dispute_details(info):
+    """打印纠错明细：具体哪条记忆、可信度从多少降到多少。"""
+    for d in info.get("dispute_details", []):
+        kind = {
+            "update": "核查后更新",
+            "conflict": "待核查降权",
+            "keep": "核查后保留",
+        }.get(d.get("kind"), d.get("kind") or "纠错")
+        print(f"[记忆] 纠错 · {kind}：「{d['fact'][:40]}」{d['confidence']:.2f} → {d['new_confidence']:.2f}")
+
+
+def cmd_goal_add(text, ctx):
+    """添加目标：/目标 内容（可带 优先级 数字）"""
+    rest = text[len("/目标"):].strip()
+    m = re.search(r"优先级\s*([1-5])", rest)
+    priority = int(m.group(1)) if m else 3
+    title = re.sub(r"优先级\s*[1-5]", "", rest).strip()
+    if not title:
+        return "用法：/目标 目标内容（例如：/目标 三个月内完成项目 优先级 2）"
+    kind, k1, k2 = ctx.scene
+    scope = f"c2c:{k1}" if kind != "group" else f"group:{k1}"
+    return memory.goal_add(scope, title, priority=priority)
+
+
+def cmd_goal_list(text, ctx):
+    kind, k1, k2 = ctx.scene
+    scope = f"c2c:{k1}" if kind != "group" else f"group:{k1}"
+    goals = memory.goal_list(scope)
+    if not goals:
+        return "还没有记录目标，用 /目标 内容 添加。"
+    lines = [
+        f"{i + 1}. {g['title']}（{'进行中' if g['status'] == 'active' else '已完成'}·优先级{g['priority']}）"
+        for i, g in enumerate(goals)
+    ]
+    return "你的目标：\n" + "\n".join(lines)
+
+
+def cmd_goal_done(text, ctx):
+    title = text[len("/目标完成"):].strip()
+    if not title:
+        return "用法：/目标完成 目标内容"
+    kind, k1, k2 = ctx.scene
+    scope = f"c2c:{k1}" if kind != "group" else f"group:{k1}"
+    return memory.goal_update(scope, title, status="done")
+
+
+def cmd_my_style(text, ctx):
+    """查看用户表达画像（v6 建议 §5）：/我的风格"""
+    kind, k1, k2 = ctx.scene
+    scope = f"c2c:{k1}" if kind != "group" else f"group:{k1}"
+    desc = memory.expression_describe(scope)
+    if not desc:
+        return "还没有足够数据判断你的表达风格，多聊几句再来吧。"
+    p = memory.expression_profile(scope)
+    return (
+        f"{desc}\n"
+        f"（网络用语 {float(p.get('slang_frequency', 0)):.0%} · "
+        f"反讽 {float(p.get('irony_usage', 0)):.0%} · "
+        f"表情 {float(p.get('emoji_usage', 0)):.0%} · "
+        f"正式度 {float(p.get('formality_level', 0.5)):.0%}）"
+    )
+
+
+_DECISION_RE = re.compile(
+    r"要不要|该不该|怎么选|给个建议|帮我决定|纠结|犹豫|选哪个|值不值得|帮我想想|拿不定主意"
+)
+
+
+async def decision_try(ctx, text):
+    """决策顾问（v6）：触发词或进行中的咨询 → 一次一问的顾问流程。"""
+    kind, k1, k2 = ctx.scene
+    scope = f"c2c:{k1}" if kind != "group" else f"group:{k1}"
+    if not _DECISION_RE.search(text or "") and not memory.consult_active(scope):
+        return None
+    return await asyncio.to_thread(memory.consult_turn, scope, text)
+
+
 COMMANDS = {
-    "/记住": cmd_remember,
     "/我的记忆": cmd_my_memory,
     "/群记忆": cmd_group_memory,
-    "/清除记忆": cmd_clear_memory,
     "/昵称": cmd_nickname,
     "/绑定": cmd_bind,
     "/解绑": cmd_unbind,
+    "/忘记": cmd_forget,
+    "/公开": cmd_publicize,
+    "/设定": cmd_character,
+    "/目标列表": cmd_goal_list,
+    "/目标完成": cmd_goal_done,
+    "/目标": cmd_goal_add,
+    "/我的风格": cmd_my_style,
 }
 
+_PRAISE_RE = re.compile(r"谢谢|感谢|太棒了|厉害|爱了|辛苦了|牛啊|靠谱")
+_SHARE_RE = re.compile(r"我.{0,8}(经历了|最近|今天|昨天|做了|去了|开始|完成|学会|参加了|搞了)")
 
-def chat_context(ctx):
-    """聊天时注入：当前场景记忆 + 群整体记忆 + 绑定提示。"""
-    parts = []
-    kind, k1, k2 = ctx.scene
-    if kind == "group":
-        m = load_member_memory(k1, k2)
-        if m.get("facts"):
-            parts.append("该用户在本群的记忆：\n" + "\n".join("- " + nice_fact(f) for f in m["facts"][-10:]))
-        g = load_group_memory(k1)
-        if g.get("facts"):
-            parts.append("该群的长期记忆：\n" + "\n".join("- " + nice_fact(f) for f in g["facts"][-10:]))
-        bound_user = find_user_for_member(k1, k2)
-        if bound_user:
-            parts.append(
-                f"（该用户已绑定私聊身份，user_openid 前 8 位：{bound_user[:8]}，"
-                "群聊记忆与私聊记忆分开保存，不要混用）"
-            )
-    else:
-        u = load_user_memory(k1)
-        if u.get("facts"):
-            parts.append("该用户在私聊中的记忆：\n" + "\n".join("- " + nice_fact(f) for f in u["facts"][-10:]))
-        binds = find_member_for_user(k1)
-        if binds:
-            parts.append(
-                f"（该用户已绑定 {len(binds)} 个群的身份，私聊记忆与群聊记忆分开保存，不要混用）"
-            )
-    return "\n\n".join(parts)
+
+def chat_context(ctx, text=None):
+    """场景与可见性由 Agent 统一处理（audience 过滤 + 场景定义），这里不再注入绑定提示。"""
+    return ""
 
 
 async def after_chat(ctx, text, reply):
-    """每次 AI 回复后自动提取记忆。"""
-    if len(text) < 6:
+    """每次 AI 回复后由 Memory Controller 自动提取；群聊每 8 条顺带更新群整体记忆。
+    信息增益触发（v3.1 §1）：高信息消息立即提取，低信息消息缓存合并，替代固定 10 分钟硬节流。"""
+    if len(text) < 2:
         return
     kind, k1, k2 = ctx.scene
+    if kind == "group":
+        # 群整体记忆：每条消息都计数，每 8 条提取一次（不依赖成员节流）
+        gdata = load_group_memory(k1)
+        gdata["message_count"] = gdata.get("message_count", 0) + 1
+        gdata["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        if gdata["message_count"] % 8 == 0 and time.time() - _last_group_extract.get(k1, 0) >= 3600:
+            _last_group_extract[k1] = time.time()
+            gfacts = await asyncio.to_thread(
+                memory.extract_facts,
+                f"（最近一次群聊片段）用户：{text[:300]}\n机器人：{reply[:300]}",
+            )
+            if gfacts:
+                info = await asyncio.to_thread(
+                    memory.ingest, f"group_all:{k1}", "", text, reply, gfacts
+                )
+                print(f"[记忆] group {_safe_id(k1)} 新增 {info['facts']} 条，事件 {info['events']}")
+                if info.get("disputed"):
+                    print(f"[记忆] 纠错：下调 {info['disputed']} 条旧记忆可信度")
+                    _print_dispute_details(info)
+                gdata = load_group_memory(k1)
+        save_group_memory(k1, gdata)
+
+    # 成员/用户记忆：信息增益触发（低信息消息进缓存，攒够或超时再合并提取）
     key = f"{kind}:{k1}:{k2}"
     now = time.time()
-    if now - _last_extract.get(key, 0) < 600:
-        return
-    _last_extract[key] = now
+    is_correction = bool(memory.analyze(text).get("correction"))
+    scope, sk = (f"group:{k1}", k2) if kind == "group" else (f"c2c:{k1}", "")
+    # 关系引擎（v3.1 §4）：行为证据驱动（chat/share/praise/dispute）
+    event = "chat"
     try:
-        facts = await asyncio.to_thread(
-            extract_facts, f"用户：{text[:500]}\n机器人：{reply[:500]}"
+        event = (
+            "dispute" if is_correction
+            else ("share" if _SHARE_RE.search(text or "")
+                  else ("praise" if _PRAISE_RE.search(text or "") else "chat"))
         )
-        if facts:
-            if kind == "group":
-                data = load_member_memory(k1, k2)
-                data["facts"] = merge_facts(data.get("facts", []), facts)
-                data["updated_at"] = datetime.now().isoformat(timespec="seconds")
-                save_member_memory(k1, k2, data)
-            else:
-                data = load_user_memory(k1)
-                data["facts"] = merge_facts(data.get("facts", []), facts)
-                data["updated_at"] = datetime.now().isoformat(timespec="seconds")
-                save_user_memory(k1, data)
-            print(f"[记忆] {kind} {_safe_id(k2 or k1)} 新增 {len(facts)} 条")
-    except Exception as e:
-        print(f"[记忆] 提取失败：{e}")
-    # 群整体记忆：每 8 条消息提取一次
-    if kind == "group":
-        try:
-            gdata = load_group_memory(k1)
-            gdata["message_count"] = gdata.get("message_count", 0) + 1
-            gdata["updated_at"] = datetime.now().isoformat(timespec="seconds")
-            if gdata["message_count"] % 8 == 0:
-                gfacts = await asyncio.to_thread(
-                    extract_facts,
-                    f"（最近一次群聊片段）用户：{text[:300]}\n机器人：{reply[:300]}",
-                )
-                if gfacts:
-                    gdata["facts"] = merge_facts(gdata.get("facts", []), gfacts)
-            save_group_memory(k1, gdata)
-        except Exception as e:
-            print(f"[记忆] 群提取失败：{e}")
+        if event == "praise":
+            _db.feedback_add(scope, sk, "praise", weight=0.3, detail=(text or "")[:100])
+        memory.relationship_update(
+            scope,
+            subject=k2 or k1,
+            event=event,
+            detail=(text or "")[:60],
+        )
+    except Exception:
+        pass
+    # Memory Trace（v10）：关系证据轨迹
+    try:
+        memory.trace_record(
+            scope, speaker="user", raw_content=text,
+            action="relationship", modules=["relationship"],
+            reasoning=f"行为证据：{event} → 关系状态更新",
+            confidence=0.6, hint="relationship",
+        )
+    except Exception:
+        pass
+    # 语言语义解释层（v7）：更新用户表达画像
+    try:
+        memory.expression_update(scope, text)
+    except Exception:
+        pass
+    gain = memory.message_gain(text, scope, sk)
+    igt_threshold = float(memory.trace_adjustments().get("igt_threshold", IGT_THRESHOLD))
+    if not is_correction and gain["score"] < igt_threshold:
+        buf = _sess_buffer.setdefault(
+            key, {"texts": [], "reply": reply or "", "first": now}
+        )
+        buf["texts"].append(text)
+        buf["reply"] = reply or buf["reply"]
+        if len(buf["texts"]) < IGT_MAX_BUFFER and now - buf["first"] < IGT_FLUSH_SEC:
+            return
+        merged = "；".join(buf["texts"])
+        _sess_buffer.pop(key, None)
+        text, reply = merged, buf["reply"]
+    else:
+        _sess_buffer.pop(key, None)
+    info = await asyncio.to_thread(memory.ingest, scope, sk, text, reply)
+    if info["facts"]:
+        print(f"[记忆] {kind} {_safe_id(k2 or k1)} 新增 {info['facts']} 条，事件 {info['events']}")
+    if info.get("disputed"):
+        print(f"[记忆] 纠错：下调 {info['disputed']} 条旧记忆可信度")
+        _print_dispute_details(info)
+    elif is_correction:
+        print("[记忆] 收到纠错信号，但未命中相关旧记忆")

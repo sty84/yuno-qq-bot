@@ -1,6 +1,5 @@
-"""娱乐互动插件：成语接龙、知识问答、排行榜、随机主动动态"""
+"""娱乐互动插件：成语接龙、知识问答、排行榜。"""
 
-import asyncio
 import random
 
 from plugins import _db
@@ -9,7 +8,7 @@ from plugins import _shared
 NAME = "娱乐互动"
 HELP = (
     "/成语 —— 成语接龙｜/答题 —— 知识问答｜/排名 —— 排行榜"
-    "（游戏中发「结束」可退出；后台：随机动态）"
+    "（游戏中发「结束」可退出）"
 )
 
 _games = {}
@@ -83,6 +82,19 @@ def load_idioms():
 
 IDIOMS = load_idioms()
 
+
+def _build_index():
+    """预计算接龙索引：首字 → 成语列表、尾字 → 可接数量（O(1) 查表）。"""
+    by_first, follow = {}, {}
+    for w in IDIOMS:
+        by_first.setdefault(w[0], []).append(w)
+    for w in IDIOMS:
+        follow[w] = sum(1 for x in by_first.get(w[-1], []) if x != w)
+    return by_first, follow
+
+
+_BY_FIRST, _FOLLOW = _build_index()
+
 QUIZ = [
     {"q": "《BanG Dream!》中梦限大MewType的DJ担当是谁？", "options": ["A. 仲町阿拉蕾", "B. 千石由乃", "C. 藤都子", "D. 宫永野乃花"], "answer": "B"},
     {"q": "千石由乃的生日是哪一天？", "options": ["A. 1月4日", "B. 4月1日", "C. 11月4日", "D. 4月11日"], "answer": "C"},
@@ -138,20 +150,19 @@ def _display_name(key) -> str:
 
 
 def start_idiom(ckey):
-    first = random.choice([i for i in IDIOMS if len(i) == 4])
+    # 只选「尾字能接得上」的成语开局，避免开局即死
+    first = random.choice([i for i in IDIOMS if _FOLLOW[i] > 0])
     _games[ckey] = {"type": "idiom", "active": True, "last_char": first[-1]}
     return f"成语接龙开始！我先来：「{first}」，请接「{first[-1]}」字开头的成语～"
 
 
 def _best_bot_word(word):
-    """选一个「后续能接得最多」的成语，让游戏尽量持续。"""
-    candidates = [i for i in IDIOMS if i[0] == word[-1] and i != word]
-    if not candidates:
+    """选一个「后续仍有活路」且接得最多的成语；无活路则认输。"""
+    candidates = [w for w in _BY_FIRST.get(word[-1], []) if w != word]
+    alive = [w for w in candidates if _FOLLOW[w] > 0]
+    if not alive:
         return None
-    return max(
-        candidates,
-        key=lambda w: sum(1 for j in IDIOMS if j[0] == w[-1]),
-    )
+    return max(alive, key=lambda w: _FOLLOW[w])
 
 
 def idiom_guess(ckey, ukey, text):
@@ -242,38 +253,3 @@ def game_try(ctx, text):
     if game.get("type") == "idiom":
         return idiom_guess(ctx.chat_key, ctx.user_key, text)
     return quiz_guess(ctx.chat_key, ctx.user_key, text)
-
-
-def loops(make_ctx):
-    return [random_event_loop(make_ctx)]
-
-
-async def random_event_loop(make_ctx):
-    while True:
-        cfg = _shared.CONFIG.get("random_events", {})
-        if not cfg.get("enabled"):
-            await asyncio.sleep(300)
-            continue
-        target = str(cfg.get("group_openid", "") or "")
-        min_m = max(1, int(cfg.get("min_interval_min", 60)))
-        max_m = max(min_m, int(cfg.get("max_interval_min", 240)))
-        await asyncio.sleep(random.uniform(min_m, max_m) * 60)
-        ctx = make_ctx()
-        if not target or ctx.api is None:
-            continue
-        try:
-            mood = _shared.state.get("mood", "慵懒")
-            prompt = (
-                f"你现在是千石由乃，当前心情「{mood}」。"
-                "请以她的口吻给群里的大家发一条简短的生活动态（60字以内），"
-                "自然、不刻意、像日常发言。"
-            )
-            msg = await asyncio.to_thread(
-                _shared.ask_deepseek, prompt, system=_shared.BASE_SYSTEM_PROMPT
-            )
-            await ctx.api.post_group_message(group_openid=target, content=msg[:500])
-            if random.random() < 0.4:
-                _shared.set_mood(random.choice(_shared.MOODS))
-            print(f"随机事件已发送到群 {target}")
-        except Exception as e:
-            print(f"随机事件失败：{e}")

@@ -1,0 +1,27 @@
+# Hermes 主配置（~/.hermes/config.yaml）—— 合并进你的配置
+mcp_servers:
+  yuno:
+    command: "/home/ubuntu/qq-bot/venv/bin/python"
+    args: ["/home/ubuntu/qq-bot/tools.py", "mcp"]
+    env:
+      CONFIG_PATH: "/home/ubuntu/qq-bot/config.json"
+    enabled: true
+    # 只暴露这些工具（对应企划的 mcp.admin_allow 白名单思路）
+    tools:
+      include:
+        - services.list
+        - services.status
+        - services.start
+        - services.stop
+        - services.restart
+        - services.logs
+        - config.get
+        - config.set
+        - audit.query
+        - disk_usage
+        - memory.search
+        - memory.add
+        - memory.clear
+        - notify.send
+      resources: false
+      prompts: false
