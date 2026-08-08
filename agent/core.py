@@ -40,6 +40,21 @@ def _scene_text(scopes) -> str:
     return ""
 
 
+def _now_text() -> str:
+    """当前时间参考（按用户时区，自然口语）。"""
+    from memory import tz as tz_mod
+    return tz_mod.now_text()
+
+
+def _presence_text() -> str:
+    """存在形态：让 AI 理解自己是线上实体，与用户有物理距离。"""
+    return (
+        "【存在形态】你在线上（网络聊天），用户在线下，和你有物理距离。"
+        "用户提到地点、距离、见面、实物交接时：可以约定、安排、共情，"
+        "但不能真的出现在现场或亲手拿到实物；按角色扮演自然应对即可。"
+    )
+
+
 def _extra_scopes(scopes) -> list[str]:
     """跨场景召回：群聊补充该群已绑定成员的 public 私聊记忆；私聊补充该用户群聊记忆。"""
     extra = []
@@ -84,6 +99,12 @@ def ask(
     QQ 前台由 plugins/memory.py 的 after_chat 学习，传 learn=False 避免重复）。"""
     meta = {"analysis": analyze(text or "")}
     ctx_parts = []
+    try:
+        from memory import tz as tz_mod
+        ctx_parts.append(tz_mod.now_text(scopes[0] if scopes else None))
+    except Exception:
+        ctx_parts.append(_now_text())
+    ctx_parts.append(_presence_text())
     scene = _scene_text(scopes)
     if scene:
         ctx_parts.append(scene)
@@ -149,7 +170,7 @@ def ask(
         text,
         extra_context="\n\n".join(ctx_parts),
         history=history or [],
-        system=system or persona.compose(),
+        system=system or persona.compose(query=text),
     )
     meta["reply"] = reply
     if learn and learn_scope:

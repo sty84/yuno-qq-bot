@@ -237,6 +237,11 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
     if text or reply:
         an = analysis.enrich(an, text or "", reply or "")
     an = _fuse_emotion(an, scope, key)
+    try:
+        from memory import tz as tz_mod
+        tz_mod.remember(scope, text)  # 用户所在地时区检测（“我现在在美国”）
+    except Exception:
+        pass
     conf = float(confidence if confidence is not None else an.get("confidence", 0.7))
     # 评分驱动行为（v11）：置信度维度低分 → 抑制过度自信
     adj = trace.adjustments()

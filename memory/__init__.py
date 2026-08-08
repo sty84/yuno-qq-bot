@@ -37,6 +37,7 @@ from memory import (
     sensitive,
     topic,
     trace,
+    tz,
     update,
     vecindex,
     world,
@@ -75,6 +76,8 @@ trace_markdown = trace.render_markdown
 trace_prune = trace.prune
 trace_score = trace.score
 trace_adjustments = trace.adjustments
+user_tz = tz.user_tz
+tz_detect = tz.detect
 world_snapshot = world.snapshot
 world_stats = world.stats
 goal_add = advisor.goal_add

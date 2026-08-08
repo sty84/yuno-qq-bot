@@ -31,6 +31,9 @@ SECTION_KINDS = {
     "说话风格": ("style", 0.85, 0.7),
     "personality": ("personality", 0.85, 0.75),
     "性格": ("personality", 0.85, 0.75),
+    "examples": ("examples", 0.9, 0.8),
+    "说话示例": ("examples", 0.9, 0.8),
+    "示例": ("examples", 0.9, 0.8),
     "avoid": ("avoid", 0.85, 0.7),
     "禁忌": ("avoid", 0.85, 0.7),
     "defaults": ("defaults", 0.85, 0.7),
@@ -69,6 +72,7 @@ PERSONA_KEYS = [
     "catchphrase",
     "mood_profile",
     "experience_persona",
+    "examples",
     "motivation",
     "relationship",
     "conflict",
@@ -90,6 +94,7 @@ KIND_LABELS = {
     "relationship": "关系观",
     "conflict": "内心矛盾",
     "behavior_policy": "行为策略",
+    "examples": "说话示例",
 }
 
 PERSONA_CATEGORY = {
@@ -101,6 +106,24 @@ PERSONA_CATEGORY = {
     "relationship": "关系",
     "conflict": "矛盾",
     "behavior_policy": "策略",
+    "examples": "风格",
+}
+
+# 段落关键词提示：查询词命中这些词时，强制注入对应人设块。
+# 兜底纯语义检索的盲区（例如“你怎么说话”→【说话风格】，示例块会抢走 top-k 名额）。
+SECTION_HINT_TOKENS = {
+    "style": ["说话", "语气", "风格", "毒舌", "反问", "敬语", "措辞", "聊天", "称呼", "口吻"],
+    "catchphrase": ["口头禅", "口头", "常挂嘴边", "常说"],
+    "personality": ["性格", "为人", "脾气", "什么样的人", "什么人"],
+    "preference": ["喜欢", "讨厌", "喜好", "爱好", "感兴趣", "口味", "爱吃什么"],
+    "avoid": ["禁忌", "雷区", "不能提", "不能做", "别做", "不许"],
+    "defaults": ["默认", "汇报", "简洁", "规矩", "规定", "怎么汇报"],
+    "experience_persona": ["经历", "过去", "出道", "以前", "怎么入行", "怎么开始"],
+    "motivation": ["动机", "为什么", "目标", "想要", "追求", "理想"],
+    "relationship": ["关系", "熟悉", "信任", "朋友", "好感", "熟不熟"],
+    "conflict": ["矛盾", "冲突", "纠结"],
+    "mood_profile": ["情绪", "心情", "状态", "低落", "开心", "心态"],
+    "value": ["价值观", "底线", "道德", "原则"],
 }
 
 # 输出规范：禁止括号舞台提示（如“（歪头）（打哈欠）”），动作/情绪直接用文字表达
@@ -108,6 +131,8 @@ OUTPUT_RULE = (
     "\n\n【输出规范】禁止用括号标注动作或情绪（例如“（歪了歪头）（打了个哈欠）”）。"
     "动作和情绪必须直接用文字本身表达（语气词、句式、用词、标点），"
     "像真人打字聊天一样，不要说任何舞台提示。"
+    "不要在回复里复述或介绍自己的身份设定（如“我是千石由乃、DJ、节能主义者”）；"
+    "身份是你天然拥有的背景，除非用户直接问“你是谁”，否则不要主动自报家门。"
 )
 
 
@@ -174,11 +199,59 @@ def _persona_fields():
     return out
 
 
+def _query_section_hints(query=None) -> set:
+    """关键词兜底：查询词命中段落关键词时，返回应注入的人设块 key。"""
+    if not query:
+        return set()
+    return {
+        key
+        for key, words in SECTION_HINT_TOKENS.items()
+        if any(w in query for w in words)
+    }
+
+
+def _persona_fields_by_query(query=None):
+    """前沿 lorebook 式人设注入：
+    - 核心字段（身份/说话示例）常驻；
+    - 其余字段按当前话题检索（向量/词法）只注入相关块；
+    - query 为空或配置为 full 时全量注入（回退/顾问场景）。"""
+    cfg = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("persona", {}) or {}
+    inject = str(cfg.get("inject", "auto"))
+    if not query or inject == "full":
+        return _persona_fields()
+    rows = _db.memory_rows(_ai_scope())
+    by_key = {}
+    for r in rows:
+        k = r.get("key") or ""
+        if k in PERSONA_KEYS and float(r.get("confidence", 0.7)) >= MIN_CONFIDENCE:
+            by_key.setdefault(k, []).append(r["fact"])
+    core_keys = {"identity", "examples"}
+    out = {k: v for k, v in by_key.items() if k in core_keys}
+    for k in _query_section_hints(query):
+        if k in by_key and k not in out:
+            out[k] = by_key[k]
+    try:
+        from memory import reasoning
+        fact_to_key = {r["fact"]: (r.get("key") or "") for r in rows}
+        hits = reasoning.retrieve(query, [_ai_scope()], top_k=6, min_score=0.05)
+        for f, _s, _sc in hits:
+            k = fact_to_key.get(f)
+            if k in PERSONA_KEYS and k not in out:
+                out[k] = by_key.get(k, [])
+    except Exception:
+        pass
+    return out
+
+
 def _render_fields(fields) -> str:
     lines = []
     for key in PERSONA_KEYS:
         items = fields.get(key)
         if not items:
+            continue
+        if key == "examples":  # 说话示例：原样展示（示范语气），不加项目符号
+            lines.append("【说话示例（只示范语气，别照搬内容）】")
+            lines.extend(items)
             continue
         lines.append(f"【{KIND_LABELS.get(key, key)}】")
         for it in items:
@@ -199,9 +272,9 @@ def ai_memory_context(limit=4) -> str:
     return "\n".join(lines)
 
 
-def compose(base=None, mood=None, include_ai=True) -> str:
+def compose(base=None, mood=None, include_ai=True, query=None) -> str:
     """合成最终 system prompt：结构化人设字段（记忆库）+ 当前心情 + 动态人格记忆。"""
-    fields = _persona_fields()
+    fields = _persona_fields_by_query(query)
     if fields:
         parts = [_render_fields(fields)]
     else:

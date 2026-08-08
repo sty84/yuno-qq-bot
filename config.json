@@ -90,6 +90,9 @@
         "llm": true,
         "min_interval_s": 300
       },
+      "persona": {
+        "inject": "auto"
+      },
       "world": {
         "enabled": true,
         "budget_chars": 400,

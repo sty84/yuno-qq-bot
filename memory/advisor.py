@@ -29,8 +29,24 @@ CONSULT_SYSTEM = (
     "6. 表达符合常识，禁止夸张或离谱比喻（比如把三千块说成'一顿饭钱'）；"
     "金额、时间、比例都要贴近现实，不确定就具体问用户。\n"
     "7. 结尾给一个具体可行的第一步行动即可，不用再总结一遍。\n"
-    "8. 禁止用括号标注动作或情绪（如'（点头）（叹口气）'），动作情绪直接用文字表达。"
+    "8. 禁止用括号标注动作或情绪（如'（点头）（叹口气）'），动作情绪直接用文字表达。\n"
+    "9. 提问要口语化、先共情：先接住用户当前的话和情绪（简短一句），再自然地问最关键的未知信息；"
+    "不要一上来就蹦术语或直接问钱。\n"
+    "10. 用户说出与你已知信息明显不符或很意外的话时（比如突然说人在另一个国家/城市），"
+    "先按你的性格自然表达惊讶或怀疑（可以调侃、可以确认），不要面无表情地直接继续追问。"
 )
+
+
+def _consult_system() -> str:
+    """顾问 system prompt：规则 + 人格语气（保持角色声音，不脱戏）。"""
+    s = CONSULT_SYSTEM
+    try:
+        from agent import persona
+        core = persona.compose(include_ai=False)
+        s = "保持以下人格，像这个人一样说话（语气、口头禅、性格都要贴合）：\n" + core + "\n\n" + s
+    except Exception:
+        pass
+    return s
 
 DECISION_TRIGGER = re.compile(
     r"要不要|该不该|怎么选|给个建议|帮我决定|纠结|犹豫|选哪个|值不值得|帮我想想|拿不定主意"
@@ -144,7 +160,7 @@ def consult_turn(scope, text) -> str:
             f"现在给出最终建议：用自然连贯的话（像朋友聊天），直接给推荐和理由，"
             f"结尾给一个具体的第一步行动；不要用方案编号列表、不要标题模板、不要分点堆砌。"
         )
-        reply = _consult_llm(CONSULT_SYSTEM, prompt)
+        reply = _consult_llm(_consult_system(), prompt)
         _db.consult_save(scope, topic, "done", stage + 1, answers + [reply[:200]])
         _db.memory_add(
             "ai", "reasoning",
@@ -160,7 +176,7 @@ def consult_turn(scope, text) -> str:
         f"用户最新回答：{text}\n"
         f"请针对最关键的未知信息，只问【一个问题】；如果信息已足够，可以直接给建议。"
     )
-    reply = _consult_llm(CONSULT_SYSTEM, prompt)
+    reply = _consult_llm(_consult_system(), prompt)
     _db.consult_save(scope, topic, "active", stage + 1, answers)
     return reply
 
