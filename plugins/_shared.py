@@ -153,6 +153,7 @@ def ask_deepseek(
     history=None,
     system=None,
     max_tokens: int = 800,
+    temperature=None,
 ) -> str:
     messages = [{"role": "system", "content": system or system_prompt()}]
     if extra_context:
@@ -163,12 +164,15 @@ def ask_deepseek(
     last_err = None
     for attempt in range(3):
         try:
-            resp = deepseek.chat.completions.create(
-                model=DEEPSEEK_MODEL,
-                messages=messages,
-                max_tokens=max_tokens,
-                timeout=30,
-            )
+            kwargs = {
+                "model": DEEPSEEK_MODEL,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "timeout": 30,
+            }
+            if temperature is not None:
+                kwargs["temperature"] = temperature
+            resp = deepseek.chat.completions.create(**kwargs)
             reply = (resp.choices[0].message.content or "").strip()
             return reply[:MAX_REPLY_LEN] + ("……" if len(reply) > MAX_REPLY_LEN else "")
         except Exception as e:

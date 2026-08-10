@@ -11,6 +11,7 @@ import time
 from datetime import datetime
 
 from plugins import _db, _shared
+from memory import policy
 
 _snapshot_cache = {}
 _investigate_state = {}  # scope -> 上次调查时间（按 scope 节流，v6 建议 §2）
@@ -90,7 +91,9 @@ def _rule_decision(old_conf, valid_from, scope="", access_count=0) -> dict:
 
 
 def investigate_correction(scope, key, text, candidate_facts, an=None) -> dict:
-    """调查一条纠正：LLM（节流 + 小预算）判断 update/keep/uncertain；失败回退规则。"""
+    """调查一条纠正：LLM（节流 + 小预算）判断 update/keep/uncertain；失败回退规则。
+    若纠正疑似玩笑，或轻纠错（“其实/改一下”）触及客观稳定事实（生日/血型/身份等），
+    一律保守 keep——单次弱信号不更新高可信锚点，也不消耗 LLM 预算。"""
     if not candidate_facts:
         return {"action": "keep", "reason": "无候选记忆"}
     row = next(
@@ -105,6 +108,12 @@ def investigate_correction(scope, key, text, candidate_facts, an=None) -> dict:
         if m["fact"] == row["fact"]:
             access_count = int(m.get("access_count", 0))
             break
+    cls = policy.fact_class(scope, key, row["fact"])
+    joke = float((an or {}).get("joke_probability", 0.0))
+    if not (an or {}).get("correction_strong") and (
+        joke >= 0.5 or cls == "stable"
+    ):
+        return {"action": "keep", "reason": "玩笑或轻纠错，稳定事实不更新"}
     if not (an or {}).get("correction_strong"):
         return {"action": "uncertain", "reason": "轻纠错，按冲突降权"}
     if not _cfg("llm_investigate", True):

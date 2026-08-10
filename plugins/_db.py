@@ -595,6 +595,32 @@ def kv_get(namespace, key, default=None):
             return default
 
 
+def kv_get_raw(namespace, key, default=None):
+    """读取 kv 原始 JSON 字符串（CAS 用：保证与库内字节完全一致）。"""
+    with _lock:
+        row = _connect().execute(
+            "SELECT value FROM kv WHERE namespace=? AND key=?", (namespace, key)
+        ).fetchone()
+        return row[0] if row else default
+
+
+def kv_cas(namespace, key, old_raw, new_raw):
+    """Compare-and-swap：仅当现值等于 old_raw 时写入 new_raw（跨进程原子，防并发重复）。"""
+    with _lock:
+        c = _connect()
+        cur = c.execute(
+            "SELECT value FROM kv WHERE namespace=? AND key=?", (namespace, key)
+        ).fetchone()
+        if cur is None or cur[0] != old_raw:
+            return False
+        c.execute(
+            "UPDATE kv SET value=? WHERE namespace=? AND key=? AND value=?",
+            (new_raw, namespace, key, old_raw),
+        )
+        c.commit()
+        return c.total_changes > 0
+
+
 # ===== 绑定 =====
 def binding_set(uid, gid, mid):
     with _lock:
@@ -1346,6 +1372,20 @@ def topics_count(scope=None) -> int:
         return _connect().execute("SELECT COUNT(*) FROM topics").fetchone()[0]
 
 
+def topic_clear(scope):
+    """清空某 scope 的议题及其参数/关联（人物档案重建等场景，避免陈旧事实经议题通道召回）。"""
+    with _lock:
+        c = _connect()
+        ids = [r[0] for r in c.execute(
+            "SELECT id FROM topics WHERE scope=?", (scope,)
+        ).fetchall()]
+        if ids:
+            marks = ",".join("?" * len(ids))
+            c.execute(f"DELETE FROM topic_params WHERE topic_id IN ({marks})", ids)
+            c.execute(f"DELETE FROM topics WHERE id IN ({marks})", ids)
+        c.commit()
+
+
 def topic_param_add(topic_id, param, value, confidence=0.7, updated_at=""):
     with _lock:
         c = _connect()
@@ -1639,7 +1679,7 @@ def session_find_recent(scope, key, within_min=1440):
     with _lock:
         rows = _connect().execute(
             "SELECT * FROM sessions WHERE scope=? AND key=? AND closed=0 "
-            "ORDER BY updated_at DESC LIMIT 1",
+            "ORDER BY updated_at DESC, id DESC LIMIT 1",
             (scope, key or ""),
         ).fetchall()
         if not rows:

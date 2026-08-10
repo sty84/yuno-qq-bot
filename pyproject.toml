@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yuno-memory"
-version = "1.0.0"
+version = "2.1.0"
 description = "成长型 Agent 记忆系统 SDK（统一记忆/纠错/轨迹/评测/导出）"
 requires-python = ">=3.10"
 dependencies = [

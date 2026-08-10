@@ -14,6 +14,8 @@ import os
 import pathlib
 import random
 import re
+import signal
+import sys
 import time
 
 import botpy
@@ -336,6 +338,18 @@ class QQBot(botpy.Client):
 
 
 if __name__ == "__main__":
+    def _on_stop(_signum, _frame):
+        """优雅关闭：把内存统计刷进 kv，避免重启丢失（v31）。"""
+        try:
+            import memory
+            memory.flush_caches()
+        except Exception:
+            pass
+        print("收到退出信号，已刷新缓存。", flush=True)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _on_stop)
+    signal.signal(signal.SIGINT, _on_stop)
     intents = botpy.Intents(public_messages=True)
     bot = QQBot(intents=intents, bot_log=None)
     bot.run(appid=APPID, secret=SECRET)

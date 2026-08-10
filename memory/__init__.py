@@ -21,27 +21,40 @@
 from memory import (
     advisor,
     analysis,
+    appointment,
     backfill,
     character,
     context,
     controller,
     embedder,
+    emotion,
+    environment,
     expression,
     extract,
     graph,
+    interaction,
     lexical,
+    living,
+    mistake,
     policy,
-    reflect,
     relationship,
     reasoning,
-    sensitive,
+    schedule,
+    sharing,
+    sleep,
+    space,
     topic,
     trace,
     tz,
-    update,
     vecindex,
     world,
 )
+
+# v31.3 模块合并别名：外部 `from memory import X` 继续可用
+reflect = advisor
+sensitive = controller
+update = controller
+weather = environment
 from plugins import _db
 from memory import backfill as backfill_mod
 
@@ -78,8 +91,36 @@ trace_score = trace.score
 trace_adjustments = trace.adjustments
 user_tz = tz.user_tz
 tz_detect = tz.detect
+appointment_extract = appointment.extract
+appointment_check = appointment.check_and_poke
+appointment_context = appointment.context_block
+mistake_process = mistake.process
+mistake_context = mistake.context_block
+mistake_record = mistake.record
+mistake_forgive_probability = mistake.forgive_probability
 world_snapshot = world.snapshot
 world_stats = world.stats
+sleep_run = sleep.night_run
+dream_context = sleep.context_block
+schedule_block = schedule.block
+schedule_today = schedule.today_summary
+weather_fetch = weather.fetch
+env_block = environment.block
+env_snapshot = environment.snapshot
+sharing_drive = sharing.drive_all
+sharing_desire = sharing.desire
+emotion_judge = emotion.judge
+emotion_eval = emotion.eval_probes
+emotion_log_rows = emotion.emotion_log_rows
+living_block = living.home_block
+travel_time = living.travel_time
+item_give = living.give
+item_take = living.take
+item_find = living.find
+space_position = space.position
+space_events = space.today_events
+travel_between = space.travel_between
+interaction_modulate = interaction.modulate
 goal_add = advisor.goal_add
 goal_list = advisor.goal_list
 goal_update = advisor.goal_update
@@ -87,6 +128,8 @@ goal_active = advisor.goal_active
 consult_turn = advisor.consult_turn
 consult_active = advisor.consult_active
 consult_status = advisor.consult_status
+consult_related = advisor.consult_related
+consult_abort = advisor.consult_abort
 assemble_context = context.assemble_context
 merge_facts = controller.merge_facts
 nice_fact = extract.nice_fact
@@ -175,6 +218,10 @@ character_build = character.build
 character_search = character.search
 character_list = character.list_names
 character_match = character.match_scopes
+character_md_path = character.md_path
+character_render_md = character.render_markdown
+character_write_md = character.write_markdown
+character_sync = character.sync_from_markdown
 sensitive_detect = sensitive.detect
 crypto_available = sensitive.available
 session_touch = controller.touch
@@ -195,3 +242,11 @@ def stats() -> dict:
         "ai_memory": len(_db.memory_rows("ai")),
         "attrs": len(_db.attr_rows()),
     }
+
+
+def flush_caches():
+    """优雅关闭：把需要落盘的内存统计刷进 kv（性能缓存丢失无影响）。"""
+    try:
+        reasoning._flush_route_stats()
+    except Exception:
+        pass

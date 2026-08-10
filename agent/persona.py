@@ -43,6 +43,7 @@ SECTION_KINDS = {
     "喜好": ("preference", 0.85, 0.75),
     "value": ("value", 0.85, 0.7),
     "价值观": ("value", 0.85, 0.7),
+    "底线与雷区": ("value", 0.85, 0.7),
     "catchphrase": ("catchphrase", 0.8, 0.6),
     "口头禅": ("catchphrase", 0.8, 0.6),
     "mood_profile": ("mood_profile", 0.8, 0.6),
@@ -115,7 +116,7 @@ SECTION_HINT_TOKENS = {
     "style": ["说话", "语气", "风格", "毒舌", "反问", "敬语", "措辞", "聊天", "称呼", "口吻"],
     "catchphrase": ["口头禅", "口头", "常挂嘴边", "常说"],
     "personality": ["性格", "为人", "脾气", "什么样的人", "什么人"],
-    "preference": ["喜欢", "讨厌", "喜好", "爱好", "感兴趣", "口味", "爱吃什么"],
+    "preference": ["喜欢", "讨厌", "喜好", "爱好", "感兴趣", "口味", "爱吃什么", "吃什么", "喝什么"],
     "avoid": ["禁忌", "雷区", "不能提", "不能做", "别做", "不许"],
     "defaults": ["默认", "汇报", "简洁", "规矩", "规定", "怎么汇报"],
     "experience_persona": ["经历", "过去", "出道", "以前", "怎么入行", "怎么开始"],
@@ -126,6 +127,11 @@ SECTION_HINT_TOKENS = {
     "value": ["价值观", "底线", "道德", "原则"],
 }
 
+# 偏好类字段只在用户明确问偏好时才注入（防止“便利店/买东西”把“喜欢白巧克力”带进上下文反复提）
+PREFERENCE_QUERY_WORDS = (
+    "喜欢", "讨厌", "喜好", "口味", "爱吃什么", "吃什么", "喝什么", "偏好",
+    "最爱", "忌口", "爱吃", "爱喝", "想吃", "想喝", "最爱吃",
+)
 # 输出规范：禁止括号舞台提示（如“（歪头）（打哈欠）”），动作/情绪直接用文字表达
 OUTPUT_RULE = (
     "\n\n【输出规范】禁止用括号标注动作或情绪（例如“（歪了歪头）（打了个哈欠）”）。"
@@ -133,6 +139,18 @@ OUTPUT_RULE = (
     "像真人打字聊天一样，不要说任何舞台提示。"
     "不要在回复里复述或介绍自己的身份设定（如“我是千石由乃、DJ、节能主义者”）；"
     "身份是你天然拥有的背景，除非用户直接问“你是谁”，否则不要主动自报家门。"
+    "不要刻意向用户提起自己的喜好、口头禅或设定细节，除非用户先提起或当前话题直接相关；"
+    "更不要每次聊天都硬塞一句自己的偏好当万能回复。"
+    "【反重复】你的具体喜好（如白巧克力、能量饮料这类细节）只在用户直接问起或话题直接相关时提一次；"
+    "同一个细节一小时内最多自然出现一次，禁止在回复里反复带出、禁止用喜好填空当万能回复。"
+    "【反重复·句式】同一个梗、玩笑或威胁句式（如“扔回脸上”“浪费电”“恶作剧盒”这类）一天最多用一次，"
+    "被用户指出重复后立刻换说法，不要每次都用同款开头（如“我先说好”）。"
+    "【物品表述】描述家里物品时名称一字不改（如“白巧克力”不要说成“白巧克力碎”），"
+    "数量照实际说（×2 就说两件/两罐），不要自创原文没有的单位或包装词。"
+
+    "【推测意图】用户问一个状态或事实时，先如实回答，再想TA为什么问这个"
+    "（多半是想让你做点什么、担心什么、或想确认情况），自然地接一句，"
+    "让对话有来有回；不要答完就冷场，也不要突然跑题到和问题无关的事。"
 )
 
 
@@ -227,8 +245,11 @@ def _persona_fields_by_query(query=None):
             by_key.setdefault(k, []).append(r["fact"])
     core_keys = {"identity", "examples"}
     out = {k: v for k, v in by_key.items() if k in core_keys}
+    pref_q = any(w in (query or "") for w in PREFERENCE_QUERY_WORDS)
     for k in _query_section_hints(query):
         if k in by_key and k not in out:
+            if k == "preference" and not pref_q:
+                continue
             out[k] = by_key[k]
     try:
         from memory import reasoning
@@ -237,6 +258,8 @@ def _persona_fields_by_query(query=None):
         for f, _s, _sc in hits:
             k = fact_to_key.get(f)
             if k in PERSONA_KEYS and k not in out:
+                if k == "preference" and not pref_q:
+                    continue
                 out[k] = by_key.get(k, [])
     except Exception:
         pass
@@ -281,8 +304,16 @@ def compose(base=None, mood=None, include_ai=True, query=None) -> str:
         parts = [(base or _identity()).strip()]
     parts.append(OUTPUT_RULE)
     mood = mood if mood is not None else _shared.state.get("mood", "")
-    if mood:
-        parts.append(f"【当前心情：{mood}】")
+    try:
+        from memory import emotion as emotion_mod
+        emo_cfg = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("emotion", {}) or {}
+        if emo_cfg.get("enabled", True):
+            parts.append(emotion_mod.ai_block())  # 多维情绪状态机（v31）
+        elif mood:
+            parts.append(f"【当前心情：{mood}】")
+    except Exception:
+        if mood:
+            parts.append(f"【当前心情：{mood}】")
     if include_ai:
         ai = ai_memory_context()
         if ai:

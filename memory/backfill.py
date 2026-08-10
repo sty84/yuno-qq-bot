@@ -1,12 +1,13 @@
 """回填与巩固（工程化）：向量 → 事件图/树 → AI 观点 → 修剪 → 词法索引。
 run() 返回结构化报告（供 agent.grow / 定时任务）；backfill() 返回可读文本（兼容 tools.py memory-embed）。"""
 
+import json
 from datetime import datetime
 
 import math
 
 from plugins import _db
-from memory import advisor, controller, embedder, graph, lexical, policy, reasoning, reflect, topic, trace, vecindex
+from memory import advisor, controller, embedder, graph, lexical, policy, reasoning, topic, trace, vecindex
 
 
 def _embed_count(batch=64) -> int:
@@ -55,6 +56,57 @@ def _llm_one(prompt) -> str:
         return ""
 
 
+CONSOLIDATE_PROMPT = (
+    "把以下关于「{topic}」的时间线记忆压缩成结构化总结，只输出 JSON：\n"
+    '{{"summary":"≤40字的核心总结","duration":"持续时间（如：3天/两周/不明）",'
+    '"trigger":"具体诱因（保留名字/数字）","turning_points":"情绪或状态转折（如：焦虑失眠→提交→想庆祝）",'
+    '"result":"最终结果","preferences":"过程中透露的偏好或下一步想法"}}\n'
+    "要求：保留具体数字、名字、情绪变化和偏好细节，不要写成'工作压力已解决'这类丢信息的空话。\n"
+    "记忆（按时间顺序，括号内为情绪标注）：\n{items}"
+)
+
+
+def _llm_consolidate(topic, items) -> dict:
+    """结构化压缩：保留诱因/时长/情绪转折/结果/偏好，返回 {summary, details{...}}。
+    模型忽略 JSON 指令时直接把纯文本当核心总结；完全失败返回 {}（调用方回退过程链）。"""
+    try:
+        from plugins import _shared
+        resp = _shared.deepseek.chat.completions.create(
+            model=_shared.DEEPSEEK_MODEL,
+            messages=[
+                {"role": "system", "content": "你是记忆巩固器。只输出 JSON，不要解释。"},
+                {
+                    "role": "user",
+                    "content": CONSOLIDATE_PROMPT.format(
+                        topic=topic, items="\n".join(f"- {i}" for i in items)
+                    ),
+                },
+            ],
+            max_tokens=260,
+            temperature=0.3,
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        start, end = raw.find("{"), raw.rfind("}")
+        if start < 0:
+            if raw and raw not in ("[]", "{}"):
+                return {"summary": raw[:100], "details": {}}
+            return {}
+        data = json.loads(raw[start:end + 1])
+        if not isinstance(data, dict):
+            return {}
+        summary = str(data.get("summary", "")).strip()[:100]
+        if not summary:
+            return {}
+        details = {
+            k: str(data.get(k, "")).strip()[:200]
+            for k in ("duration", "trigger", "turning_points", "result", "preferences")
+            if str(data.get(k, "")).strip()
+        }
+        return {"summary": summary, "details": details}
+    except Exception:
+        return {}
+
+
 def consolidate(limit=30) -> int:
     """把同类型事件总结成 AI 观点（belief，可信度 0.5）。返回写入条数。"""
     rows = _db.event_rows(limit=limit)
@@ -86,25 +138,52 @@ def consolidate(limit=30) -> int:
 
 
 def consolidate_topics(limit=30) -> int:
-    """议题级记忆巩固（v5 §P1-1）：同一议题事实 ≥5 条 → LLM 压缩成一条核心总结入 consolidated，
-    原细节事实降权（保留但不主导召回），模拟人脑"短期→总结→长期→删噪声"。"""
+    """议题级记忆巩固（v5 §P1-1 + v22 情绪价值修复）：
+    同一议题事实 ≥5 条 → LLM 压缩成「核心总结 + 细节属性（时长/诱因/情绪转折/结果/偏好）」
+    入 consolidated，原细节事实降权保留（不主导召回但可追溯）。
+    情绪线索不再被压成一句空话；LLM 失败时回退为过程链（A → B → C），绝不丢链条。"""
     written = 0
+    ts = datetime.now().isoformat(timespec="seconds")
     for t in _db.topic_rows(limit=limit):
         params = _db.topic_params(t["id"])
         facts = [p["value"] for p in params if p["param"] == "fact"]
         if len(facts) < 5:
             continue
-        summary = _llm_one(
-            f"把以下 {len(facts)} 条关于「{t['topic']}」的记忆压缩成一句不超过40字的核心总结：\n"
-            + "\n".join(f"- {f}" for f in facts[:12])
-        )
-        if not summary:
-            continue
+        # 按记忆时间排序 + 情绪标注，保留过程与转折
+        rows_by_fact = {}
+        for r in _db.memory_rows(t["scope"], t["key"]):
+            rows_by_fact[r["fact"]] = r
+        ordered = [f for f in facts if f in rows_by_fact]
+        if len(ordered) < 5:
+            ordered = facts
+        items = []
+        for f in ordered[:12]:
+            r = rows_by_fact.get(f)
+            v = float((r or {}).get("valence", 0.0))
+            tag = "低落" if v < -0.3 else ("开心" if v > 0.3 else "")
+            items.append(f + (f"（{tag}）" if tag else ""))
+        result = _llm_consolidate(t["topic"], items)
+        if result:
+            summary = result["summary"]
+            details = result["details"]
+        else:
+            summary = _llm_one(
+                f"把以下 {len(ordered)} 条关于「{t['topic']}」的记忆压缩成一句不超过40字的核心总结：\n"
+                + "\n".join(f"- {i}" for i in items)
+            )
+            details = {}
+        if not summary or summary in ("[]", "{}"):
+            chain = " → ".join(items[:6])
+            summary = (chain + (" …" if len(items) > 6 else ""))[:100]
+        valences = [float((rows_by_fact.get(f) or {}).get("valence", 0.0)) for f in ordered]
+        avg_v = round(sum(valences) / len(valences), 3) if valences else 0.0
         _db.memory_add(
             t["scope"], "consolidated", summary,
-            datetime.now().isoformat(timespec="seconds"),
-            None, 0.7, "consolidation",
+            ts, None, 0.7, "consolidation",
+            valence=avg_v,
         )
+        for field, value in details.items():
+            _db.attr_set(t["scope"], "consolidated", f"consolidation:{field}", value, 0.7, ts)
         for f in facts:
             row = next(
                 (r for r in _db.memory_rows(t["scope"], t["key"]) if r["fact"] == f), None
@@ -135,7 +214,7 @@ def run(batch=64) -> dict:
         "promoted": 0,
         "lexicon": _db.lexicon_rebuild(),
         "bm25": lexical.bm25_rebuild(),
-        "reflection": reflect.reflect_beliefs(),
+        "reflection": advisor.reflect_beliefs(),
         "insights": advisor.daily_reflect(),
         "vector_index": vecindex.build() if embedder.enabled() else {"skipped": True},
         "trace_pruned": trace.prune(),
@@ -145,6 +224,22 @@ def run(batch=64) -> dict:
     report["fuzzy"] = forget_result["fuzzy"]
     report["forgotten"] = forget_result["forgotten"]
     report["promoted"] = policy.promote()
+    try:
+        from memory import space as space_mod
+        report["space_events"] = space_mod.prune_events(7)  # 空间事件保留期（v31）
+    except Exception as e:
+        report["space_events"] = {"error": str(e)}
+    try:
+        from memory import living as living_mod
+        report["living"] = living_mod.daily_tick()  # 生活演化（v31）
+        report["birthday"] = living_mod.birthday_celebrate()  # 生日（v31.3）
+    except Exception as e:
+        report["living"] = {"error": str(e)}
+    try:
+        from memory import sleep as sleep_mod
+        report["sleep"] = sleep_mod.night_run()  # 一夜：浅睡/深睡巩固 + REM 做梦（v31）
+    except Exception as e:
+        report["sleep"] = {"error": str(e)}
     report["sessions_closed"] = controller.close_old()
     report["entities"] = graph.build_entities()
     report["relations_tagged"] = graph.tag_relations()

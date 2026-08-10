@@ -67,7 +67,10 @@ def build(nlist=None, scope=None) -> dict:
         return {"error": "没有带向量的记忆，先启用 embedder 并回填（tools.py memory-embed）"}
     vectors = [_db.vec_loads(r["embedding"]) for r in rows]
     dim = len(vectors[0])
-    nlist = nlist or int(_cfg("nlist", 8))
+    # v31：nlist 随数据量自动缩放（√n，夹在 4~128）；配置 >0 时以配置为准
+    nlist = nlist or int(_cfg("nlist", 0))
+    if nlist <= 0:
+        nlist = max(4, min(128, int(len(vectors) ** 0.5)))
     centroids, assign = _kmeans(vectors, nlist)
     _db.vec_clear()
     _db.vec_centroids_set([(c, assign.count(i)) for i, c in enumerate(centroids)])
@@ -104,7 +107,10 @@ def search(query_vec, scopes, top_k=5, nprobe=None) -> list:
     centroids = _db.vec_centroids_get()
     if not centroids:
         return []
-    nprobe = nprobe or int(_cfg("nprobe", 2))
+    # v31：nprobe 随质心数自动缩放（√nlist）；配置 >0 时以配置为准
+    nprobe = nprobe or int(_cfg("nprobe", 0))
+    if nprobe <= 0:
+        nprobe = max(1, min(len(centroids), int(len(centroids) ** 0.5)))
     scored = sorted(
         ((_cosine(query_vec, c["embedding"]), c["id"]) for c in centroids),
         key=lambda x: -x[0],

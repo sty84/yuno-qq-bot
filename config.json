@@ -1,6 +1,13 @@
 {
-  "allowed_paths": ["/home/ubuntu/qq-bot/data"],
-  "default_allow": ["list", "status"],
+  "_comment_top": "带 _comment/_comment_ 前缀的键只是说明，代码不会读取；标注“预留/未实现”的块修改无效。",
+  "allowed_paths": [
+    "/home/ubuntu/qq-bot/data"
+  ],
+  "default_allow": [
+    "list",
+    "status"
+  ],
+  "_comment_services": "预留：服务注册表（插件能力声明，字段见 plugins/_capability.py）。当前为空 = 无扩展服务；需要时按字段填。",
   "services": [],
   "chat_bridge": {
     "enabled": true,
@@ -8,16 +15,19 @@
     "min_interval_s": 90
   },
   "health_check": {
+    "_comment": "预留：定时健康检查。代码未读取此块（services 列表里每个服务的 health_check 字段是另一回事），修改无效。",
     "enabled": false,
     "interval_s": 300
   },
   "random_events": {
-    "enabled": false,
+    "_comment": "随机动态推送（广播循环读取 enabled）：已启用，但 group_openid 为空时不会实际发送；填入目标 QQ 群 openid 后生效。",
+    "enabled": true,
     "group_openid": "",
     "min_interval_min": 60,
     "max_interval_min": 240
   },
   "notify": {
+    "_comment": "通知配置（allow_targets 被 plugins/_capability.py 读取）：列表为空 = 无接收目标，不会发送任何通知；填接收方 openid 后生效。",
     "allow_targets": []
   },
   "audit": {
@@ -25,22 +35,26 @@
     "max_entries": 5000
   },
   "app": {
+    "_comment": "预留：本地 HTTP 管理面板。代码未读取此块，修改无效。",
     "enabled": false,
     "bind": "127.0.0.1:8456",
     "token_ttl_hours": 12
   },
   "mcp": {
+    "_comment": "预留：MCP 服务器配置。代码未读取此块（tools.py mcp 是独立 CLI 子命令），修改无效。",
     "enabled": true,
     "servers": {},
     "admin_allow": []
   },
   "ws": {
+    "_comment": "预留：WebSocket 通道。代码未读取此块，修改无效。",
     "enabled": false,
     "path": "/ws/{device_id}",
     "heartbeat_timeout_s": 90,
     "device_token_env": "DEVICE_TOKEN"
   },
   "multimodal": {
+    "_comment": "预留：多模态请求。代码未读取此块，修改无效。",
     "enabled": false,
     "max_requests_per_hour": 10
   },
@@ -53,12 +67,14 @@
       "api_key_env": "EMBEDDING_API_KEY"
     },
     "core": {
-      "enabled": false,
+      "_comment": "enabled=true：启用长期记忆检索（事实召回 assemble_context、当前话题、world 快照、memory trace）。状态类模块（日程/环境/情绪/睡眠/生活/关系/生日）不受此开关影响。",
+      "enabled": true,
       "top_k": 5,
       "min_score": 0.25,
       "throttle_s": 60,
       "context_budget_chars": 2000,
       "query": {
+        "_comment": "预留：LLM 查询重写/多查询尚未实现，rewrite_llm 与 multi_query 当前无效，改这里不生效。",
         "rewrite_llm": false,
         "multi_query": true
       },
@@ -104,6 +120,106 @@
         "enabled": true,
         "retention_days": 7
       },
+      "emotion": {
+        "enabled": true,
+        "decay_minutes": 90,
+        "user_window": 5,
+        "baseline": {
+          "v": 0.15,
+          "a": -0.55,
+          "d": 0.5
+        }
+      },
+      "sleep": {
+        "enabled": true,
+        "cycles": 2,
+        "dream_remember_prob": 0.25,
+        "proactive_hours": 12,
+        "min_facts": 3,
+        "recall_limit": 5,
+        "deep_window": [
+          2,
+          5
+        ],
+        "emergency_threshold": 2,
+        "emergency_window_min": 30
+      },
+      "schedule": {
+        "enabled": true,
+        "profile": "yuno"
+      },
+      "weather": {
+        "_comment": "base_url：和风「控制台 → 设置」里的专属 API Host（形如 abc1234.def.qweatherapi.com），带不带 https:// 都行，代码会自动补。2026 年起旧公共地址逐步停用；免费开发版默认 https://devapi.qweather.com，若报 403 Invalid Host 就填专属域名。",
+        "enabled": true,
+        "provider": "qweather",
+        "api_key_env": "WEATHER_API_KEY",
+        "base_url": "",
+        "location_id": "101020100",
+        "city": "上海",
+        "ttl_s": 1800
+      },
+      "environment": {
+        "_comment": "cast = 梦限大MewType 队友名单：排练/演出/偶遇时会以具名人物出现（可被记忆识别为“认识的人”）。",
+        "enabled": true,
+        "ttl_min": 60,
+        "cast": [
+          "仲町阿拉蕾",
+          "宫永野乃花",
+          "峰月律",
+          "藤都子"
+        ]
+      },
+      "sharing": {
+        "enabled": true,
+        "threshold": 0.6,
+        "half_life_hours": 8,
+        "cooldown_hours": 3,
+        "max_per_day": 2,
+        "max_per_week": 8,
+        "residual": 0.2,
+        "check_interval_min": 15,
+        "penalty_hours": 48,
+        "penalty_step": 0.25
+      },
+      "living": {
+        "enabled": true,
+        "lazy_factor": 1.15,
+        "daily_tick": true,
+        "container_capacity": 10,
+        "home_location": "上海·普通公寓",
+        "birthday": "11-04",
+        "birth_year": 2004,
+        "birthday_hint_days": 7,
+        "birthday_threshold": 0.4
+      },
+      "space": {
+        "enabled": true,
+        "pair_times": {
+          "排练室:演出场地": 15,
+          "排练室:录音室": 10,
+          "演出场地:录音室": 20
+        },
+        "recurring_npcs": [
+          "便利店店员"
+        ],
+        "container_capacity": 10
+      },
+      "interaction": {
+        "enabled": true,
+        "relation_mult": {
+          "陌生": 0.5,
+          "初识": 0.8,
+          "熟悉": 1.0,
+          "深度伙伴": 1.2
+        },
+        "familiarity_half_life_days": 30,
+        "fatigue_decay": 0.8,
+        "user_night_hours": [
+          23,
+          7
+        ],
+        "dormant_days": 3
+      },
       "weights": {
         "lexical": 0.6,
         "vector": 0.7,
@@ -111,24 +227,33 @@
         "structured": 0.3,
         "rules": 0.5,
         "topics": 0.4,
-        "policy": 0.25,
-        "confidence": 0.2
+        "policy": 0.5,
+        "confidence": 0.3
       },
       "vector_index": {
-        "nlist": 8,
-        "nprobe": 2
+        "_comment": "nlist/nprobe=0 表示自动（按记忆量 sqrt 计算）；也可用 tools.py memory-index --tune 调优后填具体值。",
+        "nlist": 0,
+        "nprobe": 0
       },
       "policy": {
-        "decay_days": 90,
+        "decay_days": 120,
         "prune_importance": 0.15,
         "ai_experience_min_importance": 0.75,
         "confirm_lr": 2.0,
         "dispute_lr": 0.3,
         "conflict_lr": 0.5,
-        "forget_days": 120,
+        "forget_days": 180,
         "fuzzy_strength": 0.15,
         "promote_min_access": 3,
-        "promote_min_importance": 0.6
+        "promote_min_importance": 0.6,
+        "class_half_life": {
+          "core": 0,
+          "stable": 720,
+          "preference": 360,
+          "long": 240,
+          "process": 120,
+          "short": 60
+        }
       }
     }
   }

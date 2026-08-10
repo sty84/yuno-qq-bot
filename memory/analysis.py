@@ -1,7 +1,7 @@
 """当前状态分析 + 意图分析（轻量规则版，避免每条消息都调 LLM）。
 规则判不出情绪/玩笑时，可节流调用 LLM 补充（config.json → memory.core.analysis）。
 返回结构：{intent, emotion, importance, event_type, confidence, correction,
-correction_strong, playful, valence, arousal}。"""
+correction_strong, playful, valence, arousal, dominance}。"""
 
 import json
 import re
@@ -23,14 +23,20 @@ EMOTION_WORDS = {
     "低落": ["难过", "伤心", "烦", "累", "生气", "崩溃", "郁闷", "沮丧", "失望", "委屈", "心累", "emo", "破防", "想哭", "哭", "难受", "痛苦", "摆烂"],
     "焦虑": ["焦虑", "烦躁", "担心", "害怕", "紧张", "压力", "失眠", "慌", "不安", "坐立不安"],
     "兴奋": ["兴奋", "激动", "期待", "惊喜", "迫不及待", "超爽", "太棒了", "冲鸭", "终于"],
+    "愤怒": ["气死", "火大", "忍不了", "太过分", "凭什么", "岂有此理", "烦死了", "滚", "神经病", "有病吧"],
+    "惊讶": ["震惊", "离谱", "什么鬼", "不会吧", "真的假的", "天哪", "我去", "居然", "没想到"],
 }
 
 EMOTION_METRICS = {
-    "开心": {"valence": 0.8, "arousal": 0.5},
-    "低落": {"valence": -0.7, "arousal": 0.6},
-    "焦虑": {"valence": -0.5, "arousal": 0.85},
-    "兴奋": {"valence": 0.8, "arousal": 0.85},
-    "平静": {"valence": 0.0, "arousal": 0.0},
+    "开心": {"valence": 0.8, "arousal": 0.5, "dominance": 0.5},
+    "低落": {"valence": -0.7, "arousal": 0.6, "dominance": -0.5},
+    "焦虑": {"valence": -0.5, "arousal": 0.85, "dominance": -0.4},
+    "兴奋": {"valence": 0.8, "arousal": 0.85, "dominance": 0.4},
+    "愤怒": {"valence": -0.7, "arousal": 0.7, "dominance": 0.5},
+    "恐惧": {"valence": -0.8, "arousal": 0.7, "dominance": -0.7},
+    "惊讶": {"valence": 0.0, "arousal": 0.8, "dominance": 0.0},
+    "厌恶": {"valence": -0.7, "arousal": 0.3, "dominance": 0.1},
+    "平静": {"valence": 0.0, "arousal": 0.0, "dominance": 0.0},
 }
 
 PROJECT_WORDS = ["项目", "部署", "服务器", "MCP", "代码", "开发", "上线", "仓库", "学习", "规划"]
@@ -113,7 +119,7 @@ def analyze(text: str, reply: str = "") -> dict:
         importance += 0.1
     if any(w in text for w in PROJECT_WORDS):
         importance += 0.1
-    metrics = EMOTION_METRICS.get(emotion, {"valence": 0.0, "arousal": 0.0})
+    metrics = EMOTION_METRICS.get(emotion, {"valence": 0.0, "arousal": 0.0, "dominance": 0.0})
     try:
         from memory import expression as expr_mod
         ex = expr_mod.analyze(text + " " + (reply or ""))
@@ -122,6 +128,7 @@ def analyze(text: str, reply: str = "") -> dict:
     return {
         "intent": intent,
         "emotion": emotion,
+        "emotion_source": "rule",
         "importance": round(min(0.95, importance), 2),
         "event_type": classify_event_type(text),
         "confidence": round(confidence, 2),
@@ -130,6 +137,7 @@ def analyze(text: str, reply: str = "") -> dict:
         "playful": playful,
         "valence": float(metrics["valence"]),
         "arousal": float(metrics["arousal"]),
+        "dominance": float(metrics["dominance"]),
         "joke_probability": float(ex.get("joke_probability", 0.0)),
         "expressions": ex.get("expressions", []),
     }
@@ -138,7 +146,7 @@ def analyze(text: str, reply: str = "") -> dict:
 # ===== LLM 轻量情绪/玩笑补充（节流，规则判不出时兜底）=====
 LLM_EMOTION_PROMPT = (
     "你是轻量情绪识别器。分析下面对话中“用户”的情绪和语气，只输出 JSON："
-    '{"emotion":"开心|低落|焦虑|兴奋|平静","playful":true|false}。'
+    '{"emotion":"开心|低落|焦虑|兴奋|愤怒|恐惧|惊讶|厌恶|平静","playful":true|false}。'
     "playful=true 表示用户在开玩笑/玩梗/反讽。不要输出任何其他内容。"
 )
 
@@ -198,10 +206,12 @@ def enrich(an, text, reply=""):
         return an
     out = dict(an)
     out["emotion"] = emotion
+    out["emotion_source"] = "llm"
     out["playful"] = playful
-    metrics = EMOTION_METRICS.get(emotion, {"valence": 0.0, "arousal": 0.0})
+    metrics = EMOTION_METRICS.get(emotion, {"valence": 0.0, "arousal": 0.0, "dominance": 0.0})
     out["valence"] = float(metrics["valence"])
     out["arousal"] = float(metrics["arousal"])
+    out["dominance"] = float(metrics["dominance"])
     if emotion != "平静":
         out["importance"] = round(min(0.95, float(out.get("importance", 0.5)) + 0.05), 2)
     return out

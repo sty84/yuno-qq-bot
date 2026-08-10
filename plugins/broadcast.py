@@ -18,7 +18,8 @@ def _target_group():
 
 
 def loops(make_ctx):
-    return [outbox_loop(make_ctx), random_event_loop(make_ctx)]
+    return [outbox_loop(make_ctx), random_event_loop(make_ctx), appointment_loop(make_ctx),
+            sharing_loop(make_ctx), space_loop(make_ctx), inspection_loop(make_ctx)]
 
 
 async def outbox_loop(make_ctx):
@@ -68,3 +69,78 @@ async def random_event_loop(make_ctx):
                 _shared.set_mood(random.choice(_shared.MOODS))
         except Exception as e:
             print(f"随机动态失败：{e}")
+
+
+async def appointment_loop(make_ctx):
+    """约定迟到检查（v23）：约定时间 + 宽限期已过、用户没出现 → 主动催（带情绪，最多 2 次）。"""
+    while True:
+        _shared.reload_if_changed()
+        try:
+            from memory import appointment
+            sent = await asyncio.to_thread(appointment.check_and_poke)
+            for a in sent:
+                print(f"[约定] 已催 {a.get('scope')}（第 {a.get('poked')} 次）：{a.get('text', '')[:40]}")
+        except Exception as e:
+            print(f"约定检查失败：{e}")
+        cfg = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("appointment", {}) or {}
+        await asyncio.sleep(float(cfg.get("check_interval_s", 60)))
+
+
+async def sharing_loop(make_ctx):
+    """分享欲驱动（v31）：定期检查，达到阈值且符合反骚扰条件 → 主动给用户发消息。"""
+    while True:
+        _shared.reload_if_changed()
+        try:
+            from memory import sharing
+            sent = await asyncio.to_thread(sharing.drive_all)
+            for s in sent:
+                print(f"[分享] {s['scope']} 主动发消息（{s['reason']}）：{s['msg'][:40]}")
+        except Exception as e:
+            print(f"分享驱动失败：{e}")
+        cfg = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("sharing", {}) or {}
+        await asyncio.sleep(float(cfg.get("check_interval_min", 15)) * 60)
+
+
+async def inspection_loop(make_ctx):
+    """跨房间查看汇报（v31.4）：'我去看看' → 延迟一条自然汇报。"""
+    while True:
+        _shared.reload_if_changed()
+        try:
+            from memory import living
+            from memory import sleep as sleep_mod
+            due = living.due_inspections()
+            if due:
+                ctx = make_ctx()
+                for item in due:
+                    if ctx.api is None:
+                        break
+                    if sleep_mod.sleep_mode() == "deep":
+                        continue
+                    msg = await asyncio.to_thread(
+                        _shared.ask_deepseek,
+                        living.inspection_prompt(item),
+                        system=_shared.BASE_SYSTEM_PROMPT,
+                    )
+                    await _shared.send_message(ctx.api, item["target_type"], item["target"], msg)
+                    living.take_inspection(item["scope"])
+                    print(f"[检查] {item['scope']} {item['container']} 已汇报")
+        except Exception as e:
+            print(f"inspection report failed: {e}")
+        await asyncio.sleep(15)
+
+
+async def space_loop(make_ctx):
+    """空间推进（v31）：定期调 position，让人物/位置在没人问时也随时间走。"""
+    while True:
+        _shared.reload_if_changed()
+        try:
+            from memory import space
+            space.position()  # 懒演化推进：自动出发/到达，事件自然生成
+            try:
+                from memory import sensors
+                sensors.tick()  # 家庭设备日常演化
+            except Exception as e:
+                print(f"sensor tick failed: {e}")
+        except Exception as e:
+            print(f"空间推进失败：{e}")
+        await asyncio.sleep(300)

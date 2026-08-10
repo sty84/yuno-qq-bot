@@ -2,9 +2,14 @@
 
 存储格式与用户/AI 记忆完全一致（memories 表，scope='char:<名>'）：向量化 + 事件图 +
 议题化 + 可信度（AI 知识默认 0.7，用户可随时纠正）。查询提到该人物时自动注入检索。
+
+同时支持 md 档案双写（v23）：/设定 人物 后自动生成 docs/characters/<名>.md（新角色卡
+模板结构，可人工审阅/编辑），编辑后运行 tools.py character-sync 一键同步回记忆库
+（md 为权威来源：清空旧档案后重建，不堆叠）。
 """
 
 import json
+import pathlib
 import re
 from datetime import datetime
 
@@ -30,6 +35,106 @@ KIND_META = {
     "relations": ("relations", "人物关系"),
     "quotes": ("catchphrase", "口头禅"),
 }
+
+# md 档案：段落标题 → 档案键（与 persona.md 模板风格一致，方便人工阅读/编辑）
+CHAR_MD_SECTIONS = [
+    ("basic", "身份"),
+    ("personality", "性格"),
+    ("style", "说话风格"),
+    ("experience", "经历"),
+    ("relations", "人物关系"),
+    ("quotes", "口头禅"),
+]
+_MD_TO_KEY = {title: key for key, title in CHAR_MD_SECTIONS}
+_MKEY_TO_DOSSIER = {
+    "identity": "basic",
+    "personality": "personality",
+    "style": "style",
+    "experience": "experience",
+    "relations": "relations",
+    "catchphrase": "quotes",
+}
+
+
+def _char_dir() -> pathlib.Path:
+    return pathlib.Path(__file__).resolve().parent.parent / "docs" / "characters"
+
+
+def md_path(name, out_dir=None) -> pathlib.Path:
+    """人物档案 md 路径（默认 docs/characters/<名>.md；out_dir 供测试/自定义）。"""
+    base = pathlib.Path(out_dir) if out_dir else _char_dir()
+    base.mkdir(parents=True, exist_ok=True)
+    safe = re.sub(r'[\\/:*?"<>|\r\n]', "_", (name or "").strip()) or "未命名"
+    return base / f"{safe}.md"
+
+
+def _dossier_from_memory(name, limit=200) -> dict:
+    """从记忆库读回档案（按 key 映射回 md 段落）。"""
+    out = {k: [] for k, _t in CHAR_MD_SECTIONS}
+    rows = _db.memory_rows(f"char:{name}")[:limit]
+    for r in rows:
+        dk = _MKEY_TO_DOSSIER.get(r.get("key") or "")
+        if dk:
+            out[dk].append(str(r["fact"]))
+    return out
+
+
+def render_markdown(name, dossier=None) -> str:
+    """把角色档案渲染成可读 md（新角色卡模板结构；每行一条记忆，可编辑后同步回）。"""
+    dossier = dossier if dossier is not None else _dossier_from_memory(name)
+    lines = [
+        f"# {name}",
+        "",
+        f"> 角色档案 · 来源 LLM 知识 · 可信度 70% · 生成于 {datetime.now():%Y-%m-%d %H:%M}",
+        f"> 编辑本文件后运行：tools.py character-sync {name}",
+        "> 每行一条记忆：删除该行 = 移除对应记忆；新增一行 = 收录一条新记忆。",
+        "",
+    ]
+    for key, title in CHAR_MD_SECTIONS:
+        items = dossier.get(key) or []
+        lines.append(f"## {title}")
+        if items:
+            lines.extend(f"- {it}" for it in items)
+        else:
+            lines.append("- （暂无）")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_markdown(name, dossier=None, out_dir=None) -> pathlib.Path:
+    """写入/更新人物档案 md，返回文件路径。"""
+    p = md_path(name, out_dir=out_dir)
+    p.write_text(render_markdown(name, dossier), encoding="utf-8")
+    return p
+
+
+def parse_markdown(text) -> dict:
+    """解析 md 档案回 dossier：按段落标题分组，忽略引用块与（暂无）。"""
+    out = {k: [] for k, _t in CHAR_MD_SECTIONS}
+    cur = None
+    for line in (text or "").splitlines():
+        s = line.strip()
+        if s.startswith("#"):
+            m = re.match(r"^#{1,6}\s*(.+)$", s)
+            cur = _MD_TO_KEY.get(m.group(1).strip()) if m else None
+            continue
+        if not cur or s.startswith(">"):
+            continue
+        item = s[1:].strip() if s.startswith("-") else s
+        if item and item != "（暂无）":
+            out[cur].append(item[:60])
+    return out
+
+
+def _clear_scope(scope):
+    """清空某人物 scope 的全部派生数据（记忆/元数据/属性/事件/议题），供重建。"""
+    _db.memory_clear(scope)
+    for m in _db.meta_rows(scope):
+        _db.meta_delete(scope, m["key"], m["fact"])
+    _db.attr_delete(scope)
+    for ev in _db.event_rows(scope, limit=10000):
+        _db.event_delete(ev["id"])
+    _db.topic_clear(scope)
 
 
 def _norm_item(it):
@@ -82,7 +187,8 @@ def _llm_dossier(name, llm=None) -> dict:
 
 
 def build(name, llm=None) -> dict:
-    """生成并存入人物档案。返回统计；失败时返回 error 字段，不抛异常。"""
+    """生成并存入人物档案（重新生成 = 刷新：先清旧档案再重建，不堆叠）。
+    返回统计；失败时返回 error 字段，不抛异常。"""
     name = (name or "").strip()
     if not name:
         return {"error": "缺少人物名称"}
@@ -90,6 +196,7 @@ def build(name, llm=None) -> dict:
     dossier = _llm_dossier(name, llm=llm)
     if not dossier:
         return {"name": name, "scope": scope, "added": 0, "error": "档案生成失败（LLM 无返回或格式错误）"}
+    _clear_scope(scope)
     ts = datetime.now().isoformat(timespec="seconds")
     added = 0
     for kind, (mkey, category) in KIND_META.items():
@@ -103,6 +210,33 @@ def build(name, llm=None) -> dict:
         "name": name,
         "scope": scope,
         "added": added,
+        "kinds": {k: len(v) for k, v in dossier.items()},
+    }
+
+
+def sync_from_markdown(name=None, path=None) -> dict:
+    """把编辑后的 md 档案同步回记忆库（md 为权威来源：清空旧档案后重建）。
+    name 与 path 二选一：path 优先；只给 name 时读取 docs/characters/<名>.md。"""
+    p = pathlib.Path(path) if path else md_path(name or "")
+    if not p.exists():
+        return {"error": f"档案文件不存在：{p}"}
+    dossier = parse_markdown(p.read_text(encoding="utf-8"))
+    nm = name or p.stem
+    scope = f"char:{nm}"
+    _clear_scope(scope)
+    added = 0
+    for kind, (mkey, category) in KIND_META.items():
+        for content in dossier.get(kind, []):
+            memory_controller.add_fact(
+                scope, mkey, content, importance=0.6, confidence=0.7, source="character:md"
+            )
+            topic.link_fact(scope, mkey, content, category, 0.7)
+            added += 1
+    return {
+        "name": nm,
+        "scope": scope,
+        "added": added,
+        "path": str(p),
         "kinds": {k: len(v) for k, v in dossier.items()},
     }
 

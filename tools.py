@@ -5,6 +5,8 @@
   python tools.py backup                    # 每日 SQLite 备份（保留 7 份）
   python tools.py recover [--notify]        # 一键恢复 services 注册表中未运行的服务
   python tools.py sync-persona [--target]   # 人设同步到 Hermes SOUL.md
+  python tools.py character 千石由乃          # 生成人物档案入记忆 + docs/characters/<名>.md
+  python tools.py character-sync 千石由乃    # 把编辑后的 md 档案同步回记忆库（或传文件路径）
   python tools.py mcp                       # 启动 MCP Server（需 mcp SDK）
 """
 
@@ -116,6 +118,84 @@ def cmd_memory_grow(dry_run: bool) -> str:
     """工程化成长：向量/事件图/巩固/修剪/词法索引 + 可信度报告。"""
     import agent
     return json.dumps(agent.grow(dry_run=dry_run), ensure_ascii=False, indent=2)
+
+
+def cmd_memory_sleep(force: bool = False) -> str:
+    """手动跑一夜：浅睡/深睡巩固 + REM 做梦。默认按日去重，--force 可重跑。"""
+    import memory
+    return json.dumps(memory.sleep_run(force=force), ensure_ascii=False, indent=2)
+
+
+def cmd_emotion_eval(path: str = "") -> str:
+    """情绪判断评测：分类准确率 + VAD MAE（--file 评测集 JSON）。"""
+    import memory
+    if not path:
+        _capability, _db, _shared = _plugins()
+        path = str(_shared.DATA_DIR / "emotion_probes.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            probes = json.load(f)
+    except OSError as e:
+        return f"评测集不存在：{path}（{e}）"
+    return json.dumps(memory.emotion_eval(probes), ensure_ascii=False, indent=2)
+
+
+def cmd_emotion_log(days: int = 14, out: str = "") -> str:
+    """导出情绪判断日志（训练数据原料），--out 写 jsonl。"""
+    import memory
+    rows = memory.emotion_log_rows(days)
+    if not out:
+        return f"共 {len(rows)} 条情绪判断日志（近 {days} 天）。用 --out 导出 jsonl。"
+    with open(out, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    return f"已导出 {len(rows)} 条 → {out}"
+
+
+def cmd_config_validate() -> str:
+    """校验 config.json：未知段、数值字段类型、窗口类字段长度、分享参数取值。"""
+    _capability, _db, _shared = _plugins()
+    cfg = _shared.CONFIG
+    errors, warnings = [], []
+    core = (cfg.get("memory", {}) or {}).get("core", {}) or {}
+    KNOWN = {
+        "enabled", "top_k", "min_score", "throttle_s", "context_budget_chars", "query",
+        "rerank", "mmr", "cache", "telemetry", "session", "reflection", "analysis",
+        "persona", "world", "trace", "emotion", "sleep", "schedule", "weather",
+        "environment", "sharing", "living", "space", "interaction", "weights",
+        "vector_index", "policy",
+    }
+    for k in core:
+        if k.startswith("_") or k in KNOWN:
+            continue
+        warnings.append(f"未知配置段 memory.core.{k}")
+    for k in ("top_k", "min_score", "context_budget_chars", "throttle_s"):
+        if k in core:
+            try:
+                float(core[k])
+            except (TypeError, ValueError):
+                errors.append(f"memory.core.{k} 应为数字，当前 {core[k]!r}")
+    for sec, keys in (("sleep", ("deep_window",)), ("interaction", ("user_night_hours",))):
+        for k in keys:
+            v = core.get(sec, {}).get(k)
+            if v is not None and (not isinstance(v, list) or len(v) != 2):
+                errors.append(f"memory.core.{sec}.{k} 应为 [起始, 结束]，当前 {v!r}")
+    for k in ("threshold", "max_per_day", "max_per_week", "penalty_hours"):
+        v = core.get("sharing", {}).get(k)
+        if v is not None:
+            try:
+                if float(v) <= 0:
+                    errors.append(f"memory.core.sharing.{k} 应 > 0，当前 {v}")
+            except (TypeError, ValueError):
+                errors.append(f"memory.core.sharing.{k} 应为数字，当前 {v!r}")
+    if not errors and not warnings:
+        return "config-validate：全部通过"
+    lines = ["config-validate 报告"]
+    for e in errors:
+        lines.append("ERROR " + e)
+    for w in warnings:
+        lines.append("WARN " + w)
+    return "\n".join(lines)
 
 
 def cmd_memory_eval(path: str, k: int, save: bool, dataset: str = "") -> str:
@@ -517,9 +597,23 @@ def cmd_sync_persona(target: str) -> str:
 
 
 def cmd_character_build(name: str) -> str:
-    """输入人物名称，自动生成设定/经历档案并存入统一记忆（char:<名>）。"""
+    """输入人物名称，自动生成设定/经历档案并存入统一记忆（char:<名>），
+    同时写入 docs/characters/<名>.md 供人工审阅/编辑。"""
     import memory
     info = memory.character_build(name)
+    if info.get("error"):
+        return json.dumps(info, ensure_ascii=False, indent=2)
+    path = memory.character_write_md(name)  # 从记忆库渲染并写入 md（与记忆保持一致）
+    return json.dumps(
+        {**info, "md": str(path)}, ensure_ascii=False, indent=2
+    )
+
+
+def cmd_character_sync(arg: str) -> str:
+    """把编辑后的 md 档案同步回记忆库（arg 为人物名或 md 文件路径）。"""
+    import memory
+    is_path = "/" in (arg or "") or "\\" in (arg or "") or (arg or "").lower().endswith(".md")
+    info = memory.character_sync(path=arg) if is_path else memory.character_sync(name=arg)
     return json.dumps(info, ensure_ascii=False, indent=2)
 
 
@@ -632,6 +726,10 @@ def main() -> int:
     p.add_argument("--dry-run", action="store_true", help="只出统计不写库")
     p.set_defaults(func=lambda a: print(cmd_memory_grow(a.dry_run)) or 0)
 
+    p = sub.add_parser("memory-sleep", help="睡眠/梦境：浅睡+深睡巩固当天对话，REM 做梦")
+    p.add_argument("--force", action="store_true", help="强制再跑一夜（跳过当日已睡检查）")
+    p.set_defaults(func=lambda a: print(cmd_memory_sleep(a.force)) or 0)
+
     p = sub.add_parser("memory-eval", help="评测召回率/MRR（--file 或 --dataset）")
     p.add_argument("--file", default="", help="评测集 JSON 路径")
     p.add_argument("--dataset", default="", help="命名评测集（memory-eval-dataset 保存）")
@@ -673,6 +771,19 @@ def main() -> int:
     p.add_argument("--file", required=True, help="评测集 JSON 路径")
     p.add_argument("--k", type=int, default=5)
     p.set_defaults(func=lambda a: print(cmd_memory_calibrate(a.file, a.k)) or 0)
+
+    sub.add_parser("config-validate", help="校验 config.json：未知段/类型错误/取值越界").set_defaults(
+        func=lambda a: print(cmd_config_validate()) or 0
+    )
+
+    p = sub.add_parser("emotion-eval", help="情绪判断评测：分类准确率 + VAD MAE")
+    p.add_argument("--file", default="", help="评测集 JSON（默认 data/emotion_probes.json）")
+    p.set_defaults(func=lambda a: print(cmd_emotion_eval(a.file)) or 0)
+
+    p = sub.add_parser("emotion-log", help="导出情绪判断日志（训练数据原料）")
+    p.add_argument("--days", type=int, default=14)
+    p.add_argument("--out", default="", help="输出 jsonl 路径（不填只打印条数）")
+    p.set_defaults(func=lambda a: print(cmd_emotion_log(a.days, a.out)) or 0)
 
     p = sub.add_parser("memory-sessions", help="查看会话")
     p.add_argument("--scope", default="")
@@ -799,6 +910,10 @@ def main() -> int:
     p = sub.add_parser("character", help="输入人物名称，自动搜索设定/经历并存入记忆")
     p.add_argument("name", help="人物名称（如：千石由乃）")
     p.set_defaults(func=lambda a: print(cmd_character_build(a.name)) or 0)
+
+    p = sub.add_parser("character-sync", help="把编辑后的 md 档案同步回记忆库")
+    p.add_argument("arg", help="人物名或 md 文件路径")
+    p.set_defaults(func=lambda a: print(cmd_character_sync(a.arg)) or 0)
 
     sub.add_parser("mcp", help="启动 MCP Server").set_defaults(func=lambda a: cmd_mcp())
 

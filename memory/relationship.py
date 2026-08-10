@@ -65,6 +65,20 @@ def update(
     trust_delta = float(trust_delta) + float(ev.get("trust", 0.0))
     familiarity_delta = float(familiarity_delta) + float(ev.get("familiarity", 0.0))
     closeness_delta = float(closeness_delta) + float(ev.get("closeness", 0.0))
+    # 互动调节层（v31）：增量 × 场景 × 关系 × 频率（同类行为重复会适应）
+    try:
+        from memory import interaction as interaction_mod
+        mod = interaction_mod.modulate(
+            scope, f"rel:{event or 'chat'}", 1.0,
+            scene="group" if scope.startswith("group") else "c2c",
+            with_relation=False,    # 关系自身更新不乘关系系数（避免富者愈富）
+            with_fatigue=False,     # 关系是累积证据，不适用刺激适应
+        )
+        trust_delta *= mod
+        familiarity_delta *= mod
+        closeness_delta *= mod
+    except Exception:
+        pass
     trust = _clamp(float(cur.get("trust", 0.3)) + trust_delta, 0.05, 1.0)
     familiarity = _clamp(float(cur.get("familiarity", 0.0)) + familiarity_delta, 0.0, 1.0)
     closeness = _clamp(float(cur.get("closeness", 0.0)) + closeness_delta, 0.0, 1.0)
@@ -95,9 +109,15 @@ def describe(scope) -> str:
     row = _db.relationship_get(scope)
     if not row:
         return ""
+    try:
+        from memory import interaction as interaction_mod
+        fam = interaction_mod.familiarity_effective(scope)
+        stage = _stage_of(fam)
+    except Exception:
+        fam, stage = float(row.get("familiarity", 0.0)), row.get("stage", "陌生")
     return (
-        f"【与用户的关系】阶段：{row.get('stage', '陌生')} · "
-        f"熟悉度 {float(row.get('familiarity', 0)):.0%} · "
+        f"【与用户的关系】阶段：{stage} · "
+        f"熟悉度 {fam:.0%} · "
         f"信任 {float(row.get('trust', 0.3)):.0%} · "
         f"亲密 {float(row.get('closeness', 0)):.0%} · "
         f"关系分 {score_of(row)}"
@@ -123,3 +143,25 @@ def score_of(row) -> float:
 
 def rows():
     return _db.relationship_rows()
+
+
+def note_return(scope, days=30) -> bool:
+    """用户回归检测（v31.2）：距上次消息超过 days 天重新出现 → 记一次"久别重逢"。
+    返回 True 表示本次是新回归（只提醒一次）。"""
+    if not scope:
+        return False
+    now = datetime.now()
+    last = _db.kv_get("memory", f"lastmsg:{scope}", "") or ""
+    flag = _db.kv_get("memory", f"user_return:{scope}") or {}
+    if flag.get("announced"):
+        return False
+    if not last:
+        return False
+    try:
+        age_days = (now - datetime.fromisoformat(last)).total_seconds() / 86400.0
+    except Exception:
+        return False
+    if age_days > float(days):
+        _db.kv_set("memory", f"user_return:{scope}", {"announced": True, "ts": now.isoformat(timespec="seconds")})
+        return True
+    return False

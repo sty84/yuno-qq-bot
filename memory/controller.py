@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 
 from plugins import _db, _shared
-from memory import analysis, embedder, extract, graph, lexical, policy, sensitive, topic, trace, update, world
+from memory import analysis, embedder, extract, graph, lexical, policy, topic, trace, world
 
 
 def merge_facts(existing, new, cap=30):
@@ -62,14 +62,17 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
     """纠错反馈：用户否定时，降低与当前文本相关记忆的可信度。
     强纠错（“记错了/不对/不是”）用 dispute LR=0.3，轻纠错（“其实/改一下”）用 conflict LR=0.5。
     匹配收紧：只影响与纠错内容同主题的记忆（特征词 = 去掉通用词后的词/二元组），
-    向量兜底仅在特征词零命中时取相似度最高的 1 条（阈值 0.5），避免误伤同类但无关的事实。
+    向量兜底仅限强纠错（轻纠错必须词元命中，防止“我其实是外星人”这类弱信号攻击无关稳定事实）。
+    玩笑/反讽（joke_probability≥0.5）且非强纠错时不动任何记忆；稳定事实/偏好按阻力降权。
     返回受影响明细 [{fact, confidence, new_confidence, kind}]。"""
+    strong = bool((an or {}).get("correction_strong"))
+    if not strong and float((an or {}).get("joke_probability", 0.0)) >= 0.5:
+        return []  # 玩笑语境里的“其实/改一下”不构成纠错
     specific = (
         set(extract.tokenize(text or "")) - _CORRECTION_STOP
     ) | (extract.fact_keywords(text or "") - _CORRECTION_STOP_BIGRAMS)
     if not specific:
         return []
-    strong = bool((an or {}).get("correction_strong"))
     kind = "dispute" if strong else "conflict"
     candidates = set()
     for r in _db.memory_rows(scope, key):
@@ -77,7 +80,7 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
             set(extract.tokenize(r["fact"])) & specific
         ):
             candidates.add(r["fact"])
-    if not candidates and embedder.enabled():
+    if not candidates and strong and embedder.enabled():
         try:
             from memory import reasoning
 
@@ -97,6 +100,7 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
         if not row:
             continue
         cur = float(row.get("confidence", 0.7))
+        cls = policy.fact_class(scope, key, fact)
         if decision["action"] == "update":
             # 调查确认旧记忆过时 → 直接废弃（保留历史，不删除）
             _db.memory_set_status(scope, key, fact, "superseded", valid_to=now_ts)
@@ -111,8 +115,8 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
                 {"fact": fact, "confidence": cur, "new_confidence": 0.0, "kind": "update", "decision": "update"}
             )
         elif decision["action"] == "uncertain":
-            # 无法确认 → 冲突降权 + 标记 contested 待核查
-            new_conf = policy.update(cur, "conflict")
+            # 无法确认 → 冲突降权 + 标记 contested 待核查（按事实类型加阻力）
+            new_conf = policy.update(cur, "conflict", resistance=policy.resistance_for(cls))
             _db.memory_set_confidence(scope, key, fact, new_conf)
             _db.memory_set_status(scope, key, fact, "contested")
             _db.history_add(
@@ -177,6 +181,39 @@ def _supersede_old(scope, key, text, ts) -> int:
     return n
 
 
+_CJK_SURNAMES = set(
+    "王李张刘陈杨黄赵吴周徐孙马朱胡郭何林罗高郑梁谢宋唐许韩冯邓曹彭曾肖田董袁潘于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦付方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤"
+)
+
+
+def _has_proper_noun(text) -> bool:
+    """专名识别（v31）：拉丁词 ≥2 字符 / 项目实体表 / 中文人名·地名·机构名·专名。
+    修复：中文专名（小白/林晓）此前在信息增益里拿不到"含专名"加分。"""
+    t = str(text or "")
+    if re.search(r"[A-Za-z]{2,}", t):
+        return True
+    try:
+        from memory.extract import extract_entities
+        if extract_entities(t):
+            return True
+    except Exception:
+        pass
+    try:
+        import jieba.posseg as pseg
+        for w, flag in pseg.cut(t):
+            if flag in ("nr", "ns", "nt", "nz") and len(w.strip()) >= 2:
+                return True
+    except Exception:
+        pass
+    # 兜底（jieba 缺失时）：常见姓氏 + 1~2 个汉字（“林晓”“李四”），
+    # 或 小/阿/老 + 姓氏（“小白”“老王”），姓氏后跟数字/符号也能命中（“小白3岁了”）
+    surname = "".join(_CJK_SURNAMES)
+    return bool(
+        re.search(r"[" + surname + r"][\u4e00-\u9fff]{1,2}", t)
+        or re.search(r"[小阿老][" + surname + r"][\u4e00-\u9fff]{0,2}", t)
+    )
+
+
 def message_gain(text, scope, key="") -> dict:
     """信息增益评分（0~1）：新实体/新事实/数字专名/状态变化 → 高分；语气词 → 低分。
     用于替代固定时间节流：只有低信息消息才跳过提取。"""
@@ -190,7 +227,7 @@ def message_gain(text, scope, key="") -> dict:
     if re.search(r"\d", t):
         score += 0.25
         reasons.append("含数字")
-    if re.search(r"[A-Za-z]{2,}", t):
+    if _has_proper_noun(t):
         score += 0.2
         reasons.append("含专名")
     if analysis.detect_correction(t):
@@ -226,6 +263,7 @@ def _fuse_emotion(an, scope, key):
         metrics = analysis.EMOTION_METRICS["低落"]
         out["valence"] = metrics["valence"]
         out["arousal"] = metrics["arousal"]
+        out["dominance"] = metrics["dominance"]
         return out
     return an
 
@@ -240,6 +278,16 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
     try:
         from memory import tz as tz_mod
         tz_mod.remember(scope, text)  # 用户所在地时区检测（“我现在在美国”）
+    except Exception:
+        pass
+    try:
+        from memory import appointment
+        appointment.extract(scope, text)  # 约定识别（“明天下午3点见”）
+    except Exception:
+        pass
+    try:
+        from memory import mistake
+        mistake.process(scope, text)  # 错误记录/道歉（“又放鸽子了”“对不起”）
     except Exception:
         pass
     conf = float(confidence if confidence is not None else an.get("confidence", 0.7))
@@ -309,6 +357,9 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
             else []
         )
     new_facts = [f for f in new_facts if str(f).strip()]
+    # 提取污染防护（v29）：用户 scope 里不存"机器人/…"开头的 AI 自述（如"机器人只会带半个坐垫"）
+    if scope.startswith(("c2c:", "group:")):
+        new_facts = [f for f in new_facts if not str(f).startswith(("机器人", "YUNO"))]
     if an.get("correction"):
         # 纠错消息：剥离"用户指出/用户纠正"等元描述前缀，保留被纠正后的新事实
         cleaned = []
@@ -345,11 +396,11 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
     for f in new_facts:
         if f in existing_rows:
             continue
-        dup = update.find_near_dup(scope, key, f, rows=rows, threshold=0.9)
+        dup = find_near_dup(scope, key, f, rows=rows, threshold=0.9)
         if dup:
             old_conf = float(existing_rows[dup].get("confidence", 0.7))
             new_conf = max(conf, old_conf)
-            update.refresh(scope, key, dup, confidence=new_conf, source=src)
+            refresh(scope, key, dup, confidence=new_conf, source=src)
             _db.history_add(
                 scope, key, dup, "merge", reason="近似重复合并",
                 old_value=dup, new_value=f,
@@ -380,7 +431,7 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
             mclasses[f] = mclass
             arousals[f] = float(an.get("arousal", 0.0))
             valences[f] = float(an.get("valence", 0.0))
-            privacy, _labels = sensitive.detect(f)
+            privacy, _labels = detect(f)
             privacies[f] = privacy
             if privacy >= float(adj.get("privacy_threshold", 0.8)):
                 audiences[f] = "private"
@@ -413,7 +464,7 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
             # 高隐私：加密且不进索引（只有 /我的记忆 能看）
             _db.memory_delete(scope, key, f)
             _db.memory_add(
-                scope, key, sensitive.encrypt_text(f), ts,
+                scope, key, encrypt_text(f), ts,
                 confidence=conf, source=src, audience="private",
                 speaker=speaker, mclass=mclass, privacy=privacies[f],
             )
@@ -504,6 +555,154 @@ def add_fact(scope, key, fact, importance=0.5, confidence=0.8, source="mcp"):
     _db.lexicon_sync(scope, key)
     lexical.bm25_upsert(scope, key, [fact])
     return fact
+
+
+# ===== 记忆更新（v31.3 合并自 memory/update.py）=====
+def _similarity(a: str, b: str, a_vec=None, b_vec=None) -> float:
+    if a_vec and b_vec:
+        return embedder.cosine(a_vec, b_vec)
+    ta, tb = extract.fact_keywords(a), extract.fact_keywords(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / max(1, min(len(ta), len(tb)))
+
+
+def find_near_dup(scope, key, fact, rows=None, threshold=0.9):
+    """在现有记忆里找近似重复（合并用，避免事实堆叠）。返回重复 fact 或 None。"""
+    rows = rows if rows is not None else _db.memory_rows(scope, key)
+    a_vec = None
+    if embedder.enabled():
+        vecs = embedder.embed([fact])
+        a_vec = vecs[0] if vecs else None
+    best, best_score = None, 0.0
+    for r in rows:
+        if r["fact"] == fact:
+            continue
+        b_vec = _db.vec_loads(r.get("embedding"))
+        s = _similarity(fact, r["fact"], a_vec, b_vec)
+        if s > best_score:
+            best, best_score = r["fact"], s
+    return best if best_score >= threshold else None
+
+
+def refresh(scope, key, fact, confidence=None, source="refresh"):
+    """记忆更新：确认即刷新（时间戳 + 可信度只增不减）。"""
+    row = next((r for r in _db.memory_rows(scope, key) if r["fact"] == fact), None)
+    cur = float(row.get("confidence", 0.7)) if row else 0.7
+    conf = max(cur, float(confidence or cur))
+    _db.memory_add(
+        scope, key, fact,
+        datetime.now().isoformat(timespec="seconds"),
+        None, conf, source,
+        audience=(row or {}).get("audience", ""),
+        speaker=(row or {}).get("speaker", ""),
+        mclass=(row or {}).get("mclass") or "short",
+        arousal=float((row or {}).get("arousal", 0.0)),
+        valence=float((row or {}).get("valence", 0.0)),
+    )
+    return conf
+
+
+def supersede(scope, key, fact):
+    """废弃替换：把旧事实可信度压到 0.05（不再被召回），由新事实替代。"""
+    _db.memory_set_confidence(scope, key, fact, 0.05)
+
+
+def publicize(scope, key, fact):
+    """公开一条记忆：audience=public，任何场景可召回（用户明确“可以告诉他们”）。"""
+    row = next((r for r in _db.memory_rows(scope, key) if r["fact"] == fact), None)
+    if not row:
+        return None
+    _db.memory_add(
+        scope, key, fact,
+        updated_at=row.get("updated_at") or "",
+        confidence=float(row.get("confidence", 0.7)),
+        source=row.get("source", ""),
+        audience="public",
+        speaker=row.get("speaker", ""),
+        mclass=row.get("mclass") or "short",
+        arousal=float(row.get("arousal", 0.0)),
+        valence=float(row.get("valence", 0.0)),
+    )
+    return fact
+
+
+# ===== 隐私检测与可选加密（v31.3 合并自 memory/sensitive.py）=====
+SENSITIVE_PATTERNS = [
+    (r"\d{11}", "手机号"),
+    (r"\d{15,18}[Xx]?", "身份证"),
+    (r"\d{16,19}", "银行卡"),
+    (r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "邮箱"),
+    (r"密码|口令|验证码|密钥|token|Token|PIN码", "凭据"),
+    (r"住址|门牌|小区|栋|单元|楼层|几零几", "住址"),
+    (r"工资|月薪|年薪|存款|欠款|借款|理财|股票|基金|资产|负债|流水|房产", "财务"),
+    (r"微信号|QQ号|支付宝|银行账号|银行卡号|收款码", "账号"),
+    (r"护照|驾照|社保|医保|社保卡|工号|工牌", "证件"),
+    (r"病历|体检报告|过敏史|处方|住院|手术|诊断", "健康"),
+]
+
+SENSITIVE_WORDS = [
+    "家庭住址", "身份证", "手机号", "银行卡", "密码", "验证码", "工资", "生病", "住院",
+    "微信号", "支付宝", "银行账号", "社保", "医保", "病历", "体检", "过敏", "护照",
+    "驾照", "房产", "股票", "理财", "基金", "资产", "邮箱",
+]
+
+
+def detect(text) -> tuple[float, list[str]]:
+    """返回 (隐私分 0~1, 命中标签列表)。"""
+    text = str(text or "")
+    labels = []
+    for pat, label in SENSITIVE_PATTERNS:
+        if re.search(pat, text):
+            labels.append(label)
+    for w in SENSITIVE_WORDS:
+        if w in text:
+            labels.append(w)
+    if not labels:
+        return 0.0, []
+    return min(1.0, 0.6 + 0.1 * len(labels)), list(dict.fromkeys(labels))[:4]
+
+
+_crypto_key = None
+
+
+def available() -> bool:
+    global _crypto_key
+    if _crypto_key is not None:
+        return True
+    secret = os.getenv("MEMORY_KEY", "")
+    if not secret:
+        return False
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        import hashlib
+        _crypto_key = AESGCM(hashlib.sha256(secret.encode("utf-8")).digest())
+        return True
+    except Exception:
+        return False
+
+
+def encrypt_text(text) -> str:
+    if not available():
+        return str(text)
+    try:
+        nonce = os.urandom(12)
+        ct = _crypto_key.encrypt(nonce, str(text).encode("utf-8"), None)
+        return "enc:" + nonce.hex() + ":" + ct.hex()
+    except Exception:
+        return str(text)
+
+
+def decrypt_text(text) -> str:
+    if not isinstance(text, str) or not text.startswith("enc:"):
+        return text
+    if not available():
+        return text
+    try:
+        _, nonce_hex, ct_hex = text.split(":", 2)
+        return _crypto_key.decrypt(bytes.fromhex(nonce_hex), bytes.fromhex(ct_hex), None).decode("utf-8")
+    except Exception:
+        return text
 
 
 # ===== 会话结构：时间窗口 + 主题，跨天同主题续接（规则版 + 可选 LLM）=====

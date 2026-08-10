@@ -1,8 +1,44 @@
 """Agent 核心：分析 → 人格 → 记忆 → 云端 LLM → 反馈学习（成长）。"""
 
+import re
+
 from plugins import _db, _shared
 from memory import analyze, assemble_context, ingest, session
 from agent import persona
+
+# 纯时间/日期提问（整句匹配，避免"你们几点开门"这类误触发）
+_TIME_Q_RE = re.compile(
+    r"^\s*(?:现在|目前|当前|今天)?\s*(?:是)?\s*(?:几点了?|几点钟|什么时间|几号|星期几|周几|日期|几点)\s*[？?]?\s*$"
+)
+
+# 历史里任何具体钟点（"凌晨两点十四""快两点半""在想两点十四分的事"）
+# 都不能当现行时间用——但"说好晚上8点见"这类约定陈述要保留
+_TIME_REF_RE = re.compile(
+    r"(?:凌晨|早上|上午|中午|下午|傍晚|晚上|半夜)?\s*[0-9一二两三四五六七八九十]{1,3}"
+    r"\s*(?:点半?|点(?:\s*[0-9一二两三四五六七八九十]{1,2}\s*分?)?|:\d{1,2})"
+)
+_APPOINT_MARKERS = ("说好", "约", "明天", "后天", "周末", "下周", "到时候", "见面", "见", "集合", "碰头")
+
+
+def _is_stale_time_ref(content) -> bool:
+    """历史 AI 回复里的过时时间引用：含具体钟点且不是约定陈述 → 需要清洗。"""
+    if not _TIME_REF_RE.search(str(content or "")):
+        return False
+    return not any(mk in str(content or "") for mk in _APPOINT_MARKERS)
+
+
+def _clean_history(history):
+    """清洗历史里的过时时间引用，防模型复读旧时间，同时保留对话语境。
+    含具体钟点且非约定陈述的 AI 回复 → 替换为占位；
+    "说好晚上8点见"这类约定陈述保留；用户说的话永远保留。"""
+    out = []
+    for m in history or []:
+        content = str(m.get("content", ""))
+        role = m.get("role", "")
+        if role == "assistant" and _is_stale_time_ref(content):
+            content = "[此前聊过时间话题]"
+        out.append({**m, "content": content})
+    return out
 
 
 def _core_enabled() -> bool:
@@ -98,12 +134,69 @@ def ask(
     默认走 DeepSeek；learn=True 时自行 ingest（适合 Hermes/API 等无插件场景，
     QQ 前台由 plugins/memory.py 的 after_chat 学习，传 learn=False 避免重复）。"""
     meta = {"analysis": analyze(text or "")}
+    try:
+        from memory import emotion as emotion_mod
+        emotion_mod.ai_apply(meta["analysis"], text, scopes[0] if scopes else "")  # AI 情绪状态机（v31）
+        if scopes:
+            emotion_mod.user_observe(scopes[0], meta["analysis"], text)  # 用户情绪观测（v31）
+            emotion_mod.record_feedback(scopes[0], text)  # 情绪自述/纠正 → 训练标签（v31）
+        from memory import sharing as sharing_mod
+        sharing_mod.on_conversation(meta["analysis"], text, scopes[0] if scopes else "")  # 分享欲对话事件（v31）
+        if scopes:
+            sharing_mod.on_annoyed(scopes[0], text)  # 用户嫌烦反馈（v31）
+    except Exception:
+        pass
     ctx_parts = []
+    try:
+        from memory import sleep as sleep_mod
+        if scopes:
+            scope0 = scopes[0]
+            urgent = sleep_mod.is_urgent(text, meta["analysis"])
+            mode = sleep_mod.sleep_mode()
+            if scope0.startswith("group") and mode == "deep":
+                mode = "standby"  # 群里不真离线，最多待机
+            if mode == "deep":
+                sleep_mod.queue_add(scope0, text, urgent)
+                if sleep_mod.emergency_wake(scope0, urgent):
+                    ctx_parts.append(
+                        "【系统级紧急唤醒】用户在深睡时段连续发来紧急消息。"
+                        "清醒、简短地回应一句，确认没事后让她继续睡。"
+                    )
+                else:
+                    return "", meta  # 深睡档真离线：不回复，醒来统一补
+            else:
+                q = sleep_mod.queue_snapshot(scope0)
+                if q.get("items"):
+                    block = sleep_mod.queue_deliver_block(q)
+                    sleep_mod.queue_take(scope0)
+                    if block:
+                        ctx_parts.append(block)
+                if mode == "standby":
+                    ctx_parts.append(sleep_mod.standby_block(scope0, text))
+                    sleep_mod.record_interrupt(scope0)
+    except Exception:
+        pass
+    try:
+        from memory import schedule as schedule_mod
+        cur = schedule_mod.current_activity()
+        if cur and cur.get("activity") in ("rehearsal", "performance"):
+            ctx_parts.append(
+                "【忙碌中】此刻她在排练/演出，回复尽量简短，被追问才展开，别长篇大论。"
+            )
+    except Exception:
+        pass
     try:
         from memory import tz as tz_mod
         ctx_parts.append(tz_mod.now_text(scopes[0] if scopes else None))
     except Exception:
         ctx_parts.append(_now_text())
+    time_q = bool(_TIME_Q_RE.match(text or ""))
+    if time_q:
+        ctx_parts.append(
+            "【时间问题·硬性要求】用户问的是当前时间/日期。"
+            "必须严格以【时间参考】里的时间逐字为准，"
+            "禁止参考历史对话或记忆里的时间，禁止编造其他时间。"
+        )
     ctx_parts.append(_presence_text())
     scene = _scene_text(scopes)
     if scene:
@@ -111,19 +204,54 @@ def ask(
     if scopes:
         try:
             from memory import context as context_mod
+            from memory import emotion as emotion_mod
+            from memory import sleep as sleep_mod
+            from memory import schedule as schedule_mod
+            from memory import environment as env_mod
+            from memory import living as living_mod
             from memory import expression
             from memory import relationship
+            from memory import appointment
+            from memory import mistake
+            from memory import relationship as rel_mod2
+            if rel_mod2.note_return(scopes[0]):  # 久别重逢（v31.2）
+                ctx_parts.append(
+                    "【久别重逢】用户隔了挺久才回来。自然带一点'好久不见/有点生疏但还记得你'的感觉，"
+                    "别太热情也别太冷淡，别主动提具体隔了多久。"
+                )
             if s := context_mod.user_state_block(scopes[0]):
+                ctx_parts.append(s)
+            if s := emotion_mod.user_block(scopes[0]):  # 用户情绪块（v31）
+                ctx_parts.append(s)
+            if s := emotion_mod.attribution_block(scopes[0]):  # 情绪归因（v31.2）
+                ctx_parts.append(s)
+            if s := sleep_mod.context_block(scopes[0], text):  # 昨晚的梦（v31）
+                ctx_parts.append(s)
+            if s := schedule_mod.block(scopes[0]):  # 此刻状态（日程表 v31）
+                ctx_parts.append(s)
+            if s := env_mod.block(scopes[0], text):  # 周围环境（v31）
+                ctx_parts.append(s)
+            if s := living_mod.home_block(scopes[0], text):  # 生活层（v31）
+                ctx_parts.append(s)
+            if s := living_mod.birthday_hint_block(scopes[0], text):  # 生日暗示（v31.3）
+                ctx_parts.append(s)
+            if s := living_mod.birthday_reaction_block(scopes[0], text):  # 生日祝贺（v31.3）
                 ctx_parts.append(s)
             if s := relationship.describe(scopes[0]):
                 ctx_parts.append(s)
             if s := expression.describe(scopes[0]):  # 表达适配（v7）
+                ctx_parts.append(s)
+            if s := appointment.context_block(scopes[0]):  # 待履约约定（v23）
+                ctx_parts.append(s)
+            if s := mistake.context_block(scopes[0], text):  # 近期错误与原谅（v23）
                 ctx_parts.append(s)
         except Exception:
             pass
     if scopes and _core_enabled():
         s = session.touch(scopes[0], "", text)
         current = session.current(scopes[0], "")
+        if current and current.get("topic"):
+            ctx_parts.append(f"【当前话题】{current['topic']}（跨轮保持主线，别聊跑题）")
         recent_texts = [
             m.get("content", "") for m in (history or []) if m.get("role") == "user"
         ][-3:]
@@ -166,12 +294,37 @@ def ask(
     if extra_context:
         ctx_parts.append(extra_context)
     call = llm or _default_llm
-    reply = call(
-        text,
-        extra_context="\n\n".join(ctx_parts),
-        history=history or [],
-        system=system or persona.compose(query=text),
-    )
+    llm_text = text
+    extra_ctx = "\n\n".join(ctx_parts)
+    sys_prompt = system or persona.compose(query=text)
+    if time_q:
+        # 把实际时间锚进用户消息（模型最看重用户输入）+ 低温度防自由发挥
+        try:
+            from memory import tz as tz_mod
+            now_head = tz_mod.now_text(scopes[0] if scopes else None).split("。")[0]
+            llm_text = (
+                f"（当前实际时间：{now_head}。用户问的就是这个时间，"
+                "必须按它回答，不要猜、不要编造。）\n用户：" + text
+            )
+        except Exception:
+            pass
+    if time_q and llm is None:
+        reply = _shared.ask_deepseek(
+            llm_text, extra_context=extra_ctx, history=_clean_history(history or []),
+            system=sys_prompt, temperature=0.3,
+        )
+    else:
+        reply = call(
+            llm_text,
+            extra_context=extra_ctx,
+            history=_clean_history(history or []),  # 清洗时间断言而非整体砍历史（v30）
+            system=sys_prompt,
+        )
+    try:
+        from memory import living as living_mod
+        living_mod.sync_from_text(reply or "")  # 生活细节回流（v31.2）
+    except Exception:
+        pass
     meta["reply"] = reply
     if learn and learn_scope:
         meta["learn"] = ingest(learn_scope, learn_key, text, reply, facts=facts)

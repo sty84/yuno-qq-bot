@@ -83,7 +83,8 @@ def user_tz(scope=None) -> str:
 
 
 def now_text(scope=None) -> str:
-    """自然口语的时间参考（按用户时区）。"""
+    """自然口语的时间参考（按用户时区）。
+    用户问当前时间/日期时必须以本块时间为准，防止 LLM 复读历史里的旧时间。"""
     from datetime import datetime
     tz_name = user_tz(scope)
     try:
@@ -96,4 +97,6 @@ def now_text(scope=None) -> str:
     return (
         f"【时间参考】现在约是 {now:%Y年%m月%d日} 周{wd} {now:%H:%M}{note}。"
         "提到时间时自然口语带过即可，不要报完整时间戳，不要显得机械。"
+        "如果用户问现在几点/几号/星期几，必须以此时间为准，"
+        "不要参考历史对话或记忆里的时间。"
     )

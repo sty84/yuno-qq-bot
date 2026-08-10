@@ -30,8 +30,8 @@ def _weights() -> dict:
         "structured": float(w.get("structured", 0.3)),
         "rules": float(w.get("rules", 0.5)),
         "topics": float(w.get("topics", 0.4)),
-        "policy": float(w.get("policy", 0.25)),
-        "confidence": float(w.get("confidence", 0.2)),
+        "policy": float(w.get("policy", 0.5)),
+        "confidence": float(w.get("confidence", 0.3)),
     }
 
 
@@ -311,10 +311,15 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
     conf_by_fact = {r["fact"]: policy.calibrate_adjust(float(r.get("confidence", 0.7))) for r in rows}
 
     scored, policy_contrib = [], {}
+    goal_boost = float(_cfg("goal_boost", 0.08))
     for r in rows:
         fact = r["fact"]
         s = fusion.get(fact, 0.0)
-        # 时间窗口加权（v6 建议 §13）：超出查询时间窗的历史记忆降权
+        # 相关度优先（v31）：没有任何检索通道命中的记忆不参与排序，
+        # 避免“重要/最近/置信度高但无关”的记忆靠加性权重挤进上下文。
+        if s <= 0:
+            continue
+        # 时间窗口加权（v6 建议 §13）：超出查询时间窗的历史记忆降权（乘性）
         if time_hint and r.get("valid_from"):
             try:
                 age_days = (datetime.now() - datetime.fromisoformat(str(r["valid_from"])[:19])).total_seconds() / 86400
@@ -325,15 +330,19 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
         if goal_token_sets:
             ft = fact_keywords(fact)
             if any(ft & gt for gt in goal_token_sets):
-                s += 0.08  # 注意力加权：与活跃目标相关
+                s *= 1.0 + goal_boost  # 注意力加权（乘性微调，不再加性主导）
         if fact in structured_hits:
-            # 结构化命中给直接加成（属性类问题的主通道）
-            s += weights["structured"] * plan["structured"] * 0.5
+            # 结构化命中加成（属性类问题主通道；乘性，避免压过 RRF 相关度）
+            s *= 1.0 + 0.5 * plan["structured"]
         st = stats.get((r["scope"], r["key"]), {}).get(fact, {})
-        pc = weights["policy"] * float(st.get("importance", 0.5)) * float(st.get("recency", 0.5))
+        imp = float(st.get("importance", 0.5))
+        rec = float(st.get("recency", 0.5))
+        conf = conf_by_fact.get(fact, policy.calibrate_adjust(0.7))
+        pc = weights["policy"] * imp * rec
         policy_contrib[fact] = pc
-        s += pc
-        s += weights["confidence"] * conf_by_fact.get(fact, policy.calibrate_adjust(0.7))
+        # 策略/置信度作为乘性微调因子（v31）：相关度为主排序，强度只做微调
+        s *= 1.0 + pc
+        s *= 1.0 + weights["confidence"] * conf
         scored.append((s, fact, r["scope"]))
 
     max_score = max((s for s, _f, _sc in scored), default=0.0) or 1.0

@@ -260,7 +260,8 @@ def cmd_publicize(text, ctx):
 
 
 async def cmd_character(text, ctx):
-    """/设定 人物名：自动生成人物设定/经历档案并存入记忆。"""
+    """/设定 人物名：自动生成人物设定/经历档案并存入记忆，同时写入
+    docs/characters/<名>.md 供人工审阅/编辑（改完可后台运行 tools.py character-sync 同步回）。"""
     parts = (text or "").strip().split(None, 1)
     name = parts[1].strip() if len(parts) > 1 else ""
     if not name:
@@ -268,7 +269,15 @@ async def cmd_character(text, ctx):
     info = await asyncio.to_thread(memory.character_build, name)
     if info.get("error"):
         return f"《{name}》档案生成失败：{info['error']}"
-    return f"已收录《{name}》：{info['added']} 条设定/经历入库（可信度 70%，说错了可以纠正我）"
+    try:
+        path = await asyncio.to_thread(memory.character_write_md, name)
+        md_note = f" · 档案已写入 {path.name}"
+    except Exception:
+        md_note = ""
+    return (
+        f"已收录《{name}》：{info['added']} 条设定/经历入库（可信度 70%，说错了可以纠正我）"
+        f"{md_note}（改完 md 后运行 tools.py character-sync {name} 同步回）"
+    )
 
 
 def _print_dispute_details(info):
@@ -340,10 +349,15 @@ _DECISION_RE = re.compile(
 
 
 async def decision_try(ctx, text):
-    """决策顾问（v6）：触发词或进行中的咨询 → 一次一问的顾问流程。"""
+    """决策顾问（v6）：触发词或进行中的咨询 → 一次一问的顾问流程。
+    防劫持（v25）：顾问会话进行中，若新消息明显切走话题（词元不重叠且不是短回答），
+    结束咨询交回正常聊天，避免把"我养了什么宠物"当成决策回答。"""
     kind, k1, k2 = ctx.scene
     scope = f"c2c:{k1}" if kind != "group" else f"group:{k1}"
     if not _DECISION_RE.search(text or "") and not memory.consult_active(scope):
+        return None
+    if not _DECISION_RE.search(text or "") and not memory.consult_related(scope, text):
+        memory.consult_abort(scope)  # 话题已切走：结束咨询，交回正常聊天
         return None
     return await asyncio.to_thread(memory.consult_turn, scope, text)
 
@@ -405,6 +419,14 @@ async def after_chat(ctx, text, reply):
     now = time.time()
     is_correction = bool(memory.analyze(text).get("correction"))
     scope, sk = (f"group:{k1}", k2) if kind == "group" else (f"c2c:{k1}", "")
+    # 世界状态解析（v32）：LLM 提议 → 引擎裁决；异步执行，不阻塞回复
+    try:
+        from memory import living as living_mod
+        await asyncio.to_thread(living_mod.propose_world_delta, scope, text)
+    except Exception as e:
+        print(f"世界状态解析失败：{e}")
+    # 约定迟到检测（v23）：记录用户最近发言时间
+    _db.kv_set("memory", f"lastmsg:{scope}", datetime.now().isoformat(timespec="seconds"))
     # 关系引擎（v3.1 §4）：行为证据驱动（chat/share/praise/dispute）
     event = "chat"
     try:
