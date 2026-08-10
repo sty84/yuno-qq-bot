@@ -343,7 +343,8 @@ if __name__ == "__main__":
         try:
             import memory
             memory.flush_caches()
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
         print("收到退出信号，已刷新缓存。", flush=True)
         sys.exit(0)
@@ -353,3 +354,13 @@ if __name__ == "__main__":
     intents = botpy.Intents(public_messages=True)
     bot = QQBot(intents=intents, bot_log=None)
     bot.run(appid=APPID, secret=SECRET)
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("bot", e)
+    except Exception:
+        pass

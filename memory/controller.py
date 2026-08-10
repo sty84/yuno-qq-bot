@@ -87,7 +87,8 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
             hits = reasoning.retrieve(text, [scope], top_k=1, min_score=0.5)
             if hits:
                 candidates.add(hits[0][0])
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
     if not candidates:
         return []
@@ -196,14 +197,16 @@ def _has_proper_noun(text) -> bool:
         from memory.extract import extract_entities
         if extract_entities(t):
             return True
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     try:
         import jieba.posseg as pseg
         for w, flag in pseg.cut(t):
             if flag in ("nr", "ns", "nt", "nz") and len(w.strip()) >= 2:
                 return True
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     # 兜底（jieba 缺失时）：常见姓氏 + 1~2 个汉字（“林晓”“李四”），
     # 或 小/阿/老 + 姓氏（“小白”“老王”），姓氏后跟数字/符号也能命中（“小白3岁了”）
@@ -278,17 +281,20 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
     try:
         from memory import tz as tz_mod
         tz_mod.remember(scope, text)  # 用户所在地时区检测（“我现在在美国”）
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     try:
         from memory import appointment
         appointment.extract(scope, text)  # 约定识别（“明天下午3点见”）
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     try:
         from memory import mistake
         mistake.process(scope, text)  # 错误记录/道歉（“又放鸽子了”“对不起”）
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     conf = float(confidence if confidence is not None else an.get("confidence", 0.7))
     # 评分驱动行为（v11）：置信度维度低分 → 抑制过度自信
@@ -512,7 +518,8 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
             confidence=conf, source=src, reasoning=reasoning,
             modules=modules, hint=str(an.get("event_type", "")),
         )
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return {
         "facts": len(additions),
@@ -678,7 +685,8 @@ def available() -> bool:
         import hashlib
         _crypto_key = AESGCM(hashlib.sha256(secret.encode("utf-8")).digest())
         return True
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return False
 
 
@@ -689,7 +697,8 @@ def encrypt_text(text) -> str:
         nonce = os.urandom(12)
         ct = _crypto_key.encrypt(nonce, str(text).encode("utf-8"), None)
         return "enc:" + nonce.hex() + ":" + ct.hex()
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return str(text)
 
 
@@ -701,7 +710,8 @@ def decrypt_text(text) -> str:
     try:
         _, nonce_hex, ct_hex = text.split(":", 2)
         return _crypto_key.decrypt(bytes.fromhex(nonce_hex), bytes.fromhex(ct_hex), None).decode("utf-8")
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return text
 
 
@@ -733,7 +743,8 @@ def _same_session_topic(text, sess) -> bool:
                 f"以下消息是否与主题「{sess.get('topic', '')}」属于同一件事？只回答 是/否。\n消息：{text[:120]}"
             )
             return "是" in (ans or "")
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
     base = f"{sess.get('topic', '')} {sess.get('summary', '')}"
     return _session_similar(text, base) >= 0.5 or bool(sess.get("topic")) and sess["topic"] in text
@@ -759,3 +770,13 @@ def current(scope, key):
 
 def close_old(days=3) -> int:
     return _db.session_close_old(days=days)
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("controller", e)
+    except Exception:
+        pass

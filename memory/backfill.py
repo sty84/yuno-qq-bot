@@ -52,7 +52,8 @@ def _llm_one(prompt) -> str:
             temperature=0.3,
         )
         return (resp.choices[0].message.content or "").strip()[:100]
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return ""
 
 
@@ -103,7 +104,8 @@ def _llm_consolidate(topic, items) -> dict:
             if str(data.get(k, "")).strip()
         }
         return {"summary": summary, "details": details}
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return {}
 
 
@@ -232,6 +234,8 @@ def run(batch=64) -> dict:
     try:
         from memory import living as living_mod
         report["living"] = living_mod.daily_tick()  # 生活演化（v31）
+        report["living_repair"] = living_mod.repair_spatial()  # 空间一致性修复（P1-3）
+        report["item_events_pruned"] = _db.item_events_prune(90)  # 物品事件保留期（P0-1）
         report["birthday"] = living_mod.birthday_celebrate()  # 生日（v31.3）
     except Exception as e:
         report["living"] = {"error": str(e)}
@@ -243,6 +247,32 @@ def run(batch=64) -> dict:
     report["sessions_closed"] = controller.close_old()
     report["entities"] = graph.build_entities()
     report["relations_tagged"] = graph.tag_relations()
+    try:
+        from memory import procedures as procedures_mod
+        report["procedures"] = procedures_mod.stats()  # System 1 习惯统计
+    except Exception as e:
+        report["procedures"] = {"error": str(e)}
+    try:
+        import memory.stats as stats_mod
+        report["counters"] = stats_mod.counters()  # 运行计数器（A/B 与门禁数据）
+    except Exception as e:
+        report["counters"] = {"error": str(e)}
+    try:
+        from memory import mind as mind_mod
+        report["intention_pruned"] = mind_mod.prune_expired()  # 过期意图清理
+    except Exception as e:
+        report["intention_pruned"] = {"error": str(e)}
+    try:
+        from memory import space_eval as space_eval_mod
+        report["space_eval"] = space_eval_mod.run()  # 空间评测探针
+    except Exception as e:
+        report["space_eval"] = {"error": str(e)}
+    try:
+        from memory import living as living_mod2
+        if living_mod2._cfg("bootstrap_on_grow", False):
+            report["living_bootstrap"] = living_mod2.bootstrap_from_persona()
+    except Exception as e:
+        report["living_bootstrap"] = {"error": str(e)}
     from plugins import _shared as _sh
     probes_path = _sh.DATA_DIR / "probes.json"
     if probes_path.exists():
@@ -361,3 +391,13 @@ def backfill(batch=64) -> str:
         vi = r["vector_index"]
         lines.append(f"向量索引：{vi.get('n', 0)} 条 / {vi.get('nlist', 0)} 质心 / dim {vi.get('dim', 0)}")
     return "\n".join(lines)
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("backfill", e)
+    except Exception:
+        pass

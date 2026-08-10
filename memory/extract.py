@@ -86,7 +86,8 @@ def extract_facts(conversation) -> list[str]:
             return []
         data = json.loads(raw[start:end + 1])
         return [f for f in (nice_fact(_norm_extract_item(x)) for x in data) if f][:5]
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return []
 
 
@@ -118,7 +119,8 @@ def structured_extract(conversation) -> dict:
             "facts": data.get("facts") or [],
         }
         return out if any(out.values()) else {}
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return {}
 
 
@@ -335,3 +337,13 @@ def expand(query: str, recent=None) -> list[str]:
             variants.append(variants[0].replace(word, alts[0], 1))
             break
     return list(dict.fromkeys(v for v in variants if v))[:4]
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("extract", e)
+    except Exception:
+        pass

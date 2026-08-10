@@ -79,7 +79,8 @@ def record(
             affected_modules=json.dumps(modules or ["memory"], ensure_ascii=False),
             context_hint=hint,
         )
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
 
 
@@ -133,7 +134,8 @@ def _compute_adjustments() -> dict:
     for r in reviews:
         try:
             s = json.loads(r.get("scores") or "{}")
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             s = {}
         for k, v in s.items():
             if k in DIMENSIONS:
@@ -167,7 +169,8 @@ def adjustments(force=False) -> dict:
 def _review_text(rev) -> str:
     try:
         s = json.loads(rev.get("scores") or "{}")
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         s = {}
     dims = " · ".join(f"{DIMENSION_LABELS.get(k, k)}{v:g}" for k, v in s.items())
     base = f"评分 {rev.get('score'):g}/5" + (f"（{dims}）" if dims else "")
@@ -238,3 +241,13 @@ def render_markdown(rows, reviews=None) -> str:
         lines.append("")
         lines.append("---")
     return "\n".join(lines)
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("trace", e)
+    except Exception:
+        pass

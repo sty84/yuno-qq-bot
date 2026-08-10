@@ -97,7 +97,8 @@ def _known(scope, name) -> bool:
         for r in _db.memory_rows(scope):
             if name in str(r.get("fact", "")):
                 return True
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return False
 
@@ -121,13 +122,15 @@ def snapshot(scope="", now=None, force=False) -> dict:
             age = (datetime.now() - datetime.fromisoformat(data["ts"])).total_seconds()
             if age < ttl_s:
                 return old_snap
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
     transit = False
     try:
         from memory import space as space_mod
         pos = space_mod.position(now)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pos = {}
     if pos.get("state") == "在途中":
         transit = True
@@ -140,7 +143,8 @@ def snapshot(scope="", now=None, force=False) -> dict:
             from memory import schedule as schedule_mod
             cur = schedule_mod.current_activity(now)
             activity = cur.get("activity") if cur else "home_rest"
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             activity = "home_rest"
         location, scene_text = LOCATION_MAP.get(activity, ("家", "在家"))
         if pos.get("state") == "在场" and pos.get("location") not in ("", "家"):
@@ -158,7 +162,8 @@ def snapshot(scope="", now=None, force=False) -> dict:
     try:
         from memory import weather as weather_mod
         wtext = weather_mod.describe(now)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         wtext = ""
     snap = {
         "key": key,
@@ -179,7 +184,8 @@ def snapshot(scope="", now=None, force=False) -> dict:
             space_mod.emit("person_in", f"{n}来了")
         for n in old_names - new_names:
             space_mod.emit("person_out", f"{n}走了")
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     if not transit:
         _db.kv_set(
@@ -211,6 +217,11 @@ def _people_text(people) -> str:
 
 def block(scope="", text="", now=None, force=None) -> str:
     """环境注入块（内部参考）。"""
+    try:
+        import memory.stats as _st
+        _st.bump("tick:environment")
+    except Exception as e:
+        _stats_err(e)
     if force is None:
         force = any(w in (text or "") for w in ("现在", "刚刚", "刚才", "谁在", "在哪", "在哪呢", "这会"))
     snap = snapshot(scope, now, force=force)
@@ -303,7 +314,8 @@ def _fetch_api() -> dict | None:
             "text": now.get("text"),
             "wind": f"{now.get('windDir', '')}{now.get('windScale', '')}级",
         }
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return None
 
 
@@ -351,7 +363,8 @@ def fetch(now=None, force=False) -> dict:
         try:
             from memory import space as space_mod
             space_mod.emit("weather_change", f"天气变了：{w.get('text', '')}")
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
     w["light"] = _light(now, str(w.get("text", "")))
     w["ts"] = datetime.now().isoformat(timespec="seconds")
@@ -361,7 +374,8 @@ def fetch(now=None, force=False) -> dict:
         if snap_data.get("snap"):
             snap_data["snap"]["weather"] = describe(now)
             _db.kv_set("memory", "env_snapshot", snap_data)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return w
 
@@ -374,3 +388,13 @@ def describe(now=None) -> str:
     t = w.get("temperature")
     temp = f"{t}°C" if t is not None else "温度未知"
     return f"{temp}，{w.get('text', '')}，{w.get('wind', '')}，{w.get('light', '')}"
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("environment", e)
+    except Exception:
+        pass

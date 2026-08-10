@@ -127,22 +127,424 @@ def _move_log(data, action, name, n, detail=""):
     data["moves"] = moves[-100:]
 
 
+# ===== 物品位置历史 / 激活 / 找东西（P0-1 / P0-3）=====
+_SEE_LAST = {}  # 内存节流：see 事件同一物品 5 分钟内只记一次（重启丢失无影响）
+
+
+def container_room(container) -> str:
+    """容器所在房间（public，供 space 层复用）。"""
+    return _container_room(container)
+
+
+def _record_item_event(item_name, event, from_place="", to_place="", cause="", seen_by="", ts=None):
+    """追加物品事件流水（move/give/see/take/consume/lost/find…）；see 类节流。"""
+    item_name = str(item_name or "").strip()
+    if not item_name:
+        return
+    now = ts or datetime.now()
+    if event == "see":
+        last = _SEE_LAST.get(item_name)
+        if last is not None and (now - last).total_seconds() < float(_cfg("see_throttle_s", 300)):
+            return
+        _SEE_LAST[item_name] = now
+    try:
+        _db.item_event_add(
+            item_name, now.isoformat(timespec="seconds"),
+            event, from_place, to_place, cause, seen_by,
+        )
+    except Exception as e:
+        _stats_err(e)
+        pass
+
+
+def _see_items(names, cause="lookup", seen_by="ai", ts=None):
+    """批量记录'看到'：一次 kv 更新刷新激活 + 一次批量落事件（节流在内存判断）。"""
+    names = [str(n or "").strip() for n in names]
+    names = [n for n in names if n]
+    if not names:
+        return
+    now = ts or datetime.now()
+    throttle = float(_cfg("see_throttle_s", 300))
+    fresh = [n for n in names if _SEE_LAST.get(n) is None or (now - _SEE_LAST.get(n)).total_seconds() >= throttle]
+    for n in fresh:
+        _SEE_LAST[n] = now
+    if not fresh:
+        return
+    try:
+        d = _db.item_activation_rows()
+        changed = False
+        for n in fresh:
+            a = d.get(n) or {"seen_ts": "", "count": 0}
+            if a.get("seen_ts"):
+                try:
+                    if (now - datetime.fromisoformat(str(a["seen_ts"]))).total_seconds() < throttle:
+                        continue
+                except Exception as e:
+                    _stats_err(e)
+                    pass
+            a["seen_ts"] = now.isoformat(timespec="seconds")
+            a["count"] = int(a.get("count", 0)) + 1
+            d[n] = a
+            changed = True
+        if changed:
+            _db.item_activation_set(d)
+    except Exception as e:
+        _stats_err(e)
+        pass
+    try:
+        data = _load()
+        rows = []
+        for n in fresh:
+            it = next((i for i in data["items"] if str(i.get("name", "")) == n), {})
+            tp = _item_where(it)
+            if not tp:
+                continue
+            rows.append({
+                "item": n, "ts": now.isoformat(timespec="seconds"),
+                "event": "see", "from_place": "", "to_place": tp,
+                "cause": cause, "seen_by": seen_by,
+            })
+        if rows:
+            _db.item_event_add_many(rows)
+    except Exception as e:
+        _stats_err(e)
+        pass
+
+
+def _item_where(item) -> str:
+    return f"{item.get('room', '')}/{item.get('container', '')}"
+
+
+def touch_item(name, ts=None) -> None:
+    """刷新物品激活（最近看到/移动）：节流，避免每次注入都写。"""
+    name = str(name or "").strip()
+    if not name:
+        return
+    now = ts or datetime.now()
+    d = _db.item_activation_rows()
+    a = d.get(name) or {"seen_ts": "", "count": 0}
+    try:
+        if a.get("seen_ts") and (now - datetime.fromisoformat(str(a["seen_ts"]))).total_seconds() < float(_cfg("see_throttle_s", 300)):
+            return
+    except Exception as e:
+        _stats_err(e)
+        pass
+    a["seen_ts"] = now.isoformat(timespec="seconds")
+    a["count"] = int(a.get("count", 0)) + 1
+    d[name] = a
+    _db.item_activation_set(d)
+
+
+def activation(name, now=None) -> float:
+    """物品激活值 0~1：频率(0.35) + 最近可见指数衰减(0.4) − 难度/丢失惩罚(≤0.4)。
+    高→直接答；中→模糊答；低→触发搜索。"""
+    name = str(name or "").strip()
+    now = now or datetime.now()
+    it = next((i for i in all_items() if str(i.get("name", "")) == name), None)
+    if not it:
+        return 0.0
+    d = _db.item_activation_rows()
+    a = d.get(name) or {}
+    count = int(a.get("count", 0))
+    days = 9999.0
+    try:
+        days = (now - datetime.fromisoformat(str(a.get("seen_ts", "")))).total_seconds() / 86400.0
+    except Exception as e:
+        _stats_err(e)
+        pass
+    half = float(_cfg("activation_half_life_days", 30))
+    freq = min(1.0, count / 5.0) * 0.35
+    recency = 0.4 * (0.5 ** (max(0.0, days) / max(1.0, half)))
+    penalty = 0.25 if str(it.get("difficulty", "")) == "深" else 0.0
+    if str(it.get("status", "")) == "找不到":
+        penalty += 0.15
+    return round(max(0.0, min(1.0, 0.2 + freq + recency - penalty)), 3)
+
+
+def item_history(name, limit=100) -> list:
+    """物品事件流水（新→旧）。"""
+    return _db.item_event_rows(str(name or "").strip(), limit=int(limit))
+
+
+def position_at(name, ts=None) -> dict:
+    """某时刻物品在哪（事件溯源投影）；无历史时回退当前库存状态。"""
+    name = str(name or "").strip()
+    if not name:
+        return {"known": False, "reason": "没有物品名"}
+    now = ts or datetime.now()
+    if isinstance(now, datetime):
+        now = now.isoformat(timespec="seconds")
+    r = _db.item_position_at(name, now)
+    if r:
+        return r
+    it = next((i for i in all_items() if str(i.get("name", "")) == name), None)
+    if not it:
+        return {"known": False, "reason": "没有这个物品"}
+    return {
+        "item": name, "room": it.get("room", ""), "container": it.get("container", ""),
+        "known": it.get("status") != "找不到",
+    }
+
+
+_SEARCH_WORDS = ("在哪", "哪里", "哪儿", "放哪", "找找", "找不到", "找不到了", "找一下", "帮我找", "帮我找找")
+
+
+def _mentioned_item(text) -> str:
+    t = str(text or "")
+    for it in all_items():
+        n = str(it.get("name", ""))
+        if n and n in t:
+            return n
+    return ""
+
+
+def _start_item_search(scope, name, now=None) -> str:
+    """开始搜索：候选容器 = 最后已知位置优先 + 其余容器（最多 search_max_steps 个）。"""
+    now = now or datetime.now()
+    try:
+        from memory import space as space_mod
+        p = space_mod.position(now)
+        if p.get("location") != "家" or p.get("state") == "在途中":
+            return f"【找东西】{name}现在不在家，等回去再找。"
+    except Exception as e:
+        _stats_err(e)
+        pass
+    it = next((i for i in all_items() if str(i.get("name", "")) == name), None)
+    if not it:
+        return ""
+    last = _db.item_position_at(name, now.isoformat(timespec="seconds"))
+    containers = []
+    for r, lv in home_layout().items():
+        for c in (lv.get("furniture") or []):
+            containers.append(c)
+    seen, ordered = set(), []
+    for c in ([last.get("container", "")] if last else []) + containers:
+        if c and c not in seen:
+            seen.add(c)
+            ordered.append(c)
+    if not ordered:
+        return f"【找东西·搜索】{name}不知道塞哪了，家里好像也没有能放它的地方。"
+    queue = ordered[: int(_cfg("search_max_steps", 5))]
+    _db.item_search_set(str(scope), {
+        "name": name, "queue": queue, "step": 0,
+        "started_at": now.isoformat(timespec="seconds"),
+    })
+    schedule_inspection(scope, queue[0], now, kind="search")
+    return (
+        f"【找东西·搜索】{name}不知道塞哪了（印象很模糊）。"
+        f"先回一句'我去找找'，系统会从{queue[0]}开始逐处查看，别现在就下结论说在哪。"
+    )
+
+
+def where_is_block(scope, text, now=None) -> str:
+    """'X 在哪'分级：激活高直接答 / 中模糊答 / 低或丢失触发搜索（P0-3）。"""
+    t = str(text or "")
+    if not any(w in t for w in _SEARCH_WORDS):
+        return ""
+    name = _mentioned_item(t)
+    if not name:
+        return ""
+    # 搜索进行中：不重启，给进度并继续（重问不从头来）
+    try:
+        d = _db.item_search_rows()
+        st = d.get(str(scope))
+        if st and st.get("name") == name:
+            step = int(st.get("step", 0))
+            queue = st.get("queue") or []
+            if step < len(queue):
+                schedule_inspection(scope, queue[step], now, kind="search")
+            return (
+                f"【找东西·进行中】{name}还在找（已翻到第{step}处）。"
+                f"用户问进度就自然说'还在找/刚翻到哪'；新一轮提问就说'我去看看'，别重启搜索。"
+            )
+    except Exception as e:
+        _stats_err(e)
+        pass
+    it = next((i for i in all_items() if str(i.get("name", "")) == name), None)
+    if not it:
+        return ""
+    now = now or datetime.now()
+    a = activation(name, now)
+    if str(it.get("status", "")) == "找不到" or a < float(_cfg("search_activation_low", 0.35)):
+        return _start_item_search(scope, name, now)
+    if a < float(_cfg("search_activation_mid", 0.6)):
+        room = str(it.get("room", ""))
+        return (
+            f"【找东西·模糊】{name}好像在{room}附近（记不太清具体位置）。"
+            f"被问起时可以说'好像在那块/记不清了'，也可以说'我帮你找找'，别把话说死。"
+        )
+    touch_item(name, now)
+    return (
+        f"【找东西·直接】{name}在{it.get('room', '')}的{it.get('container', '')}"
+        f"（{it.get('position', '')}）。被问起时直接回答即可。"
+    )
+
+
+_CANCEL_WORDS = ("别找了", "不找了", "算了", "不用找", "别找", "放弃吧")
+
+
+def cancel_search(scope) -> bool:
+    """用户说别找了 → 取消进行中的搜索。"""
+    d = _db.item_search_rows()
+    if str(scope) in d:
+        _db.item_search_delete(str(scope))
+        return True
+    return False
+
+
+def search_progress(scope) -> dict:
+    """搜索推进（broadcast 汇报循环调用）：当前容器找到→成功；否则下一处或失败。
+    返回 {done, found, name, container, prompt}。"""
+    d = _db.item_search_rows()
+    st = d.get(str(scope))
+    if not st:
+        return {"done": True, "found": False, "name": "", "container": "", "prompt": ""}
+    # 过期放弃（P2 优化）：搜索超过 TTL 未推进即作废
+    try:
+        started = datetime.fromisoformat(str(st.get("started_at", "")))
+        if datetime.now() - started > timedelta(minutes=float(_cfg("search_ttl_min", 30))):
+            _db.item_search_delete(str(scope))
+            return {"done": True, "found": False, "name": st.get("name", ""), "container": "",
+                    "prompt": ""}
+    except Exception as e:
+        _stats_err(e)
+        pass
+    # 话题转移暂停（不突兀）：搜索开始后用户发了不相关消息 → 停住，等用户再提起
+    try:
+        last = _db.kv_get("memory", f"last_user_msg:{str(scope)}")
+        if last and last.get("text"):
+            last_ts = None
+            try:
+                last_ts = datetime.fromisoformat(str(last.get("ts", "")))
+            except Exception as e:
+                _stats_err(e)
+                pass
+            if last_ts:
+                started = datetime.fromisoformat(str(st.get("started_at", "")))
+                item_name = str(st.get("name", ""))
+                lt = str(last.get("text", ""))
+                if last_ts > started and item_name not in lt and not any(w in lt for w in _SEARCH_WORDS):
+                    return {"done": False, "paused": True, "found": False,
+                            "name": item_name, "container": "", "prompt": ""}
+    except Exception as e:
+        _stats_err(e)
+        pass
+    name = st.get("name", "")
+    queue = st.get("queue") or []
+    step = int(st.get("step", 0))
+
+    def _finish():
+        _db.item_search_delete(str(scope))
+
+    if step >= len(queue):
+        _finish()
+        return {
+            "done": True, "found": False, "name": name, "container": "",
+            "prompt": f"你是千石由乃。你翻遍了家里几处都没找到{name}。用她的口吻回一句（15~35字），像'……没找到，不知道塞哪了'，别说'系统'。",
+        }
+    container = queue[step]
+    hit = next((i for i in lookup(container) if str(i.get("name", "")) == name), None)
+    if hit and hit.get("status") != "找不到":
+        _finish()
+        try:
+            import memory.stats as stats_mod
+            stats_mod.bump("search_found")
+        except Exception as e:
+            _stats_err(e)
+            pass
+        touch_item(name)
+        _record_item_event(name, "find", to_place=_item_where(hit), cause="search", seen_by="ai")
+        data = _load()
+        for i in data["items"]:
+            if str(i.get("name", "")) == name:
+                i["status"] = "有"
+                i["room"] = hit.get("room", i.get("room", ""))
+                i["container"] = hit.get("container", i.get("container", ""))
+        _save(data)
+        try:
+            from memory import space as space_mod
+            space_mod.emit("item_find", f"在{container}里找到了{name}", location=hit.get("room", ""))
+        except Exception as e:
+            _stats_err(e)
+            pass
+        return {
+            "done": True, "found": True, "name": name, "container": container,
+            "prompt": f"你是千石由乃。你在{container}里找到了{name}（{hit.get('position','')}）。用她的口吻给用户发一条简短消息（15~35字）汇报找到了，别加原文没有的单位，别提系统。",
+        }
+    nxt_step = step + 1
+    st["step"] = nxt_step
+    _db.item_search_set(str(scope), st)
+    _record_item_event(
+        name, "search_miss", to_place=f"{container_room(container)}/{container}",
+        cause="search", seen_by="ai",
+    )
+    if nxt_step >= len(queue):
+        _finish()
+        try:
+            import memory.stats as stats_mod
+            stats_mod.bump("search_fail")
+        except Exception as e:
+            _stats_err(e)
+            pass
+        # 彻底失败：按概率把物品标记为"找不到"（下次是"真的丢了"，而不是同一场搜索重来）
+        try:
+            if random.random() < float(_cfg("search_fail_mark_prob", 0.6)):
+                data = _load()
+                for i in data["items"]:
+                    if str(i.get("name", "")) == name:
+                        i["status"] = "找不到"
+                        i["position"] = "不知道塞哪了"
+                _save(data)
+                _record_item_event(name, "lost", to_place="", cause="search_fail", seen_by="ai")
+                from memory import space as space_mod2
+                space_mod2.emit("item_lost", f"{name}找不到了")
+        except Exception as e:
+            _stats_err(e)
+            pass
+        return {
+            "done": True, "found": False, "name": name, "container": container,
+            "prompt": f"你是千石由乃。你翻遍家里几处都没找到{name}，这次是真的找不到了。用她的口吻回一句（15~35字），像'……找不到了，不知道塞哪去了'，别硬编一个位置，别提系统。",
+        }
+    nxt = queue[nxt_step]
+    schedule_inspection(scope, nxt, kind="search")
+    try:
+        import memory.stats as stats_mod
+        stats_mod.bump("search_step")
+    except Exception as e:
+        _stats_err(e)
+        pass
+    if _cfg("search_quiet", True):
+        # 静默推进：中间步骤不播报，只报结果（不突兀）
+        return {"done": False, "quiet": True, "found": False,
+                "name": name, "container": container, "prompt": ""}
+    return {
+        "done": False, "found": False, "name": name, "container": container,
+        "prompt": f"你是千石由乃。你在{container}里没找到{name}，准备再去{nxt}看看。用她的口吻回一句（15~35字），像'这没有，去{nxt}看看'，别提系统。",
+    }
+
+
 def find(name) -> list:
     """按名字找物品（模糊）。"""
     t = str(name or "").strip()
     data = _load()
     if not t:
         return []
-    return [i for i in data["items"] if t in str(i.get("name", ""))]
+    hits = [i for i in data["items"] if t in str(i.get("name", ""))]
+    if hits:
+        _see_items([str(it.get("name", "")) for it in hits], cause="lookup")
+    return hits
 
 
-def lookup(container) -> list:
-    """展开容器：返回该容器里的所有物品。"""
+def lookup(container, data=None) -> list:
+    """展开容器：返回该容器里的所有物品（data 可复用一次 _load，避免重复 kv 读）。"""
     t = str(container or "").strip()
-    data = _load()
+    data = data if data is not None else _load()
     if not t:
         return []
-    return [i for i in data["items"] if str(i.get("container", "")) == t]
+    hits = [i for i in data["items"] if str(i.get("container", "")) == t]
+    if hits:
+        _see_items([str(it.get("name", "")) for it in hits], cause="lookup")
+    return hits
 
 
 def all_items() -> list:
@@ -167,6 +569,12 @@ def take(name, n=1, scope=""):
     _move_log(data, "take", name, n, "AI 拿走了" + ("最后一个" if was_last else f"{n}个"))
     _save(data)
     try:
+        _record_item_event(name, "take", to_place=_item_where(hit), cause="take", seen_by="ai")
+        touch_item(name)
+    except Exception as e:
+        _stats_err(e)
+        pass
+    try:
         if was_last:
             _db.memory_add(
                 "ai", "experience", f"我把最后一个{name}用掉了",
@@ -177,7 +585,8 @@ def take(name, n=1, scope=""):
             policy_mod.touch("ai", "experience", f"我把最后一个{name}用掉了", importance=0.5)
             from memory import sharing as sharing_mod
             sharing_mod.add_delta(0.15, f"{name}吃完了，想补货")
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return {"ok": True, "name": name, "qty": qty, "was_last": was_last}
 
@@ -193,6 +602,12 @@ def consume(name, n=1, scope=""):
     hit["status"] = "没有了" if qty <= 0 else "有"
     _move_log(data, "consume", name, int(n), "被消耗（用掉了）")
     _save(data)
+    try:
+        _record_item_event(name, "consume", to_place=_item_where(hit), cause="consume", seen_by="user")
+        touch_item(name)
+    except Exception as e:
+        _stats_err(e)
+        pass
     return {"ok": True, "name": name, "qty": qty}
 
 
@@ -222,6 +637,12 @@ def give(name, n=1, scope="", source="user_gift"):
     _move_log(data, "give", name, n, f"用户送来了{n}个{name}")
     _save(data)
     try:
+        _record_item_event(name, "give", to_place=_item_where(hit), cause=source, seen_by="user")
+        touch_item(name)
+    except Exception as e:
+        _stats_err(e)
+        pass
+    try:
         audience = "private" if source == "user_gift" else "public"
         _db.memory_add(
             "ai", "experience", f"用户送了我{name}",
@@ -232,7 +653,8 @@ def give(name, n=1, scope="", source="user_gift"):
         policy_mod.touch("ai", "experience", f"用户送了我{name}", importance=0.6)
         from memory import sharing as sharing_mod
         sharing_mod.add_delta(0.3, "收到用户的礼物")
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return {"ok": True, "name": name, "qty": hit["qty"]}
 
@@ -268,18 +690,22 @@ def propose_world_delta(scope, text, now=None):
     try:
         from plugins import _shared
         reply = _shared.ask_deepseek(prompt, temperature=0)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return {"changed": 0, "reason": "llm_fail"}
     try:
         m = re.search(r"\{.*\}", reply, re.S)
         delta = json.loads(m.group(0))
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return {"changed": 0, "reason": "parse_fail"}
     return _apply_delta(scope, delta)
 
 
 def _apply_delta(scope, delta):
     changed = 0
+    rejected = 0
+    reasons = []
     for op in (delta.get("ops") or []):
         t = str(op.get("type", ""))
         try:
@@ -298,9 +724,13 @@ def _apply_delta(scope, delta):
                 continue
             if r.get("ok"):
                 changed += 1
-        except Exception:
+            elif r.get("reason"):
+                rejected += 1
+                reasons.append(f"{t}({op.get('item', '')}): {r['reason']}")
+        except Exception as e:
+            _stats_err(e)
             continue
-    return {"changed": changed}
+    return {"changed": changed, "rejected": rejected, "reasons": reasons[:5]}
 
 
 def sync_from_text(text) -> dict:
@@ -330,24 +760,176 @@ def sync_from_text(text) -> dict:
     return {"changed": changed}
 
 
+def _valid_target(room, container) -> bool:
+    """目标位置必须真实存在：room ∈ 布局，container ∈ room 的家具。"""
+    layout = home_layout()
+    if room not in layout:
+        return False
+    return str(container) in (layout.get(room, {}).get("furniture") or [])
+
+
+def repair_spatial() -> dict:
+    """空间一致性修复（P1-3）：物品 room 必须匹配容器所在房间；容器必须存在。"""
+    data = _load()
+    fixed = []
+    seen = {}
+    for it in data["items"]:
+        name = str(it.get("name", ""))
+        # 数量与状态一致性
+        try:
+            qty = int(it.get("qty", 0) or 0)
+        except (TypeError, ValueError):
+            qty = 0
+        if qty <= 0 and it.get("status") != "没有了":
+            it["status"] = "没有了"
+            fixed.append({"name": name, "issue": "数量为 0 但状态为有，改为没有了"})
+        elif qty > 0 and it.get("status") == "没有了":
+            it["status"] = "有"
+            fixed.append({"name": name, "issue": "数量 >0 但状态为没有了，改回有"})
+        # 同名多容器：保留第一个，其余标记找不到
+        seen[name] = seen.get(name, 0) + 1
+        if seen[name] > 1:
+            it["status"] = "找不到"
+            fixed.append({"name": name, "issue": "同名物品出现在多个容器，保留第一处，其余标记找不到"})
+            continue
+        croom = _container_room(str(it.get("container", "")))
+        if not croom:
+            if it.get("status") != "找不到":
+                it["status"] = "找不到"
+                it["position"] = "不知道塞哪了"
+                fixed.append({"name": name, "issue": "容器不存在，标记为找不到"})
+            continue
+        if str(it.get("room", "")) != croom:
+            it["room"] = croom
+            fixed.append({"name": name, "issue": f"房间不符，修正为{croom}"})
+    # 容器超容量：只记录不搬动（等人工整理）
+    cap = int(_cfg("container_capacity", 10))
+    per_container = {}
+    for it in data["items"]:
+        if it.get("status") == "没有了":
+            continue
+        c = str(it.get("container", ""))
+        per_container[c] = per_container.get(c, 0) + 1
+    for c, n in per_container.items():
+        if n > cap:
+            fixed.append({"name": "", "issue": f"容器{c}超出容量（{n} > {cap}），待人工整理"})
+    _save(data)
+    return {"fixed": len(fixed), "details": fixed[:10]}
+
+
+_BOOTSTRAP_PROMPT = (
+    "你是千石由乃家里的场景设计师。根据她的身份/性格/动机/偏好（见人设），"
+    "补全她的家应该有什么物品。只输出 JSON：{\"items\":[{\"name\":\"物品名\",\"category\":\"类别\","
+    "\"qty\":1,\"room\":\"房间\",\"container\":\"容器\",\"position\":\"位置\",\"difficulty\":\"浅|深\","
+    "\"origin\":\"为什么有（引用人设依据）\"}]}。要求：房间必须是 客厅/工作室/卧室/厨房 之一，"
+    "容器必须是该房间家具之一；最多输出 {max_items} 件；不要输出已有的物品。"
+)
+
+
+def bootstrap_from_persona(scope="", now=None) -> dict:
+    """人设→场景生成（P1-2）：LLM 提案 → 合理性校验 → 与现有 diff → 只新增 + 写 origin。"""
+    if not _cfg("bootstrap", True):
+        return {"changed": 0, "reason": "disabled"}
+    try:
+        from plugins import _shared
+        import pathlib
+        persona = ""
+        p = pathlib.Path(__file__).resolve().parent.parent / "persona.md"
+        if p.exists():
+            persona = str(p.read_text(encoding="utf-8"))[:800]
+        extra = []
+        try:
+            rows = _db.memory_rows("ai")
+            rows.sort(key=lambda r: float(r.get("confidence", 0.0)), reverse=True)
+            for r in rows[:8]:
+                if r.get("status") == "superseded":
+                    continue
+                extra.append(str(r.get("fact", ""))[:60])
+        except Exception as e:
+            _stats_err(e)
+            pass
+        try:
+            for r in _db.attr_rows("ai"):
+                v = str(r.get("value", ""))[:60]
+                if v and v not in extra:
+                    extra.append(v)
+        except Exception as e:
+            _stats_err(e)
+            pass
+        max_items = int(_cfg("bootstrap_max_items", 8))
+        prompt = _BOOTSTRAP_PROMPT.replace("{max_items}", str(max_items)) + "\n人设摘要：\n" + persona
+        if extra:
+            prompt += "\n她的经历/偏好（记忆库）：\n" + "\n".join(extra[:6])
+        reply = _shared.ask_deepseek(prompt, temperature=0.7)
+        m = re.search(r"\{.*\}", reply, re.S)
+        if not m:
+            return {"changed": 0, "reason": "parse_fail"}
+        delta = json.loads(m.group(0))
+    except Exception as e:
+        return {"changed": 0, "reason": f"llm_fail: {e}"}
+    data = _load()
+    existing = {str(i.get("name", "")) for i in data["items"]}
+    layout = home_layout()
+    cap = int(_cfg("container_capacity", 10))
+    added = []
+    for it in (delta.get("items") or [])[:max_items]:
+        name = str(it.get("name", "")).strip()
+        room = str(it.get("room", "")).strip()
+        container = str(it.get("container", "")).strip()
+        if not name or name in existing or name in [a["name"] for a in added]:
+            continue
+        if room not in layout or container not in (layout.get(room, {}).get("furniture") or []):
+            continue
+        occupants = sum(1 for i in data["items"] if i.get("container") == container)
+        if occupants + 1 > cap:
+            continue
+        item = {
+            "name": name[:30],
+            "category": str(it.get("category", "杂物"))[:20] or "杂物",
+            "qty": max(1, int(it.get("qty", 1) or 1)),
+            "room": room,
+            "container": container,
+            "position": str(it.get("position", "放着"))[:30] or "放着",
+            "difficulty": "深" if str(it.get("difficulty", "浅")) == "深" else "浅",
+            "status": "有",
+            "source": "bootstrap",
+            "origin": str(it.get("origin", ""))[:80],
+        }
+        data["items"].append(item)
+        added.append(item)
+        existing.add(name)
+    _save(data)
+    return {
+        "changed": len(added),
+        "items": [a["name"] for a in added],
+        "origins": {a["name"]: a["origin"] for a in added},
+    }
+
+
 def move_item(name, room, container):
-    """把物品移到别的容器。"""
+    """把物品移到别的容器（目标必须真实存在，P1-3）。"""
     data = _load()
     hit = next((i for i in data["items"] if str(i.get("name", "")) == name), None)
     if not hit:
         return {"ok": False, "reason": f"没有{name}"}
+    if not _valid_target(room, container):
+        return {"ok": False, "reason": f"家里没有{room}的{container}"}
     cap = int(_cfg("container_capacity", 10))
     occupants = [i for i in data["items"] if i.get("container") == container and i.get("name") != name]
     if len(occupants) + 1 > cap:
         return {"ok": False, "reason": f"{container}满了，放不下"}
+    from_place = _item_where(hit)
     hit["room"], hit["container"] = room, container
     hit["position"] = "不知道塞哪了"
     _move_log(data, "move", name, 0, f"移到了{room}的{container}")
     _save(data)
     try:
+        _record_item_event(name, "move", from_place, _item_where(hit), cause="move", seen_by="ai")
+        touch_item(name)
         from memory import space as space_mod
-        space_mod.emit("item_move", f"把{name}放到了{room}的{container}")
-    except Exception:
+        space_mod.emit("item_move", f"把{name}放到了{room}的{container}", location=room)
+    except Exception as e:
+        _stats_err(e)
         pass
     return {"ok": True, "name": name, "room": room, "container": container}
 
@@ -361,6 +943,11 @@ def today_events() -> list:
 
 def daily_tick() -> dict:
     """每日演化：小概率物品被消耗/过期，让世界会自己变化。"""
+    try:
+        import memory.stats as _st
+        _st.bump("tick:living_daily")
+    except Exception as e:
+        _stats_err(e)
     if not _cfg("daily_tick", True):
         return {"changed": False}
     data = _load()
@@ -373,9 +960,11 @@ def daily_tick() -> dict:
         _move_log(data, "expire", it["name"], 1, "日常消耗（过期/用掉了）")
         _save(data)
         try:
+            _record_item_event(it["name"], "expire", to_place=_item_where(it), cause="daily_tick", seen_by="sim")
             from memory import space as space_mod
             space_mod.emit("item_expire", f"{it['name']}被用掉了")
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
         return {"changed": True, "kind": "expire", "name": it["name"], "qty": qty}
     # 小概率错放/丢失：物品被挪到别的容器，且"找不到"
@@ -391,9 +980,11 @@ def daily_tick() -> dict:
             _move_log(data, "lost", it["name"], 0, "不知道被塞到哪了（错放/丢失）")
             _save(data)
             try:
+                _record_item_event(it["name"], "lost", from_place=_item_where(it), cause="daily_tick", seen_by="sim")
                 from memory import space as space_mod
                 space_mod.emit("item_lost", f"{it['name']}找不到了")
-            except Exception:
+            except Exception as e:
+                _stats_err(e)
                 pass
             return {"changed": True, "kind": "lost", "name": it["name"]}
     return {"changed": False}
@@ -405,7 +996,8 @@ def random_flavor() -> str:
         items = all_items()
         if items:
             return random.choice(items).get("name", "")
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return ""
 
@@ -435,7 +1027,8 @@ def travel_time(place, mode=None, now=None) -> dict:
                 mult *= {"walk": mw, "bike": mw, "transit": mt, "drive": md}.get(mode, mt)
                 factors.append(f"天气({wtext})")
                 break
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
 
     if mode in ("walk", "bike"):
@@ -448,7 +1041,8 @@ def travel_time(place, mode=None, now=None) -> dict:
             if float(st.get("a", 0.0)) < 0.1:
                 mult *= 1.2
                 factors.append("今天没什么力气")
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
 
     rng = random.Random(
@@ -467,12 +1061,14 @@ def depart_at(target, mode=None, now=None) -> dict:
     if isinstance(target, str):
         try:
             target = datetime.fromisoformat(target)
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             return {"ok": False, "reason": "目标时间格式不对"}
     try:
         r = travel_time(target_place_of(target), mode, now)
         minutes = int(r.get("minutes", 30))
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         minutes = 30
     return {"ok": True, "depart_at": (target - timedelta(minutes=minutes)).isoformat(timespec="seconds"),
             "minutes": minutes}
@@ -484,7 +1080,8 @@ def target_place_of(dt) -> str:
         from memory import schedule as schedule_mod
         cur = schedule_mod.current_activity(dt)
         act = cur.get("activity") if cur else ""
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         act = ""
     return {"performance": "演出场地", "rehearsal": "排练室", "work": "公司",
             "shopping": "便利店", "exercise": "公园", "friend": "公园",
@@ -496,16 +1093,30 @@ def room_now(now=None) -> str:
     """按空间层判断此刻在家哪个房间；不在家/在路上返回 ''（单一事实源）。"""
     try:
         from memory import space as space_mod
+        sp_cfg = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("space", {}) or {}
+        if sp_cfg.get("enabled", True):
+            r = space_mod.room_position(now)
+            if r.get("state") == "在途中":
+                return ""
+            if r.get("room"):
+                return r["room"]
+    except Exception as e:
+        _stats_err(e)
+        pass
+    try:
+        from memory import space as space_mod
         pos = space_mod.position(now)
         if pos.get("state") == "在途中" or pos.get("location") != "家":
             return ""
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     try:
         from memory import schedule as schedule_mod
         cur = schedule_mod.current_activity(now)
         act = cur.get("activity") if cur else ""
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         act = ""
     return _ACTIVITY_ROOM.get(act, "")
 
@@ -530,15 +1141,35 @@ def _inspect_pending(scope, container) -> bool:
     return bool(p and p.get("container") == container)
 
 
-def schedule_inspection(scope, container, now=None):
+def schedule_inspection(scope, container, now=None, kind="container"):
+    """安排一次查看：先去目标容器所在房间（真实移动，P1-1），到点后汇报。"""
     if not scope:
         return
     now = now or datetime.now()
-    delay = max(10, int(_cfg("inspect_delay_s", 30)) + random.randint(-8, 8))
+    room = _container_room(container)
+    delay = None
+    try:
+        from memory import space as space_mod
+        if room:
+            r = space_mod.move_room(room, now=now)
+            ats = r.get("arrive_ts") if r else ""
+            if ats:
+                try:
+                    delay = (datetime.fromisoformat(ats) - now).total_seconds()
+                except Exception as e:
+                    _stats_err(e)
+                    delay = None
+    except Exception as e:
+        _stats_err(e)
+        pass
+    if delay is None:
+        delay = max(10, int(_cfg("inspect_delay_s", 30)) + random.randint(-8, 8))
+    delay = max(3.0, float(delay))
     data = _db.kv_get("memory", "inspect_pending") or {}
     data[str(scope)] = {
         "container": str(container),
-        "room": _container_room(container),
+        "room": room,
+        "kind": str(kind),
         "deliver_at": (now + timedelta(seconds=delay)).isoformat(timespec="seconds"),
         "ts": now.isoformat(timespec="seconds"),
     }
@@ -553,7 +1184,8 @@ def due_inspections(now=None) -> list:
         try:
             if now < datetime.fromisoformat(str(p.get("deliver_at", ""))):
                 continue
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             continue
         s = str(scope)
         if s.startswith("group:"):
@@ -564,6 +1196,7 @@ def due_inspections(now=None) -> list:
             "scope": scope,
             "container": str(p.get("container", "")),
             "room": str(p.get("room", "")),
+            "kind": str(p.get("kind", "container")),
             "target_type": tt,
             "target": tg,
         })
@@ -588,17 +1221,32 @@ def inspection_prompt(item) -> str:
 
 def home_block(scope="", text="", now=None) -> str:
     """生活注入块（内部参考）：此刻房间 + 目光所及 + 按需展开容器/距离。"""
+    try:
+        import memory.stats as _st
+        _st.bump("tick:living")
+    except Exception as e:
+        _stats_err(e)
     if not _cfg("enabled", True):
         return ""
     now = now or datetime.now()
+    ldata = _load()  # 单次加载，容器循环复用（P0 性能优化）
     try:
         from memory import space as space_mod
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         space_mod = None
     pos = space_mod.position(now) if space_mod else {}
     parts = []
     if pos.get("state") == "在途中":
         parts.append(f"【此刻】在去{pos.get('to', '某处')}的路上（{pos.get('mode', '')}）")
+    try:
+        rpos = space_mod.room_position(now) if space_mod else {}
+        if rpos.get("state") == "在途中":
+            path = "、".join(rpos.get("path") or [])
+            parts.append(f"【此刻】正从{rpos.get('from', '')}走向{rpos.get('to', '')}" + (f"（路过{path}）" if path else ""))
+    except Exception as e:
+        _stats_err(e)
+        pass
     room = room_now(now)
     if room and pos.get("location") == "家":
         vis = visible(room)
@@ -617,7 +1265,7 @@ def home_block(scope="", text="", now=None) -> str:
             named = container in t
             if not named and (not generic or any_named or container not in vis):
                 continue
-            items = lookup(container)
+            items = lookup(container, data=ldata)
             if items:
                 see = space_mod.can_see(room, container, now) if space_mod else {"visible": True}
                 if see.get("visible"):
@@ -636,6 +1284,18 @@ def home_block(scope="", text="", now=None) -> str:
                     else:
                         schedule_inspection(scope, container, now)
                         parts.append(INSPECT_GO.format(room=croom, room_now=room, container=container))
+    try:
+        if s := where_is_block(scope, t, now):
+            parts.append(s)
+    except Exception as e:
+        _stats_err(e)
+        pass
+    try:
+        if any(w in t for w in _CANCEL_WORDS) and cancel_search(scope):
+            parts.append("【找东西·取消】用户说别找了，别再继续翻找了，自然带一句'行，不找了'即可，别提系统。")
+    except Exception as e:
+        _stats_err(e)
+        pass
     for place in places():
         if place in t or any(w in t for w in ("多久", "分钟", "远不远", "远吗", "多远", "去")):
             if place in t:
@@ -657,12 +1317,20 @@ def home_block(scope="", text="", now=None) -> str:
             parts.append(s)
         if s := sensors_mod.named_block(room, t):
             parts.append(s)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
+        pass
+    try:
+        if space_mod and (s := space_mod.cast_block(t, now)):
+            parts.append(s)
+    except Exception as e:
+        _stats_err(e)
         pass
     try:
         if space_mod and (s := space_mod.actions_block(scope)):
             parts.append(s)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     parts.append("内部参考：别主动报生活细节，被问起或相关时自然带一句，不要生硬播报")
     return "；".join(parts)
@@ -676,7 +1344,8 @@ def ai_birthday():
     try:
         m, d = b.split("-")
         return int(m), int(d)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return None
 
 
@@ -688,7 +1357,8 @@ def ai_age(now=None):
         return None
     try:
         return max(0, now.year - int(by))
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return None
 
 
@@ -716,7 +1386,8 @@ def birthday_hint_block(scope="", text="", now=None) -> str:
         from memory import interaction as interaction_mod
         if interaction_mod.familiarity_effective(scope) < float(_cfg("birthday_threshold", 0.4)):
             return ""
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return ""
     return (
         f"【生日临近·内部参考】再过 {d} 天是她的生日。她不好意思直说，但希望你在意。"
@@ -753,7 +1424,18 @@ def birthday_celebrate(now=None) -> dict:
     try:
         from memory import space as space_mod
         space_mod.emit("birthday", detail, memorable=True)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     _db.kv_set("memory", f"birthday_celebrated:{year}", {"done": True, "detail": detail})
     return {"celebrated": True, "age": age, "detail": detail}
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("living", e)
+    except Exception:
+        pass

@@ -254,26 +254,27 @@ def _cache_cfg() -> dict:
     return {"enabled": bool(c.get("enabled", True)), "ttl": float(c.get("ttl_s", 60))}
 
 
-def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=None, use_cache=True):
+def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=None, use_cache=True, location=None):
     """单查询检索（含结果缓存）：返回 [(fact, score, scope)]（score 已归一化 0~1）。"""
     if not query_text or not scopes:
         return []
     cc = _cache_cfg()
-    cache_key = hash((query_text, tuple(scopes), tuple(extra_scopes or []), top_k, min_score))
+    cache_key = hash((query_text, tuple(scopes), tuple(extra_scopes or []), top_k, min_score, location))
     if use_cache and cc["enabled"] and _result_cache["key"] == cache_key:
         if time.time() - _result_cache["ts"] < cc["ttl"]:
             return list(_result_cache["hits"])
     all_scopes = list(scopes) + list(extra_scopes or [])
+    loc_mark = f"[地点：{location}]" if location else ""
     rows = []
     for scope in all_scopes:
         privacy_th = float(trace.adjustments().get("privacy_threshold", 0.8))
         rows += [
             r
-            for r in _db.memory_rows(scope)
+            for r in _db.memory_rows(scope, exclude_status=("superseded",))
             if _visible(r, scopes)
             and not str(r.get("fact", "")).startswith("enc:")
+            and (not loc_mark or loc_mark in str(r.get("fact", "")))
             and float(r.get("privacy", 0.0)) < privacy_th
-            and r.get("status", "active") != "superseded"  # 时间推理（v5）：历史记忆不参与当前召回
         ]
     if not rows:
         return []
@@ -284,7 +285,8 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
         goal_token_sets = [
             set(fact_keywords(g["title"])) for g in advisor.goal_active()
         ]
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         goal_token_sets = []
 
     weights = _weights()
@@ -325,7 +327,8 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
                 age_days = (datetime.now() - datetime.fromisoformat(str(r["valid_from"])[:19])).total_seconds() / 86400
                 if age_days > float(time_hint) * 1.5:
                     s *= 0.8
-            except Exception:
+            except Exception as e:
+                _stats_err(e)
                 pass
         if goal_token_sets:
             ft = fact_keywords(fact)
@@ -389,9 +392,10 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
     return hits
 
 
-def retrieve_detailed(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=None):
-    """带分数来源分解的检索（单查询）：[{fact, scope, score, rrf, policy, confidence, rerank}]。"""
-    hits = _retrieve_single(query_text, scopes, top_k, min_score, extra_scopes, use_cache=False)
+def retrieve_detailed(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=None, location=None):
+    """带分数来源分解的检索（单查询）：[{fact, scope, score, rrf, policy, confidence, rerank}]。
+    location 可限定只召回带 [地点：X] 标签的空间记忆（P0-2）。"""
+    hits = _retrieve_single(query_text, scopes, top_k, min_score, extra_scopes, use_cache=False, location=location)
     return [
         {"fact": f, "scope": sc, "score": s, **_last_details.get(f, {})}
         for f, s, sc in hits
@@ -406,18 +410,24 @@ def retrieve(
     extra_scopes=None,
     expand_query=False,
     recent=None,
+    location=None,
 ):
     """对外检索入口：多查询变体（指代消解/同义扩展）合并 → MMR 多样性 → 隐式反馈。
     返回 [(fact, score, scope)]（score 已归一化 0~1），兼容旧签名。"""
+    try:
+        import memory.stats as _st
+        _st.bump("tick:retrieve")
+    except Exception as e:
+        _stats_err(e)
     if not query_text or not scopes:
         return []
     variants = extract.expand(query_text, recent) if expand_query else [query_text]
     if len(variants) == 1:
-        hits = _retrieve_single(query_text, scopes, top_k, min_score, extra_scopes)
+        hits = _retrieve_single(query_text, scopes, top_k, min_score, extra_scopes, location=location)
     else:
         merged = {}
         for v in variants:
-            for f, s, sc in _retrieve_single(v, scopes, top_k, min_score, extra_scopes):
+            for f, s, sc in _retrieve_single(v, scopes, top_k, min_score, extra_scopes, location=location):
                 if f not in merged or s > merged[f][0]:
                     merged[f] = (s, sc)
         hits = sorted(
@@ -586,3 +596,13 @@ def explain(query_text, scopes, top_k=3) -> str:
             if related:
                 lines.append("  相关事件：" + "；".join(related))
     return "\n".join(lines)
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("reasoning", e)
+    except Exception:
+        pass

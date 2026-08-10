@@ -77,7 +77,8 @@ def update(
         trust_delta *= mod
         familiarity_delta *= mod
         closeness_delta *= mod
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     trust = _clamp(float(cur.get("trust", 0.3)) + trust_delta, 0.05, 1.0)
     familiarity = _clamp(float(cur.get("familiarity", 0.0)) + familiarity_delta, 0.0, 1.0)
@@ -113,7 +114,8 @@ def describe(scope) -> str:
         from memory import interaction as interaction_mod
         fam = interaction_mod.familiarity_effective(scope)
         stage = _stage_of(fam)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         fam, stage = float(row.get("familiarity", 0.0)), row.get("stage", "陌生")
     return (
         f"【与用户的关系】阶段：{stage} · "
@@ -135,7 +137,8 @@ def score_of(row) -> float:
             continue
         try:
             age_days = (now - datetime.fromisoformat(h["ts"])).total_seconds() / 86400
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             age_days = 0.0
         total += w * math.exp(-0.05 * max(0.0, age_days))
     return round(total, 3)
@@ -159,9 +162,20 @@ def note_return(scope, days=30) -> bool:
         return False
     try:
         age_days = (now - datetime.fromisoformat(last)).total_seconds() / 86400.0
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return False
     if age_days > float(days):
         _db.kv_set("memory", f"user_return:{scope}", {"announced": True, "ts": now.isoformat(timespec="seconds")})
         return True
     return False
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("relationship", e)
+    except Exception:
+        pass

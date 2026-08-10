@@ -261,7 +261,8 @@ def _persona_fields_by_query(query=None):
                 if k == "preference" and not pref_q:
                     continue
                 out[k] = by_key.get(k, [])
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return out
 
@@ -311,7 +312,8 @@ def compose(base=None, mood=None, include_ai=True, query=None) -> str:
             parts.append(emotion_mod.ai_block())  # 多维情绪状态机（v31）
         elif mood:
             parts.append(f"【当前心情：{mood}】")
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         if mood:
             parts.append(f"【当前心情：{mood}】")
     if include_ai:
@@ -329,3 +331,13 @@ def snapshot() -> dict:
         "mood": _shared.state.get("mood", ""),
         "ai_memory": ai_memory_rows(),
     }
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("persona", e)
+    except Exception:
+        pass

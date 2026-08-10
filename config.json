@@ -186,6 +186,17 @@
         "lazy_factor": 1.15,
         "daily_tick": true,
         "container_capacity": 10,
+        "activation_half_life_days": 30,
+        "search_activation_low": 0.35,
+        "search_activation_mid": 0.6,
+        "search_max_steps": 5,
+        "see_throttle_s": 300,
+        "search_ttl_min": 30,
+        "search_fail_mark_prob": 0.6,
+        "search_quiet": true,
+        "bootstrap": true,
+        "bootstrap_max_items": 8,
+        "bootstrap_on_grow": false,
         "home_location": "上海·普通公寓",
         "birthday": "11-04",
         "birth_year": 2004,
@@ -194,6 +205,14 @@
       },
       "space": {
         "enabled": true,
+        "_comment": "home_edges = 家内房间邻接图（真实移动用）；edge_min = 每跨一个房间的分钟数。",
+        "home_edges": [
+          ["客厅", "厨房"],
+          ["客厅", "卧室"],
+          ["卧室", "工作室"],
+          ["厨房", "工作室"]
+        ],
+        "edge_min": 1,
         "pair_times": {
           "排练室:演出场地": 15,
           "排练室:录音室": 10,
@@ -202,7 +221,37 @@
         "recurring_npcs": [
           "便利店店员"
         ],
-        "container_capacity": 10
+        "container_capacity": 10,
+        "cast_schedule": {
+          "仲町阿拉蕾": {
+            "default_place": "排练室",
+            "week": [
+              {"days": [0, 1, 2, 3, 4], "start_hour": 14, "end_hour": 18, "place": "排练室"},
+              {"days": [5, 6], "start_hour": 13, "end_hour": 21, "place": "演出场地"}
+            ]
+          },
+          "宫永野乃花": {
+            "default_place": "家",
+            "week": [
+              {"days": [0, 2, 4], "start_hour": 10, "end_hour": 16, "place": "录音室"},
+              {"days": [1, 3], "start_hour": 18, "end_hour": 21, "place": "排练室"}
+            ]
+          },
+          "峰月律": {
+            "default_place": "排练室",
+            "week": [
+              {"days": [0, 1, 2, 3, 4, 5], "start_hour": 15, "end_hour": 19, "place": "排练室"},
+              {"days": [6], "start_hour": 10, "end_hour": 14, "place": "便利店"}
+            ]
+          },
+          "藤都子": {
+            "default_place": "家",
+            "week": [
+              {"days": [0, 1, 2, 3, 4], "start_hour": 9, "end_hour": 17, "place": "学校"},
+              {"days": [5, 6], "start_hour": 13, "end_hour": 18, "place": "排练室"}
+            ]
+          }
+        }
       },
       "interaction": {
         "enabled": true,
@@ -219,6 +268,32 @@
           7
         ],
         "dormant_days": 3
+      },
+      "mind": {
+        "_comment": "心智状态中枢：enabled=注入【心智状态】内部参考；system1=命中高成功率习惯直接复用回复（省一次 LLM 调用）；cognitive_turn=单次结构化输出（appraisal/goals/intention/action/reply 压进一次调用，JSON 解析失败自动回退普通路径，建议实测稳定后再开）。",
+        "enabled": true,
+        "system1": true,
+        "system1_min_tries": 3,
+        "system1_min_success": 0.75,
+        "system1_min_overlap": 0.5,
+        "cognitive_turn": false,
+        "intention_ttl_hours": 72,
+        "persona_weights": {
+          "节能": 0.8,
+          "省电": 0.8,
+          "懒": 0.7,
+          "休息": 0.6,
+          "音乐": 0.9,
+          "演出": 0.9,
+          "排练": 0.85,
+          "作曲": 0.85,
+          "打碟": 0.85,
+          "游戏": 0.7,
+          "漫画": 0.6,
+          "队友": 0.6,
+          "朋友": 0.6,
+          "毒舌": 0.6
+        }
       },
       "weights": {
         "lexical": 0.6,

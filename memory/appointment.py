@@ -41,7 +41,8 @@ def _cfg(key, default):
 def _zone(scope):
     try:
         return ZoneInfo(tz_mod.user_tz(scope))
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return ZoneInfo("Asia/Shanghai")
 
 
@@ -126,7 +127,8 @@ def _human_time(iso):
     try:
         dt = datetime.fromisoformat(iso)
         return f"{dt.month}月{dt.day}日{dt:%H:%M}"
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return iso
 
 
@@ -136,7 +138,8 @@ def _when_text(appt) -> str:
         dt = datetime.fromisoformat(appt.get("time") or "")
         base = f"{dt.month}月{dt.day}日"
         return f"{base}{dt:%H:%M}" if appt.get("has_time") else f"{base}（没定具体时间）"
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return appt.get("time") or ""
 
 
@@ -147,7 +150,8 @@ def _poke_message(appt, round_no, now) -> str:
     try:
         from agent import persona
         system = persona.compose(include_ai=False)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         system = _shared.BASE_SYSTEM_PROMPT
     prompt = (
         f"你和用户约好了「{appt['text']}」（{time_text}），现在已经过了 {mins} 分钟，对方还没出现。\n"
@@ -160,7 +164,8 @@ def _poke_message(appt, round_no, now) -> str:
     )
     try:
         return _shared.ask_deepseek(prompt, system=system, max_tokens=150)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         if round_no >= 2:
             return f"都过去{mins}分钟了。……我不是催你，就是怕你出事。忙完记得回我一句。"
         return f"说好{time_text}的，人呢。……我数到十，不来我就当放我鸽子了。"
@@ -185,7 +190,8 @@ def check_and_poke(now=None) -> list:
             continue
         try:
             t = datetime.fromisoformat(a2["time"])
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             a2["status"] = "done"
             changed = True
             new_appts.append(a2)
@@ -203,7 +209,8 @@ def check_and_poke(now=None) -> list:
         last = _db.kv_get(KV_NS, f"lastmsg:{a2['scope']}", "") or ""
         try:
             last_dt = datetime.fromisoformat(last) if last else None
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             last_dt = None
         # 生产环境 lastmsg 是本地 naive 时间，约定时间是 aware：统一到同一时区再比较
         if last_dt is not None and last_dt.tzinfo is None and t.tzinfo is not None:
@@ -225,7 +232,8 @@ def check_and_poke(now=None) -> list:
                 if now < datetime.fromisoformat(a2["poked_at"]) + interval:
                     new_appts.append(a)
                     continue
-            except Exception:
+            except Exception as e:
+                _stats_err(e)
                 pass
         target_type, target = _target_of(a2["scope"])
         if not target_type or not target:
@@ -257,7 +265,8 @@ def check_and_poke(now=None) -> list:
         try:
             from memory import mistake
             mistake.record_no_show(a2["scope"], a2.get("text", ""))  # 迟到 = 一次“放鸽子”错误
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
         sent.append(a2)
     return sent
@@ -276,7 +285,18 @@ def context_block(scope) -> str:
         try:
             due = datetime.fromisoformat(a["time"])
             state = "还没到时间" if now < due else "对方还没出现，可以自然提起"
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             state = "约定待履约"
         lines.append(f"· {a['text']}（约在 {_when_text(a)}，{state}）")
     return "【待履约约定】\n" + "\n".join(lines)
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("appointment", e)
+    except Exception:
+        pass

@@ -36,12 +36,15 @@ from memory import (
     lexical,
     living,
     mistake,
+    mind,
     policy,
+    procedures,
     relationship,
     reasoning,
     schedule,
     sharing,
     sleep,
+    space_eval,
     space,
     topic,
     trace,
@@ -117,10 +120,26 @@ travel_time = living.travel_time
 item_give = living.give
 item_take = living.take
 item_find = living.find
+item_history = living.item_history
+item_position_at = living.position_at
+item_activation = living.activation
+item_where = living.where_is_block
+item_search_progress = living.search_progress
 space_position = space.position
 space_events = space.today_events
 travel_between = space.travel_between
+space_room_position = space.room_position
+space_room_now = space.room_now
+space_move_room = space.move_room
+space_route = space.shortest_route
+space_cast_location = space.cast_location
 interaction_modulate = interaction.modulate
+mind_snapshot = mind.snapshot
+mind_block = mind.block
+mind_intention = mind.intention_current
+mind_recompute = mind.recompute_intention
+procedures_stats = procedures.stats
+space_eval_run = space_eval.run
 goal_add = advisor.goal_add
 goal_list = advisor.goal_list
 goal_update = advisor.goal_update
@@ -247,6 +266,23 @@ def stats() -> dict:
 def flush_caches():
     """优雅关闭：把需要落盘的内存统计刷进 kv（性能缓存丢失无影响）。"""
     try:
+        import memory.stats as stats_mod
+        stats_mod.flush()  # 计数器缓冲落盘（v2.2）
+    except Exception as e:
+        _stats_err(e)
+        pass
+    try:
         reasoning._flush_route_stats()
+    except Exception as e:
+        _stats_err(e)
+        pass
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("__init__", e)
     except Exception:
         pass

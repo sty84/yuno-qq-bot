@@ -145,6 +145,11 @@ def ai_baseline():
 
 def ai_state():
     """当前 AI 情绪：先按流逝时间指数衰减回基线。"""
+    try:
+        import memory.stats as _st
+        _st.bump("tick:emotion")
+    except Exception as e:
+        _stats_err(e)
     data = _db.kv_get("memory", "ai_emotion") or {}
     if not data:
         return ai_baseline()
@@ -155,7 +160,8 @@ def ai_state():
     except (TypeError, ValueError):
         try:
             ts = datetime.fromisoformat(str(raw_ts)).timestamp()
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             ts = 0.0
     minutes = (time.time() - ts) / 60.0
     half = float(_cfg("decay_minutes", 90))
@@ -202,7 +208,8 @@ def _event_deltas(an, text=""):
         try:
             from memory import interaction as interaction_mod
             f = interaction_mod.fatigue_mult("praise")  # 刺激适应：连夸效果递减
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             f = 1.0
         d = vadd(d, {"v": 0.22 * f, "a": 0.0, "d": 0.08 * f})   # 被夸 → 心里高兴
     if any(w in t for w in ("滚", "别烦", "废物", "蠢", "闭嘴", "差劲", "讨厌你")):
@@ -220,7 +227,8 @@ def ai_apply(an, text="", scope=""):
         from memory import interaction as interaction_mod
         if any(w in str(text or "") for w in ("谢谢", "厉害", "好棒", "靠谱", "爱你", "喜欢", "辛苦了", "真棒", "夸")):
             interaction_mod.mark_event("praise")
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     _ai_save(nxt)
     data = _db.kv_get("memory", "ai_emotion") or {}
@@ -240,7 +248,8 @@ def attribution_block(scope="") -> str:
         return ""
     try:
         age_h = (datetime.now() - datetime.fromisoformat(str(data.get("last_trigger_ts") or ""))).total_seconds() / 3600.0
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         age_h = 999.0
     if age_h > 3:
         return ""
@@ -315,7 +324,8 @@ def judge(text="", an=None, scope="") -> dict:
         try:
             from memory import analysis as analysis_mod
             an = analysis_mod.analyze(text or "")
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             an = {}
     an = an or {}
     label = str(an.get("emotion") or "平静")
@@ -435,7 +445,8 @@ def user_estimate(scope):
     for i, r in enumerate(rows):
         try:
             age_h = max(0.0, (now - float(r.get("ts", now))) / 3600.0)
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             age_h = 0.0
         rec = 0.5 ** (age_h / 12.0)          # 时间衰减：12 小时半衰期
         pos = 0.5 + 0.5 * i / max(1, n - 1)  # 越近权重越高
@@ -467,7 +478,8 @@ def user_estimate(scope):
 def _age_hours(r) -> float:
     try:
         return max(0.0, (time.time() - float(r.get("ts", time.time()))) / 3600.0)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return 0.0
 
 
@@ -543,3 +555,13 @@ def emotion_log_rows(days=14) -> list:
             r.setdefault("date", d)
             out.append(r)
     return out
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("emotion", e)
+    except Exception:
+        pass

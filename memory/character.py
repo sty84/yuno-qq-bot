@@ -182,7 +182,8 @@ def _llm_dossier(name, llm=None) -> dict:
                     seen.add(text)
                     out.setdefault(key, []).append(text[:60])
         return out
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return {}
 
 
@@ -269,3 +270,13 @@ def match_scopes(text) -> list[str]:
         if n and n.lower() in t:
             out.append(f"char:{n}")
     return out
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("character", e)
+    except Exception:
+        pass

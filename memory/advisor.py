@@ -44,7 +44,8 @@ def _consult_system() -> str:
         from agent import persona
         core = persona.compose(include_ai=False)
         s = "保持以下人格，像这个人一样说话（语气、口头禅、性格都要贴合）：\n" + core + "\n\n" + s
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return s
 
@@ -103,7 +104,8 @@ def consult_related(scope, text) -> bool:
         return True
     try:
         answers = json.loads(sess.get("answers") or "[]")
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         answers = []
     base = f"{sess.get('topic', '')} " + " ".join(answers[-2:])
     tk = set(extract.fact_keywords(t))
@@ -120,7 +122,8 @@ def consult_abort(scope):
         return
     try:
         answers = json.loads(sess.get("answers") or "[]")
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         answers = []
     _db.consult_save(scope, sess.get("topic", ""), "done", int(sess.get("stage", 0)), answers)
 
@@ -148,7 +151,8 @@ def _consult_memory_context(scope, topic):
                     extract.nice_fact(f) for f, _s, _sc in hits[:6]
                 )
             )
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return "\n".join(parts) or "（暂无背景）"
 
@@ -247,7 +251,8 @@ def daily_reflect(limit=20) -> int:
             for l in (resp.choices[0].message.content or "").splitlines()
             if l.strip()
         ]
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return 0
 
 
@@ -407,3 +412,13 @@ def rollback_belief(log_id) -> str:
             _db.policy_log_add("reflection", "insight", 0.6, detail=l[:100])
             n += 1
     return n
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("advisor", e)
+    except Exception:
+        pass

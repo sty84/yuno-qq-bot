@@ -83,7 +83,8 @@ def build(nlist=None, scope=None) -> dict:
 def enabled(scope=None) -> bool:
     try:
         return _db.vec_index_count() > 0 and bool(_db.vec_centroids_get())
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return False
 
 
@@ -93,12 +94,14 @@ def backend_name() -> str:
     try:
         import sqlite_vec  # noqa: F401
         return "sqlite_vec"
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     try:
         import faiss  # noqa: F401
         return "faiss"
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return "ivf"
 
 
@@ -134,6 +137,18 @@ def search(query_vec, scopes, top_k=5, nprobe=None) -> list:
     return out[:top_k]
 
 
+def upsert(scope, key, fact, embedding=None) -> bool:
+    """增量写一条向量索引（归到最近质心）。无质心/无向量时跳过（等下次 build 全量重建）。"""
+    if not enabled(scope) or embedding is None:
+        return False
+    centroids = _db.vec_centroids_get()
+    if not centroids:
+        return False
+    best = max(centroids, key=lambda c: _cosine(embedding, c["embedding"]))
+    _db.vec_index_upsert(scope, key, fact, best["id"], embedding)
+    return True
+
+
 def tune(probes, nlists=(4, 8, 16), nprobes=(1, 2, 4), top_k=5) -> dict:
     """对照实验：不同 nlist/nprobe 下用评测集算 recall@k，返回最佳组合并恢复最优索引。"""
     results = []
@@ -159,3 +174,13 @@ def tune(probes, nlists=(4, 8, 16), nprobes=(1, 2, 4), top_k=5) -> dict:
     best = max(results, key=lambda r: r["recall@k"])
     build(nlist=best["nlist"])
     return {"results": results, "best": best}
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("vecindex", e)
+    except Exception:
+        pass

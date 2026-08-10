@@ -290,7 +290,8 @@ def recency_factor(last_access, half_life=None, scope=None) -> float:
     try:
         last = datetime.fromisoformat(last_access)
         days = (datetime.now() - last).total_seconds() / 86400
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return 0.5
     half = float(half_life) if half_life else decay_days()
     if scope:
@@ -442,3 +443,13 @@ def governance(scope=None) -> dict:
         "recent_history_entries": len(_db.history_rows(scope, limit=100)),
         "policy_log_entries": len(_db.policy_log_rows(100)),
     }
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("policy", e)
+    except Exception:
+        pass

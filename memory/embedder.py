@@ -40,7 +40,8 @@ def _local_encode(texts) -> list[list[float]] | None:
             try:
                 import torch
                 device = "cuda" if torch.cuda.is_available() else "cpu"
-            except Exception:
+            except Exception as e:
+                _stats_err(e)
                 device = "cpu"
         try:
             _local_model = SentenceTransformer(
@@ -102,3 +103,13 @@ def cosine(a, b) -> float:
     na = sum(x * x for x in a) ** 0.5
     nb = sum(x * x for x in b) ** 0.5
     return dot / (na * nb) if na and nb else 0.0
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("embedder", e)
+    except Exception:
+        pass

@@ -6,10 +6,17 @@
 import os
 import sys
 
-TEST_DIR = r"C:\Users\STY\.codex\visualizations\2026\08\07\019fda20-33c8-7031-851a-541c0036115a\yuno_mem_test"
+TEST_DIR = os.getenv(
+    "V29_TEST_DIR",
+    r"C:\Users\STY\.codex\visualizations\2026\08\07\019fda20-33c8-7031-851a-541c0036115a\yuno_mem_test",
+)
+PROJECT_DIR = os.getenv("V29_PROJECT_DIR", os.path.dirname(os.path.abspath(__file__)))
+if not os.path.isdir(TEST_DIR):
+    print(f"跳过：测试目录不存在（{TEST_DIR}），可用环境变量 V29_TEST_DIR 指定。")
+    sys.exit(0)
 os.environ["CONFIG_PATH"] = os.path.join(TEST_DIR, "config_v22.json")
 sys.path.insert(0, TEST_DIR)
-sys.path.insert(0, r"C:\Users\STY\Desktop\qq-bot-github")
+sys.path.insert(0, PROJECT_DIR)
 
 import memory  # noqa: E402
 from memory import extract  # noqa: E402

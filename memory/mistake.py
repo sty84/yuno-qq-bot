@@ -83,7 +83,8 @@ def _days_since(iso, now=None):
     try:
         d = datetime.fromisoformat(iso)
         return max(0.0, (now - d).total_seconds() / 86400)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return 0.0
 
 
@@ -114,7 +115,8 @@ def forgive_probability(rec, scope, now=None) -> float:
     fam = float(row.get("familiarity", 0.0))
     try:
         score = relationship.score_of(row)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         score = 0.0
     rel_norm = min(1.0, 0.3 * trust + 0.3 * fam + 0.4 * min(1.0, max(0.0, score) / 5.0))
     calm = min(1.0, _days_since(rec.get("last_at") or rec.get("first_at") or "", now) / 7.0)
@@ -256,3 +258,13 @@ def context_block(scope, text="") -> str:
             f"你现在的态度是{st['label']}（生气度{st['level']}，随时间在降）。{guide}。"
         )
     return "\n".join(lines)
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("mistake", e)
+    except Exception:
+        pass

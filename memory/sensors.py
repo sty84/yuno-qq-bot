@@ -91,7 +91,8 @@ def sensor_event(name, kind, detail, source="sensor"):
     try:
         from memory import space as space_mod
         space_mod.emit("sensor", str(detail)[:80])
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return ev
 
@@ -102,7 +103,8 @@ def recent_events(seconds=3600) -> list:
     for e in (_data().get("events") or []):
         try:
             ts = datetime.fromisoformat(e["ts"])
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             continue
         if now - ts <= timedelta(seconds=seconds):
             out.append(e)
@@ -155,6 +157,11 @@ def named_block(room, text, seconds=1800) -> str:
 
 def tick(now=None):
     """日常演化：小概率门铃响/灯忘关，让家会自己动。"""
+    try:
+        import memory.stats as _st
+        _st.bump("tick:sensors")
+    except Exception as e:
+        _stats_err(e)
     if not _cfg("tick", True):
         return []
     now = now or datetime.now()
@@ -167,3 +174,13 @@ def tick(now=None):
     if lights and rng.random() < 0.04:
         out.append(set_device(rng.choice(lights), "开", source="sim"))
     return out
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("sensors", e)
+    except Exception:
+        pass

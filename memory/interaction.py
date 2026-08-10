@@ -31,7 +31,8 @@ def familiarity_effective(scope) -> float:
     """熟悉度（计算值）：存储值 × 0.5^(距上次互动天数/半衰期)，1 天内不衰减。"""
     try:
         row = _db.relationship_get(scope)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         row = None
     if not row:
         return 0.0
@@ -45,7 +46,8 @@ def familiarity_effective(scope) -> float:
             half = float(_cfg("familiarity_half_life_days", 30))
             if days > 1.0 and half > 0:
                 fam *= 0.5 ** ((days - 1.0) / half)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return round(max(0.0, min(1.0, fam)), 4)
 
@@ -82,7 +84,8 @@ def user_mult(scope, now=None) -> dict:
         if est and est.get("label") in _NEG_LABELS:
             m["disturb"] *= 0.4
             m["care"] *= 1.3
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     # 用户时区深夜 → 少打扰
     try:
@@ -92,7 +95,8 @@ def user_mult(scope, now=None) -> dict:
         lo, hi = _cfg("user_night_hours", [23, 7])
         if hour >= int(lo) or hour < int(hi):
             m["disturb"] *= 0.6
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     # 潜水：最近没消息 → 少打扰
     try:
@@ -101,7 +105,8 @@ def user_mult(scope, now=None) -> dict:
             days = (now - datetime.fromisoformat(last)).total_seconds() / 86400.0
             if days > float(_cfg("dormant_days", 3)):
                 m["disturb"] *= 0.7
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return {k: round(v, 3) for k, v in m.items()}
 
@@ -139,6 +144,11 @@ def modulate(scope, kind, base=1.0, now=None, scene="", axis="neutral",
     """有效值 = 基准 × 场景 × 关系 × 用户状态 × 频率。
     with_relation=False：关系系统自身更新时不乘关系系数（避免富者愈富）。
     with_fatigue=False：累积证据类（关系）不适用刺激适应——重复可靠应更涨信任。"""
+    try:
+        import memory.stats as _st
+        _st.bump("tick:interaction")
+    except Exception as e:
+        _stats_err(e)
     now = now or datetime.now()
     scene = scene or _scene_of(scope)
     m = float(base)
@@ -150,3 +160,13 @@ def modulate(scope, kind, base=1.0, now=None, scene="", axis="neutral",
     if with_fatigue:
         m *= fatigue_mult(kind, now)
     return round(max(0.05, m), 3)
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("interaction", e)
+    except Exception:
+        pass

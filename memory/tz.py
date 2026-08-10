@@ -90,7 +90,8 @@ def now_text(scope=None) -> str:
     try:
         from zoneinfo import ZoneInfo
         now = datetime.now(ZoneInfo(tz_name))
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         now = datetime.now()
     wd = "一二三四五六日"[now.weekday()]
     note = "（按你的当地时间）" if scope and user_tz(scope) else ""
@@ -100,3 +101,13 @@ def now_text(scope=None) -> str:
         "如果用户问现在几点/几号/星期几，必须以此时间为准，"
         "不要参考历史对话或记忆里的时间。"
     )
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("tz", e)
+    except Exception:
+        pass

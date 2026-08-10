@@ -272,7 +272,8 @@ async def cmd_character(text, ctx):
     try:
         path = await asyncio.to_thread(memory.character_write_md, name)
         md_note = f" · 档案已写入 {path.name}"
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         md_note = ""
     return (
         f"已收录《{name}》：{info['added']} 条设定/经历入库（可信度 70%，说错了可以纠正我）"
@@ -422,11 +423,22 @@ async def after_chat(ctx, text, reply):
     # 世界状态解析（v32）：LLM 提议 → 引擎裁决；异步执行，不阻塞回复
     try:
         from memory import living as living_mod
-        await asyncio.to_thread(living_mod.propose_world_delta, scope, text)
+        wd = await asyncio.to_thread(living_mod.propose_world_delta, scope, text)
+        if wd and wd.get("rejected"):
+            print(f"[世界] 拒绝 {wd['rejected']} 条：{wd.get('reasons')}")
     except Exception as e:
         print(f"世界状态解析失败：{e}")
     # 约定迟到检测（v23）：记录用户最近发言时间
     _db.kv_set("memory", f"lastmsg:{scope}", datetime.now().isoformat(timespec="seconds"))
+    # 搜索话题感知（v2.2）：记录最近一条用户消息文本，供搜索"话题转移暂停"判断
+    try:
+        _db.kv_set(
+            "memory", f"last_user_msg:{scope}",
+            {"ts": datetime.now().isoformat(timespec="seconds"), "text": str(text or "")[:200]},
+        )
+    except Exception as e:
+        _stats_err(e)
+        pass
     # 关系引擎（v3.1 §4）：行为证据驱动（chat/share/praise/dispute）
     event = "chat"
     try:
@@ -443,7 +455,18 @@ async def after_chat(ctx, text, reply):
             event=event,
             detail=(text or "")[:60],
         )
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
+        pass
+    # 程序记忆学习（System 1）：praise → 这次回复有效；纠正 → 无效
+    try:
+        from memory import procedures
+        if event == "praise":
+            procedures.learn(scope, text, reply, 1.0)
+        elif is_correction:
+            procedures.learn(scope, text, reply, 0.0)
+    except Exception as e:
+        _stats_err(e)
         pass
     # Memory Trace（v10）：关系证据轨迹
     try:
@@ -453,12 +476,14 @@ async def after_chat(ctx, text, reply):
             reasoning=f"行为证据：{event} → 关系状态更新",
             confidence=0.6, hint="relationship",
         )
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     # 语言语义解释层（v7）：更新用户表达画像
     try:
         memory.expression_update(scope, text)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     gain = memory.message_gain(text, scope, sk)
     igt_threshold = float(memory.trace_adjustments().get("igt_threshold", IGT_THRESHOLD))
@@ -483,3 +508,13 @@ async def after_chat(ctx, text, reply):
         _print_dispute_details(info)
     elif is_correction:
         print("[记忆] 收到纠错信号，但未命中相关旧记忆")
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("memory", e)
+    except Exception:
+        pass

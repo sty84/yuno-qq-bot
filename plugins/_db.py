@@ -9,7 +9,7 @@ import pathlib
 import sqlite3
 import threading
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
 
 DB_PATH = None
 _conn = None
@@ -68,6 +68,16 @@ def _create_tables():
             CREATE TABLE IF NOT EXISTS kv(
                 namespace TEXT NOT NULL, key TEXT NOT NULL, value TEXT,
                 PRIMARY KEY(namespace,key));
+            CREATE TABLE IF NOT EXISTS item_events(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                event TEXT NOT NULL DEFAULT 'move',
+                from_place TEXT NOT NULL DEFAULT '',
+                to_place TEXT NOT NULL DEFAULT '',
+                cause TEXT NOT NULL DEFAULT '',
+                seen_by TEXT NOT NULL DEFAULT '');
+            CREATE INDEX IF NOT EXISTS idx_item_events_item_ts ON item_events(item, ts);
             CREATE TABLE IF NOT EXISTS bindings(
                 user_openid TEXT NOT NULL, group_id TEXT NOT NULL,
                 member_openid TEXT NOT NULL,
@@ -278,6 +288,56 @@ def _create_tables():
                 stage INTEGER NOT NULL DEFAULT 0,
                 answers TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT, updated_at TEXT);
+            CREATE TABLE IF NOT EXISTS procedures(
+                situation TEXT NOT NULL,
+                action TEXT NOT NULL,
+                success REAL NOT NULL DEFAULT 0.5,
+                tries INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT,
+                PRIMARY KEY(situation, action));
+            CREATE TABLE IF NOT EXISTS space_state(
+                id INTEGER PRIMARY KEY CHECK(id=1),
+                room TEXT NOT NULL DEFAULT '客厅',
+                state TEXT NOT NULL DEFAULT '在场',
+                from_room TEXT NOT NULL DEFAULT '',
+                to_room TEXT NOT NULL DEFAULT '',
+                path TEXT NOT NULL DEFAULT '[]',
+                depart_ts TEXT NOT NULL DEFAULT '',
+                arrive_ts TEXT NOT NULL DEFAULT '',
+                updated_ts TEXT);
+            CREATE TABLE IF NOT EXISTS item_activation_state(
+                item TEXT PRIMARY KEY,
+                seen_ts TEXT NOT NULL DEFAULT '',
+                count INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS item_search_state(
+                scope TEXT PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT '',
+                queue TEXT NOT NULL DEFAULT '[]',
+                step INTEGER NOT NULL DEFAULT 0,
+                started_at TEXT NOT NULL DEFAULT '',
+                updated_ts TEXT);
+            CREATE TABLE IF NOT EXISTS mind_intention_state(
+                scope TEXT PRIMARY KEY,
+                title TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT '',
+                strength REAL NOT NULL DEFAULT 0.0,
+                state TEXT NOT NULL DEFAULT 'committed',
+                due TEXT NOT NULL DEFAULT '',
+                condition TEXT NOT NULL DEFAULT '',
+                started_at TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT '');
+            CREATE TABLE IF NOT EXISTS space_events_state(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT '',
+                detail TEXT NOT NULL DEFAULT '',
+                memorable INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS ai_actions_state(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                scope TEXT NOT NULL DEFAULT '',
+                action TEXT NOT NULL DEFAULT '',
+                detail TEXT NOT NULL DEFAULT '');
             CREATE TABLE IF NOT EXISTS language_context(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 raw_expression TEXT NOT NULL,
@@ -591,7 +651,8 @@ def kv_get(namespace, key, default=None):
             return default
         try:
             return json.loads(row[0])
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             return default
 
 
@@ -619,6 +680,407 @@ def kv_cas(namespace, key, old_raw, new_raw):
         )
         c.commit()
         return c.total_changes > 0
+
+
+# ===== 物品事件溯源（P0-1：位置历史 / 激活 / 找东西）=====
+def item_event_add(item, ts, event, from_place="", to_place="", cause="", seen_by=""):
+    """追加一条物品事件（move/give/see/take/consume/lost/find…）。"""
+    with _lock:
+        c = _connect()
+        c.execute(
+            "INSERT INTO item_events(item,ts,event,from_place,to_place,cause,seen_by) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (
+                str(item)[:60], str(ts), str(event)[:20],
+                str(from_place)[:80], str(to_place)[:80],
+                str(cause)[:80], str(seen_by)[:20],
+            ),
+        )
+        c.commit()
+
+
+def item_event_add_many(rows):
+    """批量追加物品事件（see 批量用，一次事务）。rows: dict 列表。"""
+    if not rows:
+        return
+    with _lock:
+        c = _connect()
+        c.executemany(
+            "INSERT INTO item_events(item,ts,event,from_place,to_place,cause,seen_by) "
+            "VALUES(?,?,?,?,?,?,?)",
+            [
+                (
+                    str(r.get("item", ""))[:60], str(r.get("ts", "")), str(r.get("event", ""))[:20],
+                    str(r.get("from_place", ""))[:80], str(r.get("to_place", ""))[:80],
+                    str(r.get("cause", ""))[:80], str(r.get("seen_by", ""))[:20],
+                )
+                for r in rows
+            ],
+        )
+        c.commit()
+
+
+def item_event_rows(item=None, limit=500):
+    """物品事件流水（新→旧）。"""
+    with _lock:
+        c = _connect()
+        if item:
+            cur = c.execute(
+                "SELECT * FROM item_events WHERE item=? ORDER BY ts DESC, id DESC LIMIT ?",
+                (str(item)[:60], int(limit)),
+            )
+        else:
+            cur = c.execute(
+                "SELECT * FROM item_events ORDER BY ts DESC, id DESC LIMIT ?", (int(limit),)
+            )
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in rows]
+
+
+def item_position_at(item, ts):
+    """ts 时刻该物品的位置（事件溯源投影）：最后一次决定位置的
+    move/give/see/find 事件；lost 表示那时已丢失（known=False）。"""
+    with _lock:
+        c = _connect()
+        cur = c.execute(
+            "SELECT * FROM item_events WHERE item=? AND ts<=? "
+            "AND event IN ('move','give','see','find','lost') "
+            "ORDER BY ts DESC, id DESC LIMIT 1",
+            (str(item)[:60], str(ts)),
+        )
+        rows = cur.fetchall()
+        if not rows:
+            return None
+        cols = [d[0] for d in cur.description]
+        r = dict(zip(cols, rows[0]))
+        to_place = str(r.get("to_place") or "")
+        room, container = "", ""
+        if "/" in to_place:
+            room, container = to_place.split("/", 1)
+        elif to_place:
+            room = to_place
+        return {
+            "item": r["item"], "ts": r["ts"], "event": r["event"],
+            "room": room, "container": container,
+            "known": r["event"] != "lost",
+            "cause": r.get("cause", ""),
+        }
+
+
+def item_events_prune(days=90) -> int:
+    """清理超过保留期的物品事件（默认 90 天）。"""
+    cutoff = (datetime.now() - timedelta(days=int(days))).isoformat(timespec="seconds")
+    with _lock:
+        c = _connect()
+        cur = c.execute("DELETE FROM item_events WHERE ts < ?", (cutoff,))
+        c.commit()
+        return cur.rowcount
+
+
+# ===== 程序记忆（System 1 习惯表）=====
+def procedure_upsert(situation, action, success, updated_at=""):
+    """记录一次"情境→动作"的结果（成功率 = 累计平均）。"""
+    situation = str(situation or "")[:120]
+    action = str(action or "")[:400]
+    if not situation or not action:
+        return
+    success = 1.0 if float(success) >= 0.5 else 0.0
+    with _lock:
+        c = _connect()
+        row = c.execute(
+            "SELECT success, tries FROM procedures WHERE situation=? AND action=?",
+            (situation, action),
+        ).fetchone()
+        if row:
+            tries = int(row[1]) + 1
+            # 指数滑动平均（EMA）：旧样本衰减，新反馈能真正改变成功率（学得动）
+            alpha = 0.3
+            s = round((1.0 - alpha) * float(row[0]) + alpha * success, 3)
+            c.execute(
+                "UPDATE procedures SET success=?, tries=?, updated_at=? WHERE situation=? AND action=?",
+                (s, tries, str(updated_at), situation, action),
+            )
+        else:
+            c.execute(
+                "INSERT INTO procedures(situation,action,success,tries,updated_at) VALUES(?,?,?,1,?)",
+                (situation, action, success, str(updated_at)),
+            )
+        c.commit()
+
+
+def procedure_rows(min_tries=0, limit=200):
+    """程序记忆列表（按成功率排序）。"""
+    with _lock:
+        cur = _connect().execute(
+            "SELECT situation, action, success, tries, updated_at FROM procedures "
+            "WHERE tries>=? ORDER BY success DESC, tries DESC LIMIT ?",
+            (int(min_tries), int(limit)),
+        )
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def procedure_clear():
+    with _lock:
+        c = _connect()
+        c.execute("DELETE FROM procedures")
+        c.commit()
+
+
+# ===== 空间/心智状态表（P0 数据模型优化：kv JSON → 正规表，带一次性迁移）=====
+_MIGRATED = {"space_state": False, "item_activation": False, "item_search": False,
+             "mind_intention": False, "space_events": False, "ai_actions": False}
+
+
+def space_state_get():
+    """家内房间状态（单行）。"""
+    with _lock:
+        if not _MIGRATED["space_state"]:
+            _MIGRATED["space_state"] = True
+            old = kv_get("memory", "space_room")
+            if old:
+                space_state_set(old)
+                c = _connect()
+                c.execute("DELETE FROM kv WHERE namespace='memory' AND key='space_room'")
+                c.commit()
+        row = _connect().execute("SELECT * FROM space_state WHERE id=1").fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        try:
+            d["path"] = json.loads(d.get("path") or "[]")
+        except Exception as e:
+            _stats_err(e)
+            d["path"] = []
+        return d
+
+
+def space_state_set(st):
+    st = st or {}
+    with _lock:
+        c = _connect()
+        c.execute(
+            "INSERT INTO space_state(id,room,state,from_room,to_room,path,depart_ts,arrive_ts,updated_ts) "
+            "VALUES(1,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET room=excluded.room,state=excluded.state,"
+            "from_room=excluded.from_room,to_room=excluded.to_room,path=excluded.path,"
+            "depart_ts=excluded.depart_ts,arrive_ts=excluded.arrive_ts,updated_ts=excluded.updated_ts",
+            (
+                str(st.get("room", "客厅")), str(st.get("state", "在场")),
+                str(st.get("from", "")), str(st.get("to", "")),
+                json.dumps(st.get("path", []), ensure_ascii=False),
+                str(st.get("depart_ts", "")), str(st.get("arrive_ts", "")),
+                str(st.get("updated_ts", "")),
+            ),
+        )
+        c.commit()
+
+
+def item_activation_rows():
+    """物品激活全量 {item: {seen_ts, count}}。"""
+    with _lock:
+        if not _MIGRATED["item_activation"]:
+            _MIGRATED["item_activation"] = True
+            old = kv_get("memory", "item_activation")
+            if old:
+                item_activation_set(old)
+                c = _connect()
+                c.execute("DELETE FROM kv WHERE namespace='memory' AND key='item_activation'")
+                c.commit()
+        rows = _connect().execute(
+            "SELECT item, seen_ts, count FROM item_activation_state"
+        ).fetchall()
+        return {r["item"]: {"seen_ts": r["seen_ts"], "count": r["count"]} for r in rows}
+
+
+def item_activation_set(items):
+    """批量 upsert 物品激活。"""
+    if not items:
+        return
+    with _lock:
+        c = _connect()
+        c.executemany(
+            "INSERT INTO item_activation_state(item,seen_ts,count) VALUES(?,?,?) "
+            "ON CONFLICT(item) DO UPDATE SET seen_ts=excluded.seen_ts,count=excluded.count",
+            [(str(k)[:60], str(v.get("seen_ts", "")), int(v.get("count", 0))) for k, v in items.items()],
+        )
+        c.commit()
+
+
+def item_search_rows():
+    with _lock:
+        if not _MIGRATED["item_search"]:
+            _MIGRATED["item_search"] = True
+            old = kv_get("memory", "item_search")
+            if old:
+                for scope, d in old.items():
+                    item_search_set(scope, d)
+                c = _connect()
+                c.execute("DELETE FROM kv WHERE namespace='memory' AND key='item_search'")
+                c.commit()
+        rows = _connect().execute(
+            "SELECT scope, name, queue, step, started_at FROM item_search_state"
+        ).fetchall()
+        out = {}
+        for r in rows:
+            try:
+                q = json.loads(r["queue"] or "[]")
+            except Exception as e:
+                _stats_err(e)
+                q = []
+            out[r["scope"]] = {
+                "name": r["name"], "queue": q, "step": r["step"],
+                "started_at": r["started_at"],
+            }
+        return out
+
+
+def item_search_set(scope, data):
+    data = data or {}
+    with _lock:
+        c = _connect()
+        c.execute(
+            "INSERT INTO item_search_state(scope,name,queue,step,started_at,updated_ts) "
+            "VALUES(?,?,?,?,?,?) "
+            "ON CONFLICT(scope) DO UPDATE SET name=excluded.name,queue=excluded.queue,"
+            "step=excluded.step,started_at=excluded.started_at,updated_ts=excluded.updated_ts",
+            (
+                str(scope), str(data.get("name", "")),
+                json.dumps(data.get("queue", []), ensure_ascii=False),
+                int(data.get("step", 0)), str(data.get("started_at", "")),
+                datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+        c.commit()
+
+
+def item_search_delete(scope):
+    with _lock:
+        c = _connect()
+        c.execute("DELETE FROM item_search_state WHERE scope=?", (str(scope),))
+        c.commit()
+
+
+def mind_intention_rows():
+    with _lock:
+        if not _MIGRATED["mind_intention"]:
+            _MIGRATED["mind_intention"] = True
+            old = kv_get("memory", "mind_intention")
+            if old:
+                for scope, d in old.items():
+                    mind_intention_set(scope, d)
+                c = _connect()
+                c.execute("DELETE FROM kv WHERE namespace='memory' AND key='mind_intention'")
+                c.commit()
+        rows = _connect().execute(
+            "SELECT scope,title,source,strength,state,due,condition,started_at,updated_at "
+            "FROM mind_intention_state"
+        ).fetchall()
+        return {r["scope"]: dict(r) for r in rows}
+
+
+def mind_intention_set(scope, data):
+    data = data or {}
+    with _lock:
+        c = _connect()
+        c.execute(
+            "INSERT INTO mind_intention_state("
+            "scope,title,source,strength,state,due,condition,started_at,updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(scope) DO UPDATE SET title=excluded.title,source=excluded.source,"
+            "strength=excluded.strength,state=excluded.state,due=excluded.due,"
+            "condition=excluded.condition,started_at=excluded.started_at,updated_at=excluded.updated_at",
+            (
+                str(scope), str(data.get("title", "")), str(data.get("source", "")),
+                float(data.get("strength", 0.0)), str(data.get("state", "committed")),
+                str(data.get("due", "")), str(data.get("condition", ""))[:120],
+                str(data.get("started_at", "")), str(data.get("updated_at", "")),
+            ),
+        )
+        c.commit()
+
+
+def mind_intention_delete(scope):
+    with _lock:
+        c = _connect()
+        c.execute("DELETE FROM mind_intention_state WHERE scope=?", (str(scope),))
+        c.commit()
+
+
+def space_event_add(ts, kind, detail, memorable=False):
+    with _lock:
+        c = _connect()
+        c.execute(
+            "INSERT INTO space_events_state(ts,kind,detail,memorable) VALUES(?,?,?,?)",
+            (str(ts), str(kind)[:20], str(detail)[:80], 1 if memorable else 0),
+        )
+        c.commit()
+
+
+def space_event_rows(limit=200):
+    """空间事件（新→旧）。"""
+    with _lock:
+        if not _MIGRATED["space_events"]:
+            _MIGRATED["space_events"] = True
+            old = kv_get("memory", "space_events")
+            if old and old.get("rows"):
+                for r in old["rows"][-200:]:
+                    space_event_add(r.get("ts", ""), r.get("kind", ""), r.get("detail", ""), r.get("memorable", False))
+                c = _connect()
+                c.execute("DELETE FROM kv WHERE namespace='memory' AND key='space_events'")
+                c.commit()
+        rows = _connect().execute(
+            "SELECT id, ts, kind, detail, memorable FROM space_events_state "
+            "ORDER BY ts DESC, id DESC LIMIT ?",
+            (max(1, int(limit)),),
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["memorable"] = bool(d.get("memorable"))
+            out.append(d)
+        return out
+
+
+def space_event_prune(days=7) -> int:
+    cutoff = (datetime.now() - timedelta(days=int(days))).isoformat(timespec="seconds")
+    with _lock:
+        c = _connect()
+        cur = c.execute("DELETE FROM space_events_state WHERE ts < ?", (cutoff,))
+        c.commit()
+        return cur.rowcount
+
+
+def ai_action_add(ts, scope, action, detail=""):
+    with _lock:
+        c = _connect()
+        c.execute(
+            "INSERT INTO ai_actions_state(ts,scope,action,detail) VALUES(?,?,?,?)",
+            (str(ts), str(scope)[:40], str(action)[:40], str(detail)[:80]),
+        )
+        c.commit()
+
+
+def ai_action_rows(scope="", limit=60):
+    with _lock:
+        if not _MIGRATED["ai_actions"]:
+            _MIGRATED["ai_actions"] = True
+            old = kv_get("memory", "ai_actions")
+            if old and old.get("items"):
+                for r in old["items"][-60:]:
+                    ai_action_add(r.get("ts", ""), r.get("scope", ""), r.get("action", ""), r.get("detail", ""))
+                c = _connect()
+                c.execute("DELETE FROM kv WHERE namespace='memory' AND key='ai_actions'")
+                c.commit()
+        sql = "SELECT ts, scope, action, detail FROM ai_actions_state"
+        params = []
+        if scope:
+            sql += " WHERE scope=?"
+            params.append(scope)
+        sql += " ORDER BY ts DESC, id DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        return [dict(r) for r in _connect().execute(sql, params).fetchall()]
 
 
 # ===== 绑定 =====
@@ -720,7 +1182,8 @@ def state_get():
         for r in rows:
             try:
                 result[r["k"]] = json.loads(r["v"])
-            except Exception:
+            except Exception as e:
+                _stats_err(e)
                 result[r["k"]] = r["v"]
         return result
 
@@ -822,7 +1285,8 @@ def vec_dumps(vec):
 def vec_loads(raw):
     try:
         return json.loads(raw) if raw else None
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return None
 
 
@@ -1036,8 +1500,8 @@ def memory_search(q, scope=None, key=None, limit=10):
         return [dict(r) for r in _connect().execute(sql, params).fetchall()]
 
 
-def memory_rows(scope=None, key=None):
-    """带 embedding 的全量行（供向量检索）。"""
+def memory_rows(scope=None, key=None, exclude_status=None, limit=None):
+    """带 embedding 的行（供向量检索）；exclude_status/limit 可下推到 SQL 减扫描。"""
     with _lock:
         sql = (
             "SELECT scope,key,fact,embedding,updated_at,confidence,source,audience,speaker,mclass,"
@@ -1048,8 +1512,16 @@ def memory_rows(scope=None, key=None):
             sql += " WHERE scope=?"
             params.append(scope)
         if key is not None:
-            sql += " AND key=?"
+            sql += " AND key=?" if "WHERE" in sql else " WHERE key=?"
             params.append(key)
+        if exclude_status:
+            if "WHERE" not in sql:
+                sql += " WHERE 1=1"
+            sql += " AND status NOT IN (" + ",".join("?" * len(exclude_status)) + ")"
+            params.extend(exclude_status)
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(max(1, int(limit)))
         return [dict(r) for r in _connect().execute(sql, params).fetchall()]
 
 
@@ -1462,6 +1934,18 @@ def vec_index_replace(rows):
         c.commit()
 
 
+def vec_index_upsert(scope, key, fact, centroid_id, embedding):
+    """增量写一条向量索引（同 fact 覆盖；最近质心归属由调用方算好）。"""
+    with _lock:
+        c = _connect()
+        c.execute("DELETE FROM vec_index WHERE scope=? AND key=? AND fact=?", (scope, key, fact))
+        c.execute(
+            "INSERT INTO vec_index(scope,key,fact,centroid_id,embedding) VALUES(?,?,?,?,?)",
+            (scope, key, fact, int(centroid_id), vec_dumps(embedding)),
+        )
+        c.commit()
+
+
 def vec_index_count() -> int:
     with _lock:
         return _connect().execute("SELECT COUNT(*) FROM vec_index").fetchone()[0]
@@ -1689,7 +2173,8 @@ def session_find_recent(scope, key, within_min=1440):
             from datetime import datetime as _dt
             last = _dt.fromisoformat(s.get("updated_at") or "")
             minutes = (_dt.now() - last).total_seconds() / 60
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             minutes = 0
         return s if minutes <= within_min else None
 
@@ -2465,7 +2950,8 @@ def restore_all(data, replace=False) -> dict:
                         [tuple(r.get(col) for col in cols) for r in rows],
                     )
                 counts[t] = len(rows)
-            except Exception:
+            except Exception as e:
+                _stats_err(e)
                 counts[t] = -1  # 该表导入失败（可能字段不兼容），跳过
         # 自增序列对齐，保证后续插入不冲突
         for t in (
@@ -2476,7 +2962,8 @@ def restore_all(data, replace=False) -> dict:
             try:
                 mx = c.execute(f"SELECT COALESCE(MAX(id),0) FROM {t}").fetchone()[0]
                 c.execute("UPDATE sqlite_sequence SET seq=? WHERE name=?", (int(mx or 0), t))
-            except Exception:
+            except Exception as e:
+                _stats_err(e)
                 pass
         c.commit()
     return counts
@@ -2490,3 +2977,13 @@ def backup_to(path):
             _connect().backup(dst)
     finally:
         dst.close()
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("_db", e)
+    except Exception:
+        pass

@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install minimal deps
+        run: python -m pip install --upgrade pip pytest openai python-dotenv
+      - name: Syntax check
+        run: |
+          python -m py_compile plugins/_db.py plugins/_shared.py plugins/broadcast.py plugins/memory.py agent/core.py tools.py
+          python -m py_compile memory/*.py
+      - name: Regression tests
+        run: python -m pytest tests/ -q

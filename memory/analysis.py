@@ -123,7 +123,8 @@ def analyze(text: str, reply: str = "") -> dict:
     try:
         from memory import expression as expr_mod
         ex = expr_mod.analyze(text + " " + (reply or ""))
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         ex = {}
     return {
         "intent": intent,
@@ -187,7 +188,8 @@ def llm_enrich(text, reply="", force=False):
         with _llm_lock:
             _llm_state["ts"] = time.time()
         return data
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return None
 
 
@@ -243,3 +245,13 @@ def attr_of(fact: str, an=None):
     """结构化属性名（偏好→preference 等）；不适合结构化的返回 None。"""
     an = an or analyze(fact)
     return ATTR_BY_ETYPE.get(an["event_type"])
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("analysis", e)
+    except Exception:
+        pass

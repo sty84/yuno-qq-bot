@@ -163,7 +163,7 @@ def cmd_config_validate() -> str:
         "rerank", "mmr", "cache", "telemetry", "session", "reflection", "analysis",
         "persona", "world", "trace", "emotion", "sleep", "schedule", "weather",
         "environment", "sharing", "living", "space", "interaction", "weights",
-        "vector_index", "policy",
+        "vector_index", "policy", "mind", "sensors",
     }
     for k in core:
         if k.startswith("_") or k in KNOWN:
@@ -702,6 +702,34 @@ def cmd_mcp() -> int:
     return 0
 
 
+def cmd_mind_status(scope=""):
+    """心智状态快照（mind_state + 意图 + 程序记忆统计）。"""
+    from memory import mind, procedures
+    import memory.stats as stats_mod
+    snap = mind.snapshot(str(scope or ""), "")
+    snap["procedures"] = procedures.stats()
+    snap["counters"] = stats_mod.counters()
+    return json.dumps(snap, ensure_ascii=False, indent=2)
+
+
+def cmd_procedures_list():
+    """列出程序记忆（System 1 习惯）。"""
+    from memory import procedures
+    return procedures.report()
+
+
+def cmd_living_bootstrap():
+    """人设→场景生成：按 persona 补齐家里物品（只新增不覆盖）。"""
+    from memory import living
+    return json.dumps(living.bootstrap_from_persona(), ensure_ascii=False, indent=2)
+
+
+def cmd_space_eval(save=False, compare=False):
+    """空间评测：X在哪命中 / 时刻召回 / 找东西模拟（--save 落基线 / --compare 对比）。"""
+    from memory import space_eval
+    return json.dumps(space_eval.run(save=save, compare=compare), ensure_ascii=False, indent=2)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="YUNO 2.0 运维/入口工具")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -914,6 +942,21 @@ def main() -> int:
     p = sub.add_parser("character-sync", help="把编辑后的 md 档案同步回记忆库")
     p.add_argument("arg", help="人物名或 md 文件路径")
     p.set_defaults(func=lambda a: print(cmd_character_sync(a.arg)) or 0)
+
+    p = sub.add_parser("mind-status", help="心智状态快照（mind_state + 意图 + 程序记忆）")
+    p.add_argument("--scope", default="", help="场景 scope（可选）")
+    p.set_defaults(func=lambda a: print(cmd_mind_status(a.scope)) or 0)
+
+    p = sub.add_parser("procedures-list", help="列出程序记忆（System 1 习惯）")
+    p.set_defaults(func=lambda a: print(cmd_procedures_list()) or 0)
+
+    p = sub.add_parser("living-bootstrap", help="人设→场景生成：按 persona 补齐家里物品（只新增不覆盖）")
+    p.set_defaults(func=lambda a: print(cmd_living_bootstrap()) or 0)
+
+    p = sub.add_parser("space-eval", help="空间评测：X在哪命中 / 时刻召回 / 找东西模拟")
+    p.add_argument("--save", action="store_true", help="把结果存为 baseline")
+    p.add_argument("--compare", action="store_true", help="与上次 baseline 对比")
+    p.set_defaults(func=lambda a: print(cmd_space_eval(save=a.save, compare=a.compare)) or 0)
 
     sub.add_parser("mcp", help="启动 MCP Server").set_defaults(func=lambda a: cmd_mcp())
 

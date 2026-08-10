@@ -62,11 +62,11 @@ PROFILES = {
         },
         "slot_pool": {
             2: {1: {"compose": 2.0, "study": 1.0, "home_entertain": 1.5},
-                3: {"dj_practice": 2.0, "friend": 1.0, "gaming": 1.5}},
-            3: {3: {"home_entertain": 2.0, "friend": 1.0, "dj_practice": 1.5}},
+                3: {"dj_practice": 2.0, "gaming": 1.5}},
+            3: {3: {"home_entertain": 2.0, "dj_practice": 1.5}},
             5: {1: {"rehearsal": 1.0, "home_rest": 1.0, "shopping": 0.8},
                 2: {"rehearsal": 1.2, "dj_practice": 1.0, "performance": 1.0, "home_rest": 0.5},
-                3: {"performance": 1.3, "dj_practice": 1.0, "friend": 0.6, "home_rest": 0.5}},
+                3: {"dj_practice": 1.0, "home_rest": 1.0}},
         },
     },
     # 普通上班族：周一~五上班，周末自由
@@ -148,6 +148,14 @@ def generate_week(profile, week_key, rng=None) -> dict:
             else:
                 acts = list(pool.keys())
                 wts = [float(pool[a]) for a in acts]
+            # 夜晚槽（22:00–06:00）只能在家活动：正常人不会在外面呆到凌晨
+            if slot == 3:
+                home_acts = [a for a in acts if ACTIVITIES.get(a, {}).get("home", False)]
+                if home_acts:
+                    acts = home_acts
+                    wts = [float(local[a]) if local else float(pool[a]) for a in acts]
+                else:
+                    acts, wts = ["home_rest"], [1.0]
             day[slot] = rng.choices(acts, weights=wts, k=1)[0]
         plan[wd] = day
         fixed_marks[wd] = marks
@@ -175,6 +183,26 @@ def generate_week(profile, week_key, rng=None) -> dict:
     return plan
 
 
+def _plan_night_ok(plan) -> bool:
+    """夜晚槽合法性：22:00–06:00 的活动必须 home=True（防止旧计划里有凌晨演出/外出）。"""
+    if not plan:
+        return True
+    try:
+        for wd in range(7):
+            day = plan.get(wd) or []
+            if len(day) < 4:
+                return False
+            act = day[3]
+            if act is None:
+                continue
+            if not ACTIVITIES.get(act, {}).get("home", False):
+                return False
+    except Exception as e:
+        _stats_err(e)
+        return False
+    return True
+
+
 _plan_cache = {}
 
 
@@ -191,6 +219,10 @@ def get_week_plan() -> dict:
     if data.get("week") == wk and data.get("profile") == pid and data.get("plan"):
         # JSON 持久化后顶层键变成字符串，还原为 int（槽位索引仍为数组）
         plan = {int(k): v for k, v in data["plan"].items()}
+        if not _plan_night_ok(plan):
+            # 旧计划夜晚槽不合理（凌晨演出/外出）→ 重新生成
+            plan = generate_week(profile(), wk)
+            _db.kv_set("memory", "schedule_week", {"week": wk, "profile": pid, "plan": plan})
     else:
         plan = generate_week(profile(), wk)
         _db.kv_set("memory", "schedule_week", {"week": wk, "profile": pid, "plan": plan})
@@ -198,17 +230,32 @@ def get_week_plan() -> dict:
     return plan
 
 
-def current_activity(now=None) -> dict:
-    """当前槽活动：{activity, label, weekday, slot, energy}。"""
-    plan = get_week_plan()
-    if not plan:
-        return {}
+def _slot_act(plan, now):
+    """当前槽活动（含深夜拆分）：22:00–02:00 用夜晚槽活动（在家夜生活），
+    02:00–06:00 强制睡觉——人设"凌晨 2 点后才睡"，2 点起就是睡眠延续。"""
     now = now or datetime.now()
     wd = now.weekday()
     if now.hour < 6:
         wd = (wd - 1) % 7  # 凌晨 0~6 点属于前一晚的夜晚槽（22:00 开始的延续）
     slot = slot_index(now.hour)
     act = plan[wd][slot]
+    if 2 <= now.hour < 6:
+        act = "sleep"
+    return wd, slot, act
+
+
+def current_activity(now=None) -> dict:
+    """当前槽活动：{activity, label, weekday, slot, energy}。"""
+    try:
+        import memory.stats as _st
+        _st.bump("tick:schedule")
+    except Exception as e:
+        _stats_err(e)
+    plan = get_week_plan()
+    if not plan:
+        return {}
+    now = now or datetime.now()
+    wd, slot, act = _slot_act(plan, now)
     meta = ACTIVITIES.get(act, ACTIVITIES["idle"])
     return {
         "activity": act,
@@ -239,7 +286,8 @@ def _appointment_line(scope, now) -> str:
     try:
         from memory import appointment as appt_mod
         appts = [a for a in appt_mod._appts() if a.get("scope") == scope and a.get("status") == "waiting"]
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return ""
     for a in appts[:2]:
         try:
@@ -248,7 +296,8 @@ def _appointment_line(scope, now) -> str:
                 return f"今天有约（{appt_mod._when_text(a)}），用户约定优先，别安排别的事"
             if due.date() == now.date() + timedelta(days=1):
                 return f"明天有约（{appt_mod._when_text(a)}），到时候记得"
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             continue
     return ""
 
@@ -275,9 +324,7 @@ def block(scope="", now=None) -> str:
     if not plan:
         return ""
     now = now or datetime.now()
-    wd = now.weekday()
-    slot = slot_index(now.hour)
-    act = plan[wd][slot]
+    wd, slot, act = _slot_act(plan, now)
     meta = ACTIVITIES.get(act, ACTIVITIES["idle"])
     parts = [f"【此刻状态】{meta['label']}"]
     nxt = _next_activity(plan, wd, slot)
@@ -305,3 +352,13 @@ def today_summary(d=None) -> str:
         if a not in ("sleep", "home_rest", "idle")
     ]
     return "、".join(labels) if labels else ""
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("schedule", e)
+    except Exception:
+        pass

@@ -59,7 +59,8 @@ def load_config():
     try:
         with open(CONFIG_PATH, encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return {}
 
 
@@ -147,6 +148,16 @@ def system_prompt() -> str:
 
 
 # ===== AI 调用 =====
+def _bump_counter(key, n=1):
+    """运行计数器：交给 memory.stats（内存缓冲 + 定时落盘）。"""
+    try:
+        import memory.stats as stats_mod
+        stats_mod.bump(key, n)
+    except Exception as e:
+        _stats_err(e)
+        pass
+
+
 def ask_deepseek(
     text: str,
     extra_context: str = "",
@@ -174,6 +185,8 @@ def ask_deepseek(
                 kwargs["temperature"] = temperature
             resp = deepseek.chat.completions.create(**kwargs)
             reply = (resp.choices[0].message.content or "").strip()
+            _bump_counter("llm_calls", 1)
+            _bump_counter("llm_chars", len(str(text)) + len(str(extra_context)) + len(reply))
             return reply[:MAX_REPLY_LEN] + ("……" if len(reply) > MAX_REPLY_LEN else "")
         except Exception as e:
             last_err = e
@@ -221,3 +234,13 @@ def send_message(api, target_type: str, target: str, content: str):
     if target_type == "c2c":
         return api.post_c2c_message(openid=target, content=content)
     return api.post_group_message(group_openid=target, content=content)
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("_shared", e)
+    except Exception:
+        pass

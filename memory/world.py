@@ -56,7 +56,8 @@ def snapshot(scope, budget=None, force=False) -> str:
         goals = advisor.goal_active(scope)
         if goals:
             parts.append("目标：" + "；".join(str(g["title"])[:20] for g in goals[:3]))
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
 
     text = "【用户的世界】" + ("\n".join(parts) if parts else "（暂无活跃内容）")
@@ -73,7 +74,8 @@ def _rule_decision(old_conf, valid_from, scope="", access_count=0) -> dict:
             if valid_from
             else 0.0
         )
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         age_days = 0.0
     if scope == "ai" or scope.startswith("ai:"):
         # AI 自我认知：保守更新，避免人格漂移
@@ -153,7 +155,8 @@ def investigate_correction(scope, key, text, candidate_facts, an=None) -> dict:
             action = "uncertain"
         _investigate_state[scope] = now
         return {"action": action, "reason": str(data.get("reason", ""))[:100]}
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return _rule_decision(old_conf, valid_from, scope, access_count)
 
 
@@ -175,3 +178,13 @@ def stats(scope=None) -> dict:
         "investigate_throttle_s": float(_cfg("investigate_throttle_s", 600)),
         "budget_chars": int(_cfg("budget_chars", 400)),
     }
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("world", e)
+    except Exception:
+        pass

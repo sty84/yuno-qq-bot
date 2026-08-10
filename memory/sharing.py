@@ -80,7 +80,8 @@ def _decayed(st) -> float:
     half = float(_cfg("half_life_hours", 8))
     try:
         hours = (datetime.now() - datetime.fromisoformat(st.get("ts") or "")).total_seconds() / 3600.0
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         hours = 0.0
     if hours <= 0 or half <= 0:
         return max(0.0, min(1.0, float(st.get("S", 0.0))))
@@ -107,7 +108,8 @@ def emotion_bonus() -> float:
     try:
         from memory import emotion as emotion_mod
         s = emotion_mod.ai_state()
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return 0.02
     v, a, d = s.get("v", 0.0), s.get("a", 0.0), s.get("d", 0.0)
     if v > 0.4 and a > 0.4:
@@ -128,7 +130,8 @@ def _stage_mult(scope) -> float:
             fam = float(row.get("familiarity", 0.0))
             stage = "深度伙伴" if fam >= 0.65 else ("熟悉" if fam >= 0.4 else ("初识" if fam >= 0.2 else "陌生"))
             return STAGE_MULT.get(stage, 0.5)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return 0.5  # 无记录按"初识"
 
@@ -143,7 +146,8 @@ def _penalty_mult(scope) -> float:
         return 1.0
     try:
         age_h = (datetime.now() - datetime.fromisoformat(data["ts"])).total_seconds() / 3600.0
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         age_h = 0.0
     window = float(data.get("window_hours", _cfg("penalty_hours", 48)))
     p = min(0.6, float(_cfg("penalty_step", 0.25)) * count)
@@ -186,7 +190,8 @@ def on_annoyed(scope="", text=""):
     try:
         from memory import relationship as rel_mod
         rel_mod.update(scope, event="negative", detail="用户嫌消息多")
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return count
 
@@ -222,6 +227,9 @@ def _mark_sent_reason(now, reason):
 def _schedule_events(now=None) -> list:
     """当日日程里的可分享事件（每天每类只计一次）。"""
     now = now or datetime.now()
+    # 深夜（22:00–06:00）不新计分享事件，避免"昨天的排练"在凌晨被当成今天的新事件
+    if now.hour >= 22 or now.hour < 6:
+        return []
     key = f"sharing_events:{now.date()}"
     data = _db.kv_get("memory", key) or {"kinds": []}
     kinds = set(data.get("kinds") or [])
@@ -229,11 +237,20 @@ def _schedule_events(now=None) -> list:
     try:
         from memory import schedule as schedule_mod
         plan = schedule_mod.get_week_plan()
-        acts = plan.get(now.weekday(), []) if plan else []
-    except Exception:
+        wd = now.weekday()
+        if now.hour < 6:
+            wd = (wd - 1) % 7
+        acts = plan.get(wd, []) if plan else []
+    except Exception as e:
+        _stats_err(e)
         acts = []
-    for act in acts:
+    for slot, act in enumerate(acts):
         if act in EVENT_DELTAS and act not in ("praised", "stood_up", "user_down", "playful", "dream"):
+            # 只统计"已经开始"的槽位（避免凌晨就把未来一整天的活动都预加进来）
+            if slot != 3:
+                start = {0: 6, 1: 12, 2: 18}.get(slot)
+                if start is None or now.hour < start:
+                    continue
             if act not in kinds:
                 new.append(act)
                 kinds.add(act)
@@ -243,7 +260,8 @@ def _schedule_events(now=None) -> list:
         if dream_rows and "dream" not in kinds:
             new.append("dream")
             kinds.add("dream")
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     # 空间事件：到达演出/排练/迟到 → 当日分享素材（每天每类一次）
     try:
@@ -261,7 +279,8 @@ def _schedule_events(now=None) -> list:
             if mapped and mapped not in kinds:
                 new.append(mapped)
                 kinds.add(mapped)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     if new:
         _db.kv_set("memory", key, {"kinds": sorted(kinds)})
@@ -303,7 +322,8 @@ def _eligible(scope, now) -> tuple:
             scene="group" if str(scope).startswith("group") else "c2c", axis="disturb",
         )
         th = float(_cfg("threshold", 0.6)) / max(0.3, mod)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         th = float(_cfg("threshold", 0.6))
     if d["effective"] < th:
         return False, f"分享欲不足 {d['effective']}<{round(th, 2)}"
@@ -313,12 +333,14 @@ def _eligible(scope, now) -> tuple:
         try:
             if (now - datetime.fromisoformat(st["last_trigger_ts"])).total_seconds() < cd * 3600:
                 return False, "冷却中"
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
     try:
         from memory import interaction as interaction_mod
         cap = max(1, round(int(_cfg("max_per_day", 2)) * min(1.5, interaction_mod.relation_mult(scope))))
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         cap = int(_cfg("max_per_day", 2))
     if st.get("day") == now.date().isoformat() and int(st.get("daily", 0)) >= cap:
         return False, "日上限"
@@ -329,7 +351,8 @@ def _eligible(scope, now) -> tuple:
         cur = schedule_mod.current_activity(now)
         if cur.get("activity") in ("sleep", "performance", "rehearsal"):
             return False, f"安静时段（{cur.get('label')}）"
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return True, ""
 
@@ -360,12 +383,20 @@ def _compose(scope, ctx: str, reason: str) -> str:
     try:
         from agent import persona
         system = persona.compose(include_ai=False)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         system = _shared.BASE_SYSTEM_PROMPT
+    try:
+        from memory import tz as tz_mod
+        now_txt = tz_mod.now_text(scope)
+    except Exception as e:
+        _stats_err(e)
+        now_txt = datetime.now().strftime("%m月%d日 %H:%M")
     prompt = (
         "你是千石由乃。你在主动找用户说话（用户此刻没发消息），下面是你此刻的状态素材（内部参考，不要全部复述）：\n"
         f"{ctx}\n"
         f"想发这条消息的缘由：{_reason_text(reason)}\n"
+        f"现在是：{now_txt}。\n"
         "要求：\n"
         "1. 消息必须自洽——用户看不到你的生活，所以消息里要带上'前因'：要么提你此刻正在做的事"
         "（写歌/排练/天气/家里），要么提你们共同知道的事；不能让用户觉得莫名其妙。\n"
@@ -373,6 +404,10 @@ def _compose(scope, ctx: str, reason: str) -> str:
         "这类回应或外部评价，也不要写成对用户上一句话的回应。\n"
         "3. 短（40字以内）、口语化、像随手发的一条；不要报日程、不要括号舞台提示、"
         "不要'作为AI''希望对你有帮助'这类 AI 味表达、不要总结升华。\n"
+        "4. 时间一致：只有素材显示你'此刻正在做 / 1 小时内刚做完'的事才能用'刚…'；"
+        "白天发生的事就说'今天/下午/傍晚排练过'；现在是深夜（22 点后）就绝不要说'刚回来''刚排练完'这类话。\n"
+        "5. 天气：素材里有【天气/环境】内容才可提天气；素材里没有天气，就完全不要提天气，"
+        "也不要用'闷热/凉快/热'这类词。\n"
         "直接输出消息内容。"
     )
     try:
@@ -381,7 +416,8 @@ def _compose(scope, ctx: str, reason: str) -> str:
         msg = sleep_mod._sanitize_dream(msg)
         if msg:
             return msg[:80]
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return FALLBACK_MESSAGES.get(reason, FALLBACK_MESSAGES["generic"])
 
@@ -402,7 +438,8 @@ def drive(scope="", now=None) -> dict:
         est = emotion_mod.user_estimate(scope)
         if est and est.get("label") in _NEG_USER_LABELS and reason in _POSITIVE_REASONS:
             return {"sent": False, "reason": "用户情绪不佳，克制正向分享", "desire": d}
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     # 同一天同一类事件不重复发（内容去重）
     if reason in _sent_reasons(now):
@@ -412,18 +449,21 @@ def drive(scope="", now=None) -> dict:
         from memory import schedule as schedule_mod
         if s := schedule_mod.block(scope, now=now):
             ctx_parts.append(s)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     try:
         from memory import environment as env_mod
         if s := env_mod.block(scope, now=now, force=True):  # 发消息前强制刷新环境，防旧快照穿帮
             ctx_parts.append(s)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     try:
         from memory import emotion as emotion_mod
         ctx_parts.append(emotion_mod.ai_block())
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     msg = _compose(scope, "\n".join(ctx_parts), reason)
     target_type, target = _target_of(scope)
@@ -434,7 +474,8 @@ def drive(scope="", now=None) -> dict:
     try:
         from memory import interaction as interaction_mod
         interaction_mod.mark_event("share", now)  # 分享频率计数（刺激适应）
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     st = _state()
     st["S"] = float(_cfg("residual", 0.2))
@@ -456,20 +497,27 @@ def drive(scope="", now=None) -> dict:
         policy_mod.touch("ai", "experience", f"给用户发了条消息：「{msg}」", importance=0.5)
         from memory import relationship as rel_mod
         rel_mod.update(scope, event="share", detail=msg[:60])
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return {"sent": True, "msg": msg, "reason": reason, "desire": d}
 
 
 def drive_all(now=None) -> list:
     """后台循环入口：遍历有关系的用户场景，各自检查是否触发。"""
+    try:
+        import memory.stats as _st
+        _st.bump("tick:sharing")
+    except Exception as e:
+        _stats_err(e)
     if not _cfg("enabled", True):
         return []
     now = now or datetime.now()
     sent = []
     try:
         rows = _db.relationship_rows()
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return []
     scopes = [r.get("scope") for r in rows if str(r.get("scope") or "").startswith("c2c:")]
     for scope in scopes:
@@ -480,3 +528,13 @@ def drive_all(now=None) -> list:
         except Exception as e:
             print(f"分享驱动失败 {scope}: {e}")
     return sent
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("sharing", e)
+    except Exception:
+        pass

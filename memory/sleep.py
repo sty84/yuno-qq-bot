@@ -108,13 +108,19 @@ def _deep_window() -> tuple:
     w = _cfg_sleep("deep_window", [2, 5]) or [2, 5]
     try:
         return (int(w[0]), int(w[1]))
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return (2, 5)
 
 
 def sleep_mode(now=None) -> str:
     """awake / standby（节能待机，可唤醒）/ deep（深睡档，真离线）。
     深睡档按时间窗优先；待机档 = 日程里的睡觉槽；其余清醒。"""
+    try:
+        import memory.stats as _st
+        _st.bump("tick:sleep")
+    except Exception as e:
+        _stats_err(e)
     now = now or datetime.now()
     lo, hi = _deep_window()
     hour = now.hour
@@ -125,7 +131,8 @@ def sleep_mode(now=None) -> str:
         from memory import schedule as schedule_mod
         cur = schedule_mod.current_activity(now)
         act = cur.get("activity") if cur else ""
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         act = ""
     return "standby" if act == "sleep" else "awake"
 
@@ -184,7 +191,8 @@ def emergency_wake(scope, urgent, now=None) -> bool:
             continue
         try:
             ts = datetime.fromisoformat(i["ts"])
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             continue
         if now - ts <= window:
             recent += 1
@@ -214,7 +222,8 @@ def record_interrupt(scope, now=None):
     try:
         from memory import schedule as schedule_mod
         slot = schedule_mod.slot_index(now.hour)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         slot = -1
     slots = list(data.get("slots") or [])
     if slot in slots:
@@ -226,7 +235,8 @@ def record_interrupt(scope, now=None):
     try:
         from memory import space as space_mod
         space_mod.emit("interrupt", "被从省电模式里捞出来")
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     return int(data["count"])
 
@@ -276,7 +286,8 @@ def _llm_one(prompt) -> str:
             temperature=0.4,
         )
         return (resp.choices[0].message.content or "").strip()[:120]
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return ""
 
 
@@ -310,14 +321,16 @@ def _deep_consolidate() -> dict:
             n = interrupts_yesterday()
             if n:
                 summary = f"昨晚被吵醒{n}次没睡好；{summary}"[:120]
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
         try:
             from memory import schedule as schedule_mod
             sch = schedule_mod.today_summary()
             if sch:
                 summary = f"今天安排了{sch}；{summary}"[:120]
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
         fact = f"{_today()}：{summary}"
         _db.memory_add(
@@ -379,7 +392,8 @@ def _llm_dream(dtype, materials, logic_hint) -> str:
             temperature=0.9,
         )
         return _sanitize_dream(resp.choices[0].message.content or "")
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return ""
 
 
@@ -412,13 +426,15 @@ def _dream() -> dict:
         from memory import living as living_mod
         if item := living_mod.random_flavor():
             frags.append(item)  # 家里物件进梦（v31）
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     try:
         from memory import space as space_mod
         if any("演出" in str(e.get("detail", "")) for e in space_mod.today_events()):
             frags.append("舞台灯光")  # 今天有演出 → 舞台进梦（v31）
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     random.shuffle(frags)
 
@@ -481,7 +497,8 @@ def night_run(force=False) -> dict:
         try:
             from memory import sharing as sharing_mod
             sharing_mod.add_delta(0.3, "dream")  # 做梦 → 分享欲（v31）
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
     report["dreams"] = len(dreams)
     report["remembered"] = remember
@@ -494,7 +511,8 @@ def _age_hours(data) -> float:
     try:
         from datetime import datetime as _dt
         return (_dt.now() - _dt.fromisoformat(str(data.get("created_ts", "")))).total_seconds() / 3600.0
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         return 999.0
 
 
@@ -531,7 +549,8 @@ def context_block(scope="", text="") -> str:
         from memory import interaction as interaction_mod
         if interaction_mod.user_mult(scope)["disturb"] < 0.8:
             return ""
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     _db.kv_set("memory", "dreams", {**data, "told": True})
     if data.get("remembered") and data.get("dreams"):
@@ -545,3 +564,13 @@ def context_block(scope="", text="") -> str:
         "【昨晚的梦（内部提示）】醒来后还没和用户提过：我昨晚好像做了个梦，"
         "但内容一点都想不起来了。可以在合适的时机自然提一句，不要生硬播报。"
     )
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("sleep", e)
+    except Exception:
+        pass

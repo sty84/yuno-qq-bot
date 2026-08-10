@@ -19,6 +19,39 @@ _TIME_REF_RE = re.compile(
 )
 _APPOINT_MARKERS = ("说好", "约", "明天", "后天", "周末", "下周", "到时候", "见面", "见", "集合", "碰头")
 
+_COGNITIVE_INSTRUCTION = (
+    "\n\n【认知输出要求（本条消息）】请只输出一个 JSON 对象（不要 Markdown 代码块、不要解释），字段："
+    '{"appraisal": "你对当前情境的一句话解读（威胁/机会/无关）", '
+    '"activated_goals": ["命中的目标列表（没有就空数组）"], '
+    '"intention": "你当前承诺要做的事（没有就空字符串）", '
+    '"chosen_action": "你选择的动作", '
+    '"reply": "对用户的完整回复（保持人设与语气）"}'
+)
+
+
+def _mind_cfg(key, default):
+    try:
+        m = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("mind", {}) or {}
+        return m.get(key, default)
+    except Exception as e:
+        _stats_err(e)
+        return default
+
+
+def _parse_cognitive(raw) -> dict | None:
+    try:
+        import json
+        m = re.search(r"\{.*\}", raw or "", re.S)
+        if not m:
+            return None
+        data = json.loads(m.group(0))
+        if not str(data.get("reply") or "").strip():
+            return None
+        return data
+    except Exception as e:
+        _stats_err(e)
+        return None
+
 
 def _is_stale_time_ref(content) -> bool:
     """历史 AI 回复里的过时时间引用：含具体钟点且不是约定陈述 → 需要清洗。"""
@@ -144,7 +177,8 @@ def ask(
         sharing_mod.on_conversation(meta["analysis"], text, scopes[0] if scopes else "")  # 分享欲对话事件（v31）
         if scopes:
             sharing_mod.on_annoyed(scopes[0], text)  # 用户嫌烦反馈（v31）
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     ctx_parts = []
     try:
@@ -174,7 +208,8 @@ def ask(
                 if mode == "standby":
                     ctx_parts.append(sleep_mod.standby_block(scope0, text))
                     sleep_mod.record_interrupt(scope0)
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     try:
         from memory import schedule as schedule_mod
@@ -183,12 +218,14 @@ def ask(
             ctx_parts.append(
                 "【忙碌中】此刻她在排练/演出，回复尽量简短，被追问才展开，别长篇大论。"
             )
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     try:
         from memory import tz as tz_mod
         ctx_parts.append(tz_mod.now_text(scopes[0] if scopes else None))
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         ctx_parts.append(_now_text())
     time_q = bool(_TIME_Q_RE.match(text or ""))
     if time_q:
@@ -245,7 +282,8 @@ def ask(
                 ctx_parts.append(s)
             if s := mistake.context_block(scopes[0], text):  # 近期错误与原谅（v23）
                 ctx_parts.append(s)
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
     if scopes and _core_enabled():
         s = session.touch(scopes[0], "", text)
@@ -261,7 +299,8 @@ def ask(
         try:
             from memory import character
             extra_scopes += character.match_scopes(text)
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
         # 分层计算（v5 §P3）：极短查询用轻量检索（少召回、不扩展），控制成本
         light = len((text or "").strip()) <= 4
@@ -277,7 +316,8 @@ def ask(
             from memory import world
             if s := world.snapshot(scopes[0]):  # 用户中心世界模型（v8，硬预算+缓存）
                 ctx_parts.append(s)
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
         try:
             from memory import trace
@@ -287,16 +327,61 @@ def ask(
                     candidate=mem_ctx[:200], action="inject", modules=["memory"],
                     reasoning="检索注入（回答依据）", hint="assemble_context",
                 )
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
         if mem_ctx:
             ctx_parts.append(mem_ctx)
     if extra_context:
         ctx_parts.append(extra_context)
+    if scopes and _mind_cfg("enabled", True):
+        try:
+            from memory import mind as mind_mod
+            if s := mind_mod.block(scopes[0], text):
+                ctx_parts.append(s)
+            mind_mod.recompute_intention(scopes[0])
+        except Exception as e:
+            _stats_err(e)
+            pass
     call = llm or _default_llm
     llm_text = text
     extra_ctx = "\n\n".join(ctx_parts)
     sys_prompt = system or persona.compose(query=text)
+    # System 1：命中高成功率习惯 → 直接复用动作（省一次 LLM 调用）
+    if llm is None and scopes and _mind_cfg("system1", True):
+        try:
+            from memory import procedures as procedures_mod
+            hit = procedures_mod.match(text, scopes[0])
+            if hit:
+                reply = str(hit.get("action", ""))
+                meta["system1"] = {
+                    "situation": hit.get("situation", ""),
+                    "success": hit.get("success", 0.0),
+                    "tries": hit.get("tries", 0),
+                }
+                try:
+                    import memory.stats as stats_mod
+                    stats_mod.bump("system1_hit")
+                except Exception as e:
+                    _stats_err(e)
+                    pass
+                try:
+                    from memory import living as living_mod2
+                    living_mod2.sync_from_text(reply)
+                except Exception as e:
+                    _stats_err(e)
+                    pass
+                meta["reply"] = reply
+                return reply, meta
+            try:
+                import memory.stats as stats_mod
+                stats_mod.bump("system1_miss")
+            except Exception as e:
+                _stats_err(e)
+                pass
+        except Exception as e:
+            _stats_err(e)
+            pass
     if time_q:
         # 把实际时间锚进用户消息（模型最看重用户输入）+ 低温度防自由发挥
         try:
@@ -306,13 +391,53 @@ def ask(
                 f"（当前实际时间：{now_head}。用户问的就是这个时间，"
                 "必须按它回答，不要猜、不要编造。）\n用户：" + text
             )
-        except Exception:
+        except Exception as e:
+            _stats_err(e)
             pass
     if time_q and llm is None:
         reply = _shared.ask_deepseek(
             llm_text, extra_context=extra_ctx, history=_clean_history(history or []),
             system=sys_prompt, temperature=0.3,
         )
+    elif llm is None and _mind_cfg("cognitive_turn", False):
+        # 单次结构化输出（认知循环）：appraisal/goals/intention/action/reply 压进一次调用
+        raw = _shared.ask_deepseek(
+            llm_text,
+            extra_context=extra_ctx + _COGNITIVE_INSTRUCTION,
+            history=_clean_history(history or []),
+            system=sys_prompt,
+            temperature=0.6,
+        )
+        parsed = _parse_cognitive(raw)
+        if parsed:
+            reply = str(parsed.get("reply", ""))
+            meta["cognitive"] = parsed
+            try:
+                import memory.stats as stats_mod
+                stats_mod.bump("cognitive_ok")
+            except Exception as e:
+                _stats_err(e)
+                pass
+            try:
+                if scopes:
+                    from memory import mind as mind_mod
+                    mind_mod.apply_cognitive(scopes[0], text, parsed)
+            except Exception as e:
+                _stats_err(e)
+                pass
+        else:
+            try:
+                import memory.stats as stats_mod
+                stats_mod.bump("cognitive_fail")
+            except Exception as e:
+                _stats_err(e)
+                pass
+            reply = call(
+                llm_text,
+                extra_context=extra_ctx,
+                history=_clean_history(history or []),
+                system=sys_prompt,
+            )
     else:
         reply = call(
             llm_text,
@@ -323,7 +448,8 @@ def ask(
     try:
         from memory import living as living_mod
         living_mod.sync_from_text(reply or "")  # 生活细节回流（v31.2）
-    except Exception:
+    except Exception as e:
+        _stats_err(e)
         pass
     meta["reply"] = reply
     if learn and learn_scope:
@@ -342,3 +468,13 @@ def grow(scope=None, dry_run=False) -> dict:
     if dry_run:
         return {"stats": memory.eval_report()}
     return memory.backfill_run(batch=64)
+
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("core", e)
+    except Exception:
+        pass

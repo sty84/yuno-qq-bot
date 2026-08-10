@@ -116,13 +116,30 @@ async def inspection_loop(make_ctx):
                         break
                     if sleep_mod.sleep_mode() == "deep":
                         continue
-                    msg = await asyncio.to_thread(
-                        _shared.ask_deepseek,
-                        living.inspection_prompt(item),
-                        system=_shared.BASE_SYSTEM_PROMPT,
-                    )
-                    await _shared.send_message(ctx.api, item["target_type"], item["target"], msg)
-                    living.take_inspection(item["scope"])
+                    if item.get("kind") == "search":
+                        # 先清当前 pending，再推进：search_progress 会写入下一次查看，
+                        # 顺序反了会把下一次查看误删，导致搜索停摆（修复）
+                        living.take_inspection(item["scope"])
+                        prog = living.search_progress(item["scope"])
+                        prompt = prog.get("prompt", "") if prog else ""
+                        quiet = bool(prog.get("quiet")) if prog else False
+                        paused = bool(prog.get("paused")) if prog else False
+                    else:
+                        prompt = living.inspection_prompt(item)
+                        quiet = paused = False
+                    if prompt:
+                        msg = await asyncio.to_thread(
+                            _shared.ask_deepseek,
+                            prompt,
+                            system=_shared.BASE_SYSTEM_PROMPT,
+                        )
+                        await _shared.send_message(ctx.api, item["target_type"], item["target"], msg)
+                    elif quiet:
+                        print(f"[检查] {item['scope']} 静默推进（{item['container']}）")
+                    elif paused:
+                        print(f"[检查] {item['scope']} 话题转移，搜索暂停")
+                    if item.get("kind") != "search":
+                        living.take_inspection(item["scope"])
                     print(f"[检查] {item['scope']} {item['container']} 已汇报")
         except Exception as e:
             print(f"inspection report failed: {e}")
@@ -136,6 +153,10 @@ async def space_loop(make_ctx):
         try:
             from memory import space
             space.position()  # 懒演化推进：自动出发/到达，事件自然生成
+            try:
+                space.room_position()  # 家内房间移动同样懒推进（P0 优化）
+            except Exception as e:
+                print(f"房间移动推进失败：{e}")
             try:
                 from memory import sensors
                 sensors.tick()  # 家庭设备日常演化
