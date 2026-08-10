@@ -26,6 +26,11 @@ async def outbox_loop(make_ctx):
     """把 MCP notify.send 写入的待发消息推送到 QQ。"""
     while True:
         _shared.reload_if_changed()
+        try:
+            import memory.stats as _st
+            _st.bump("tick:outbox_loop")
+        except Exception as e:
+            _stats_err(e)
         ctx = make_ctx()
         if ctx.api is not None:
             for item in _db.notif_pending():
@@ -37,6 +42,7 @@ async def outbox_loop(make_ctx):
                 except Exception as e:
                     _db.notif_mark_failed(item["id"])
                     print(f"播报发送失败（第 {_db.notif_failed_retries(item['id'])} 次）：{e}")
+                    _stats_err(e)
         await asyncio.sleep(30)
 
 
@@ -44,6 +50,11 @@ async def random_event_loop(make_ctx):
     """按配置间隔给目标群发一条人设化随机动态。"""
     while True:
         _shared.reload_if_changed()
+        try:
+            import memory.stats as _st
+            _st.bump("tick:random_loop")
+        except Exception as e:
+            _stats_err(e)
         cfg = _shared.CONFIG.get("random_events", {})
         if not cfg.get("enabled"):
             await asyncio.sleep(300)
@@ -69,6 +80,7 @@ async def random_event_loop(make_ctx):
                 _shared.set_mood(random.choice(_shared.MOODS))
         except Exception as e:
             print(f"随机动态失败：{e}")
+            _stats_err(e)
 
 
 async def appointment_loop(make_ctx):
@@ -76,12 +88,18 @@ async def appointment_loop(make_ctx):
     while True:
         _shared.reload_if_changed()
         try:
+            import memory.stats as _st
+            _st.bump("tick:appointment_loop")
+        except Exception as e:
+            _stats_err(e)
+        try:
             from memory import appointment
             sent = await asyncio.to_thread(appointment.check_and_poke)
             for a in sent:
                 print(f"[约定] 已催 {a.get('scope')}（第 {a.get('poked')} 次）：{a.get('text', '')[:40]}")
         except Exception as e:
             print(f"约定检查失败：{e}")
+            _stats_err(e)
         cfg = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("appointment", {}) or {}
         await asyncio.sleep(float(cfg.get("check_interval_s", 60)))
 
@@ -91,12 +109,18 @@ async def sharing_loop(make_ctx):
     while True:
         _shared.reload_if_changed()
         try:
+            import memory.stats as _st
+            _st.bump("tick:sharing_loop")
+        except Exception as e:
+            _stats_err(e)
+        try:
             from memory import sharing
             sent = await asyncio.to_thread(sharing.drive_all)
             for s in sent:
                 print(f"[分享] {s['scope']} 主动发消息（{s['reason']}）：{s['msg'][:40]}")
         except Exception as e:
             print(f"分享驱动失败：{e}")
+            _stats_err(e)
         cfg = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("sharing", {}) or {}
         await asyncio.sleep(float(cfg.get("check_interval_min", 15)) * 60)
 
@@ -105,6 +129,11 @@ async def inspection_loop(make_ctx):
     """跨房间查看汇报（v31.4）：'我去看看' → 延迟一条自然汇报。"""
     while True:
         _shared.reload_if_changed()
+        try:
+            import memory.stats as _st
+            _st.bump("tick:inspection_loop")
+        except Exception as e:
+            _stats_err(e)
         try:
             from memory import living
             from memory import sleep as sleep_mod
@@ -143,6 +172,7 @@ async def inspection_loop(make_ctx):
                     print(f"[检查] {item['scope']} {item['container']} 已汇报")
         except Exception as e:
             print(f"inspection report failed: {e}")
+            _stats_err(e)
         await asyncio.sleep(15)
 
 
@@ -151,17 +181,34 @@ async def space_loop(make_ctx):
     while True:
         _shared.reload_if_changed()
         try:
+            import memory.stats as _st
+            _st.bump("tick:space_loop")
+        except Exception as e:
+            _stats_err(e)
+        try:
             from memory import space
             space.position()  # 懒演化推进：自动出发/到达，事件自然生成
             try:
                 space.room_position()  # 家内房间移动同样懒推进（P0 优化）
             except Exception as e:
                 print(f"房间移动推进失败：{e}")
+                _stats_err(e)
             try:
                 from memory import sensors
                 sensors.tick()  # 家庭设备日常演化
             except Exception as e:
                 print(f"sensor tick failed: {e}")
+                _stats_err(e)
         except Exception as e:
             print(f"空间推进失败：{e}")
+            _stats_err(e)
         await asyncio.sleep(300)
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("broadcast", e)
+    except Exception:
+        pass

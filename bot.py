@@ -52,6 +52,7 @@ def load_plugins():
             print(f"已加载插件：{getattr(mod, 'NAME', f.stem)}")
         except Exception as e:
             print(f"插件加载失败 {f.name}：{e}")
+            _stats_err(e)
     return mods
 
 
@@ -149,6 +150,7 @@ async def run_plugin_commands(text, ctx):
                     result = await result
             except Exception as e:
                 print(f"插件指令处理失败（{getattr(mod, 'NAME', mod.__name__)}/{trigger}）：{e}")
+                _stats_err(e)
                 continue
             if result:
                 return result
@@ -167,6 +169,7 @@ class QQBot(botpy.Client):
                     asyncio.create_task(coro)
             except Exception as e:
                 print(f"插件 {getattr(mod, 'NAME', mod.__name__)} 后台任务启动失败：{e}")
+                _stats_err(e)
         asyncio.create_task(self._warmup())
 
     async def _warmup(self):
@@ -178,6 +181,7 @@ class QQBot(botpy.Client):
                 print("记忆向量模型预热完成")
         except Exception as e:
             print(f"记忆向量模型预热失败：{e}")
+            _stats_err(e)
 
     async def _send_bridge(self, ctx):
         """慢响应时发一条自然衔接（有冷却，防止刷屏）。"""
@@ -196,6 +200,7 @@ class QQBot(botpy.Client):
             )
         except Exception as e:
             print(f"衔接消息发送失败：{e}")
+            _stats_err(e)
 
     async def _ask(self, text, ctx, scopes, extra):
         """调 Agent；响应超过阈值时先发衔接语，再等完整答案。"""
@@ -248,6 +253,7 @@ class QQBot(botpy.Client):
                     return r
             except Exception as e:
                 print(f"游戏处理失败：{e}")
+                _stats_err(e)
 
         # 决策顾问（v6）：一次一问，结合对用户的了解，考虑现实约束
         for mod in PLUGINS:
@@ -262,6 +268,7 @@ class QQBot(botpy.Client):
                     return r
             except Exception as e:
                 print(f"决策咨询处理失败：{e}")
+                _stats_err(e)
 
         return await self._chat(text, ctx)
 
@@ -292,6 +299,7 @@ class QQBot(botpy.Client):
                     extra_parts.append(s)
             except Exception as e:
                 print(f"上下文注入失败：{e}")
+                _stats_err(e)
         extra = "\n\n".join(extra_parts)
 
         kind, k1, k2 = ctx.scene
@@ -303,6 +311,7 @@ class QQBot(botpy.Client):
             reply, _meta = await self._ask(text, ctx, scopes, extra)
         except Exception as e:
             print(f"[AI] 请求失败，使用兜底回复：{e}")
+            _stats_err(e)
             reply = "（AI 服务暂时不可用，请稍后再试～）"
         # 无论 AI 是否成功都记录上下文并尝试提取记忆，避免偶发失败导致记忆断档
         push_history(key, "user", text)
@@ -314,6 +323,7 @@ class QQBot(botpy.Client):
                     asyncio.create_task(ac(ctx, text, reply))
                 except Exception as e:
                     print(f"after_chat 启动失败：{e}")
+                    _stats_err(e)
         return reply
 
     async def on_group_at_message_create(self, message: GroupMessage):
@@ -333,6 +343,7 @@ class QQBot(botpy.Client):
                 await message.reply(content=chunk)
             except Exception as e:
                 print(f"回复失败：{e}")
+                _stats_err(e)
             if i < len(chunks) - 1:
                 await asyncio.sleep(0.6)
 
