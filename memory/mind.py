@@ -242,6 +242,7 @@ def options_for(text, scope="", now=None) -> list:
     try:
         from memory import emotion
         st = emotion.user_estimate(scope) if hasattr(emotion, "user_estimate") else {}
+        st = st or {}  # user_estimate 对空 scope 可能返回 None（v2.2 修复）
         if float(st.get("v", 0.0)) < -0.2:
             opts.append({"action": "先安抚情绪再解决问题", "utility": 0.75})
     except Exception as e:
