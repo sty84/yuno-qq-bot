@@ -37,6 +37,45 @@ INTENSITY_TIERS = {
     "恐惧": ("不安", "恐惧", "惊恐"),
 }
 
+# ---- 复合情绪（Plutchik 情绪对 + 对立并存）----
+PLUTCHIK_COMPOUND = {
+    ("喜悦", "信任"): "爱",
+    ("信任", "恐惧"): "服从",
+    ("恐惧", "惊讶"): "敬畏",
+    ("惊讶", "悲伤"): "失望",
+    ("悲伤", "厌恶"): "悔恨",
+    ("厌恶", "愤怒"): "轻蔑",
+    ("愤怒", "期待"): "攻击性",
+    ("期待", "喜悦"): "乐观",
+}
+
+OPPOSITE_COMPOUND = {
+    frozenset(["喜悦", "悲伤"]): "悲喜交加",
+    frozenset(["喜悦", "愤怒"]): "哭笑不得",
+    frozenset(["期待", "恐惧"]): "期待又不安",
+    frozenset(["喜悦", "恐惧"]): "又惊又喜",
+    frozenset(["信任", "厌恶"]): "又爱又恨",
+}
+
+COMPOUND_WORDS = {
+    "悲喜交加": "悲喜交加", "喜忧参半": "悲喜交加",
+    "哭笑不得": "哭笑不得", "又气又笑": "哭笑不得", "又气又好笑": "哭笑不得",
+    "又惊又喜": "又惊又喜", "又爱又恨": "又爱又恨", "五味杂陈": "五味杂陈",
+    "既期待又害怕": "期待又不安", "既期待又怕": "期待又不安", "又期待又紧张": "期待又不安",
+    "百感交集": "五味杂陈",
+}
+
+_BASIC_EMO_WORDS = {
+    "开心": "喜悦", "高兴": "喜悦", "快乐": "喜悦", "喜": "喜悦", "笑": "喜悦",
+    "气": "愤怒", "生气": "愤怒", "愤怒": "愤怒", "恼": "愤怒", "火": "愤怒",
+    "难过": "悲伤", "伤心": "悲伤", "悲": "悲伤", "哭": "悲伤",
+    "怕": "恐惧", "害怕": "恐惧", "慌": "恐惧", "紧张": "恐惧",
+    "期待": "期待", "盼": "期待",
+    "惊": "惊讶", "吓": "恐惧",
+    "厌": "厌恶", "烦": "厌恶",
+    "信": "信任", "放心": "信任",
+}
+
 # 现有 analysis 标签 → VAD（用户侧观测用，独立于 analysis 的 metrics 以免循环依赖）
 LABEL_VAD = {
     "开心": {"v": 0.8, "a": 0.5, "d": 0.5},
@@ -318,6 +357,32 @@ def _confidence_of(text, an, source="rule") -> float:
     return 0.3
 
 
+def _compound_of(text, label, vad) -> str:
+    """复合情绪检测：词表直配 → '又X又Y' 情绪对 → 正负词并存兜底。"""
+    t = str(text or "")
+    for w, c in COMPOUND_WORDS.items():
+        if w in t:
+            return c
+    m = re.search(r"(?:又|既)([\u4e00-\u9fff]{1,3})(?:又|还)([\u4e00-\u9fff]{1,3})", t)
+    if m:
+        a, b = _BASIC_EMO_WORDS.get(m.group(1)), _BASIC_EMO_WORDS.get(m.group(2))
+        if a and b:
+            if a == b:
+                return ""
+            pair = frozenset([a, b])
+            if pair in OPPOSITE_COMPOUND:
+                return OPPOSITE_COMPOUND[pair]
+            if (a, b) in PLUTCHIK_COMPOUND:
+                return PLUTCHIK_COMPOUND[(a, b)]
+            if (b, a) in PLUTCHIK_COMPOUND:
+                return PLUTCHIK_COMPOUND[(b, a)]
+    pos = any(w in t for w in ("开心", "高兴", "快乐", "喜", "爱", "期待", "好笑", "好耶", "笑死"))
+    neg = any(w in t for w in ("难过", "生气", "气", "伤心", "烦", "怕", "哭", "倒霉", "崩溃"))
+    if pos and neg and len(t) >= 6:
+        return "五味杂陈"
+    return ""
+
+
 def judge(text="", an=None, scope="") -> dict:
     """单条消息的情绪判断：规则 → 强度修正 → 上下文修正 → 置信度。"""
     if an is None:
@@ -349,7 +414,11 @@ def judge(text="", an=None, scope="") -> dict:
                 conf = min(conf, 0.6)
                 if label == "平静":
                     label = "低落"
-    return {"emotion": label, "vad": vad, "confidence": round(conf, 2), "source": src}
+    out = {"emotion": label, "vad": vad, "confidence": round(conf, 2), "source": src}
+    compound = _compound_of(text, label, vad)
+    if compound:
+        out["compound"] = compound
+    return out
 
 
 def log_judgment(scope, text, j):
@@ -510,7 +579,12 @@ def eval_probes(probes, scope="") -> dict:
         text = str(p.get("text", ""))
         j = judge(text, scope=scope)
         exp = p.get("emotion")
-        ok = (not exp) or (j["emotion"] == exp)
+        exp_compound = str(p.get("compound") or "")
+        if exp_compound:
+            # 复合探针以复合标签为准（主标签由普通探针单独测）
+            ok = str(j.get("compound") or "") == exp_compound
+        else:
+            ok = (not exp) or (j["emotion"] == exp)
         mae = 0.0
         if "v" in p:
             mae = (
@@ -518,7 +592,7 @@ def eval_probes(probes, scope="") -> dict:
                 + abs(j["vad"]["a"] - float(p.get("a", 0)))
                 + abs(j["vad"]["d"] - float(p.get("d", 0)))
             ) / 3.0
-        cat = exp or "vad_only"
+        cat = exp_compound or exp or "vad_only"
         c = cats.setdefault(cat, {"n": 0, "hit": 0, "mae": 0.0})
         c["n"] += 1
         if ok:
@@ -526,15 +600,20 @@ def eval_probes(probes, scope="") -> dict:
         c["mae"] += mae
         results.append(
             {"text": text[:30], "pred": j["emotion"], "expected": exp,
+             "compound": j.get("compound", ""), "compound_expected": exp_compound,
              "hit": ok, "mae": round(mae, 3), "confidence": j["confidence"]}
         )
     n = len(probes or [])
     acc = sum(1 for r in results if r["hit"]) / n if n else 0.0
     mae_all = sum(r["mae"] for r in results) / n if n else 0.0
+    comp_n = sum(1 for p in probes or [] if p.get("compound"))
+    comp_hit = sum(1 for r in results if r.get("compound_expected") and r["hit"])
     return {
         "n": n,
         "accuracy": round(acc, 3),
         "vad_mae": round(mae_all, 3),
+        "compound_accuracy": round(comp_hit / comp_n, 3) if comp_n else None,
+        "compound_n": comp_n,
         "by_category": {
             k: {"n": v["n"], "accuracy": round(v["hit"] / v["n"], 3),
                 "mae": round(v["mae"] / v["n"], 3)}

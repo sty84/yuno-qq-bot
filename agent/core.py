@@ -334,6 +334,14 @@ def ask(
             ctx_parts.append(mem_ctx)
     if extra_context:
         ctx_parts.append(extra_context)
+    if scopes:
+        try:
+            from memory import context as context_mod, subjects
+            if names := subjects.detect(text):
+                if s := context_mod.npc_memory_block(text, names):
+                    ctx_parts.append(s)
+        except Exception as e:
+            _stats_err(e)
     if scopes and _mind_cfg("enabled", True):
         try:
             from memory import mind as mind_mod

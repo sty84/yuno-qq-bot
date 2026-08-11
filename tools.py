@@ -163,7 +163,7 @@ def cmd_config_validate() -> str:
         "rerank", "mmr", "cache", "telemetry", "session", "reflection", "analysis",
         "persona", "world", "trace", "emotion", "sleep", "schedule", "weather",
         "environment", "sharing", "living", "space", "interaction", "weights",
-        "vector_index", "policy", "mind", "sensors",
+        "vector_index", "policy", "mind", "sensors", "agents",
     }
     for k in core:
         if k.startswith("_") or k in KNOWN:
@@ -736,6 +736,36 @@ def cmd_time_eval(save=False, compare=False):
     return json.dumps(time_eval.run(save=save, compare=compare), ensure_ascii=False, indent=2)
 
 
+def cmd_subjects_status():
+    """多主体记忆：列出已注册主体及各视角数据量。"""
+    from memory import subjects
+    from plugins import _db
+    rows = []
+    for name in subjects.registered():
+        nscope = subjects.scope_of(name)
+        rows.append({
+            "name": name, "scope": nscope,
+            "memories": len(_db.memory_rows(nscope)),
+            "events": len(_db.event_rows(nscope)),
+        })
+    return json.dumps({"enabled": subjects.enabled(), "subjects": rows}, ensure_ascii=False, indent=2)
+
+
+def cmd_subjects_eval(save=False, compare=False) -> str:
+    """多主体评测：写入成功 / 隐私门控 / 对话引用（--save 落基线 / --compare 对比）。"""
+    from memory import subjects_eval
+    return json.dumps(subjects_eval.run(save=save, compare=compare), ensure_ascii=False, indent=2)
+
+
+def cmd_consistency_eval() -> str:
+    """双轨制一致性：失效队列长度 + 本次重算数。"""
+    from memory import consistency
+    from plugins import _db
+    pending = len(_db.invalidation_rows(100))
+    done = consistency.reconcile_pending()
+    return json.dumps({"pending": pending, "reconciled": done["reconciled"]}, ensure_ascii=False, indent=2)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="YUNO 2.0 运维/入口工具")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -968,6 +998,17 @@ def main() -> int:
     p.add_argument("--save", action="store_true", help="把结果存为 baseline")
     p.add_argument("--compare", action="store_true", help="与上次 baseline 对比")
     p.set_defaults(func=lambda a: print(cmd_time_eval(save=a.save, compare=a.compare)) or 0)
+
+    p = sub.add_parser("subjects-status", help="多主体记忆：列出已注册主体及各视角数据量")
+    p.set_defaults(func=lambda a: print(cmd_subjects_status()) or 0)
+
+    p = sub.add_parser("subjects-eval", help="多主体评测：写入成功 / 隐私门控 / 对话引用")
+    p.add_argument("--save", action="store_true", help="把结果存为 baseline")
+    p.add_argument("--compare", action="store_true", help="与上次 baseline 对比")
+    p.set_defaults(func=lambda a: print(cmd_subjects_eval(save=a.save, compare=a.compare)) or 0)
+
+    p = sub.add_parser("consistency-eval", help="双轨制一致性：失效队列长度 + 重算数")
+    p.set_defaults(func=lambda a: print(cmd_consistency_eval()) or 0)
 
     sub.add_parser("mcp", help="启动 MCP Server").set_defaults(func=lambda a: cmd_mcp())
 

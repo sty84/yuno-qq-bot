@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Yuno Ops Web</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #0f172a; color: #e2e8f0; padding: 16px; }
@@ -38,6 +39,9 @@
     <div class="tab" data-page="mem">检索评测</div>
     <div class="tab" data-page="space">空间评测</div>
     <div class="tab" data-page="time">时间评测</div>
+    <div class="tab" data-page="emotion">情绪评测</div>
+    <div class="tab" data-page="diag">数据与诊断</div>
+    <div class="tab" data-page="charts">图表分析</div>
   </div>
 
   <div class="page active" id="page-dash">
@@ -47,6 +51,7 @@
       <button onclick="runTask('memory_eval','记忆评测')">跑检索评测</button>
       <button onclick="runTask('space_eval','空间评测')">跑空间评测</button>
       <button onclick="runTask('time_eval','时间评测')">跑时间评测</button>
+      <button onclick="runTask('subjects_eval','多主体评测')">跑多主体评测</button>
       <pre id="grow-report" style="display:none"></pre>
     </div>
   </div>
@@ -70,6 +75,30 @@
     <pre id="time-raw" style="display:none"></pre>
   </div>
 
+  <div class="page" id="page-emotion">
+    <button onclick="runTask('emotion_eval','情绪评测')">运行情绪评测</button>
+    <div class="cards" id="emotion-cards"></div>
+    <div class="chart" id="emotion-chart"></div>
+    <pre id="emotion-raw" style="display:none"></pre>
+  </div>
+
+  <div class="page" id="page-diag">
+    <div class="cards" id="diag-counts"></div>
+    <div class="cards" id="diag-review"></div>
+    <div class="cards" id="diag-proc"></div>
+    <div class="chart" id="diag-route"></div>
+    <pre id="diag-cal" style="display:none"></pre>
+  </div>
+
+  <div class="page" id="page-charts">
+    <button onclick="downloadExcel()">下载 Excel</button>
+    <div class="cards" id="charts-summary"></div>
+    <div class="chart" id="trend-chart"></div>
+    <div class="muted">图 1 基线趋势：每次跑评测自动记录一点，横轴是时间，纵轴是各指标值（recall@5 / where_acc / window_recall / 情绪 accuracy），断点表示该指标当时没跑。</div>
+    <div class="chart" id="compare-chart"></div>
+    <div class="muted">图 2 最新 vs 历史平均：看当前基线是高于还是低于自己过去的表现，红色差距大的地方就是需要重点观察的指标。</div>
+  </div>
+
   <script>
     const $ = (id) => document.getElementById(id);
     document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
@@ -77,6 +106,8 @@
       document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
       t.classList.add('active');
       $('page-' + t.dataset.page).classList.add('active');
+      if (t.dataset.page === 'diag') renderDiag();
+      if (t.dataset.page === 'charts') renderCharts();
     });
 
     async function api(path, opts) {
@@ -126,6 +157,9 @@
       html += card('检索 recall@5', b.memory_eval && b.memory_eval.recall_at_k, 'MRR ' + fmt(b.memory_eval && b.memory_eval.mrr));
       html += card('空间 where_acc', b.space_eval && b.space_eval.where_accuracy && b.space_eval.where_accuracy.accuracy);
       html += card('时间 window_recall', b.time_eval && b.time_eval.window_recall && b.time_eval.window_recall.recall);
+      html += card('情绪 accuracy', b.emotion_eval && b.emotion_eval.accuracy, 'VAD MAE ' + fmt(b.emotion_eval && b.emotion_eval.vad_mae));
+      html += card('情绪日志(7天)', d.emotion_log_count);
+      html += card('多主体 write_rate', b.subjects_eval && b.subjects_eval.write_rate, 'privacy ' + fmt(b.subjects_eval && b.subjects_eval.privacy_rate));
       $('dash-cards').innerHTML = html;
       const g = d.grow_report;
       if (g) { $('grow-report').style.display = 'block'; $('grow-report').textContent = JSON.stringify(g, null, 2); }
@@ -135,6 +169,7 @@
       if (kind === 'memory_eval') return renderMem();
       if (kind === 'space_eval') return renderSpace();
       if (kind === 'time_eval') return renderTime();
+      if (kind === 'emotion_eval') return renderEmotion();
     }
 
     async function renderMem() {
@@ -171,6 +206,138 @@
         + card('date_accuracy', b.date_accuracy && b.date_accuracy.accuracy);
       $('time-raw').style.display = 'block';
       $('time-raw').textContent = JSON.stringify(b, null, 2);
+    }
+
+    async function renderEmotion() {
+      const d = await api('/api/dashboard');
+      const b = (d.baselines || {}).emotion_eval || {};
+      $('emotion-cards').innerHTML = card('分类 accuracy', b.accuracy)
+        + card('VAD MAE', b.vad_mae)
+        + card('样本数', b.n)
+        + card('复合情绪准确率', b.compound_accuracy, '样本 ' + fmt(b.compound_n))
+        + card('情绪日志(7天)', d.emotion_log_count);
+      $('emotion-raw').style.display = 'block';
+      $('emotion-raw').textContent = JSON.stringify(b, null, 2);
+      const cats = b.by_category || {};
+      const chart = echarts.init($('emotion-chart'));
+      chart.setOption({
+        title: { text: '分情绪准确率', textStyle: { color: '#e2e8f0', fontSize: 13 } },
+        tooltip: {}, grid: { left: 40, right: 20, bottom: 40 },
+        xAxis: { type: 'category', data: Object.keys(cats), axisLabel: { color: '#94a3b8', interval: 0, rotate: 30 } },
+        yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+        series: [{ type: 'bar', data: Object.values(cats).map(x => x.accuracy), itemStyle: { color: '#a78bfa' } }],
+      });
+    }
+
+    async function renderDiag() {
+      const d = await api('/api/diagnostics');
+      const dc = d.data_counts || {};
+      $('diag-counts').innerHTML = card('probes', dc.probes) + card('query_log', dc.query_log)
+        + card('item_events', dc.item_events) + card('explicit 事件', dc.explicit_events)
+        + card('trace', dc.trace) + card('feedback', dc.feedback) + card('procedures', dc.procedures);
+      const rv = d.review || {};
+      $('diag-review').innerHTML = card('人工评分', rv.n, '总分均值 ' + fmt(rv.avg_total))
+        + card('extraction', rv.avg_extraction) + card('decision', rv.avg_decision)
+        + card('confidence', rv.avg_confidence) + card('provenance', rv.avg_provenance)
+        + card('privacy', rv.avg_privacy);
+      const pr = d.procedures || {};
+      $('diag-proc').innerHTML = card('程序记忆', pr.count) + card('System1 就绪', pr.system1_ready)
+        + card('平均成功率', pr.avg_success);
+      const rs = d.route_stats || {};
+      const algos = Object.keys(rs).filter(k => rs[k].trials > 0);
+      const chart = echarts.init($('diag-route'));
+      chart.setOption({
+        title: { text: '检索路由命中率（各算法）', textStyle: { color: '#e2e8f0', fontSize: 13 } },
+        tooltip: {}, grid: { left: 40, right: 20, bottom: 40 },
+        xAxis: { type: 'category', data: algos, axisLabel: { color: '#94a3b8' } },
+        yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+        series: [{
+          type: 'bar',
+          data: algos.map(k => rs[k].rate),
+          itemStyle: { color: '#f59e0b' },
+          label: { show: true, position: 'top', color: '#e2e8f0', formatter: p => rs[algos[p.dataIndex]].hits + '/' + rs[algos[p.dataIndex]].trials },
+        }],
+      });
+      if (d.calibrate) { $('diag-cal').style.display = 'block'; $('diag-cal').textContent = d.calibrate; }
+    }
+
+    async function renderCharts() {
+      const h = (await api('/api/history')).slice().sort((a, b) => a.ts.localeCompare(b.ts));
+      const ts = h.map(x => x.ts);
+      const defs = [
+        { name: '检索 recall@5', key: 'recall', color: '#3b82f6' },
+        { name: '空间 where_acc', key: 'where_acc', color: '#10b981' },
+        { name: '时间 window_recall', key: 'window_recall', color: '#f59e0b' },
+        { name: '情绪 accuracy', key: 'accuracy', color: '#a78bfa' },
+        { name: '多主体 write_rate', key: 'write_rate', color: '#34d399' },
+      ];
+      $('charts-summary').innerHTML = card('历史记录数', h.length, '每次评测跑完自动记一条');
+      const tchart = echarts.init($('trend-chart'));
+      tchart.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { data: defs.map(d => d.name), textStyle: { color: '#94a3b8' } },
+        grid: { left: 45, right: 20, top: 40, bottom: 40 },
+        xAxis: { type: 'category', data: ts, axisLabel: { color: '#94a3b8', rotate: 30 } },
+        yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+        series: defs.map(d => ({
+          name: d.name, type: 'line', smooth: true, connectNulls: false,
+          data: h.map(x => x.metrics && x.metrics[d.key] != null ? x.metrics[d.key] : null),
+          itemStyle: { color: d.color }, lineStyle: { width: 2 }, symbolSize: 5,
+        })),
+      });
+      const keys = ['recall', 'where_acc', 'window_recall', 'accuracy'];
+      const labels = ['检索 recall@5', '空间 where_acc', '时间 window_recall', '情绪 accuracy'];
+      const latest = {}, avg = {};
+      keys.forEach(k => {
+        const vals = h.map(x => x.metrics && x.metrics[k]).filter(v => v != null);
+        if (vals.length) { latest[k] = vals[vals.length - 1]; avg[k] = vals.reduce((a, b) => a + b, 0) / vals.length; }
+      });
+      const cchart = echarts.init($('compare-chart'));
+      cchart.setOption({
+        tooltip: {}, legend: { data: ['最新', '历史平均'], textStyle: { color: '#94a3b8' } },
+        grid: { left: 45, right: 20, top: 40, bottom: 40 },
+        xAxis: { type: 'category', data: labels, axisLabel: { color: '#94a3b8' } },
+        yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+        series: [
+          { name: '最新', type: 'bar', data: keys.map(k => latest[k] != null ? latest[k] : null), itemStyle: { color: '#3b82f6' } },
+          { name: '历史平均', type: 'bar', data: keys.map(k => avg[k] != null ? avg[k] : null), itemStyle: { color: '#64748b' } },
+        ],
+      });
+    }
+
+    async function downloadExcel() {
+      if (typeof XLSX === 'undefined') { alert('SheetJS 未加载（CDN 可能被墙），无法生成 Excel'); return; }
+      const [d, h, diag, c] = await Promise.all([
+        api('/api/dashboard'), api('/api/history'), api('/api/diagnostics'), api('/api/counters'),
+      ]);
+      const wb = XLSX.utils.book_new();
+      const b = d.baselines || {};
+      const dash = [['指标', '值'],
+        ['记忆条数', d.memory_counts.memories], ['事件', d.memory_counts.events], ['属性', d.memory_counts.attrs],
+        ['情绪日志(7天)', d.emotion_log_count],
+        ['检索 recall@5', b.memory_eval && b.memory_eval.recall_at_k], ['检索 MRR', b.memory_eval && b.memory_eval.mrr],
+        ['空间 where_acc', b.space_eval && b.space_eval.where_accuracy && b.space_eval.where_accuracy.accuracy],
+        ['时间 window_recall', b.time_eval && b.time_eval.window_recall && b.time_eval.window_recall.recall],
+        ['情绪 accuracy', b.emotion_eval && b.emotion_eval.accuracy], ['情绪 VAD MAE', b.emotion_eval && b.emotion_eval.vad_mae]];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dash), '总览');
+      const hdr = ['时间', '类型', 'recall', 'mrr', 'ndcg', 'where_acc', 'where_recall', 'avg_steps', 'window_recall', 'timeline_rate', 'date_acc', 'emotion_acc', 'vad_mae'];
+      const rows = [hdr];
+      h.slice().sort((a, b2) => a.ts.localeCompare(b2.ts)).forEach(x => {
+        const m = x.metrics || {};
+        rows.push([x.ts, x.kind, m.recall, m.mrr, m.ndcg, m.where_acc, m.where_recall, m.avg_steps, m.window_recall, m.timeline_rate, m.date_acc, m.accuracy, m.vad_mae]);
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), '历史趋势');
+      const dg = diag.data_counts || {}, rv = diag.review || {}, pr = diag.procedures || {};
+      const diagRows = [['项', '值'], ['probes', dg.probes], ['query_log', dg.query_log], ['item_events', dg.item_events],
+        ['explicit 事件', dg.explicit_events], ['trace', dg.trace], ['feedback', dg.feedback], ['procedures', dg.procedures],
+        ['人工评分', rv.n], ['总分均值', rv.avg_total], ['extraction', rv.avg_extraction], ['decision', rv.avg_decision],
+        ['confidence', rv.avg_confidence], ['provenance', rv.avg_provenance], ['privacy', rv.avg_privacy],
+        ['程序记忆数', pr.count], ['System1 就绪', pr.system1_ready], ['平均成功率', pr.avg_success]];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(diagRows), '数据诊断');
+      const cRows = [['key', 'value']];
+      Object.keys(c).sort().forEach(k => cRows.push([k, c[k]]));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cRows), '计数器');
+      XLSX.writeFile(wb, 'yuno_baseline_' + new Date().toISOString().slice(0, 10) + '.xlsx');
     }
 
     loadDash().catch(e => $('dash-cards').innerHTML = '<div class="red">加载失败：' + e.message + '</div>');

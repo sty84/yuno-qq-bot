@@ -85,6 +85,14 @@ def list_topics(scope=None, limit=50) -> list:
     return [_db.topic_get(t["id"]) for t in _db.topic_rows(scope, limit=limit)]
 
 
+def invalidate_for_fact(scope, key, fact):
+    """纠错联动：含该事实的议题参数降权（标记 stale，供重算/下次 build 修正）。"""
+    try:
+        _db.topic_param_invalidate(str(fact))
+    except Exception:
+        pass
+
+
 def build(scope=None) -> int:
     """回填：为没有议题的事件建议题并挂参数、关联事件。返回新建/更新数。"""
     created = 0

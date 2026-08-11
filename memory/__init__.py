@@ -24,6 +24,7 @@ from memory import (
     appointment,
     backfill,
     character,
+    consistency,
     context,
     controller,
     embedder,
@@ -46,6 +47,8 @@ from memory import (
     sleep,
     space_eval,
     space,
+    subjects_eval,
+    subjects,
     time_eval,
     time_extract,
     topic,
@@ -145,6 +148,14 @@ space_eval_run = space_eval.run
 time_extract_extract = time_extract.extract
 time_label = time_extract.label_for
 time_eval_run = time_eval.run
+subjects_eval_run = subjects_eval.run
+retrieve_subject = reasoning.retrieve_subject
+npc_memory_block = context.npc_memory_block
+subjects_registered = subjects.registered
+subjects_detect = subjects.detect
+subjects_scope_of = subjects.scope_of
+consistency_reconcile = consistency.reconcile
+consistency_pending = consistency.reconcile_pending
 goal_add = advisor.goal_add
 goal_list = advisor.goal_list
 goal_update = advisor.goal_update

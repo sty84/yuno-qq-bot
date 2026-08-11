@@ -392,6 +392,21 @@ def cancel_search(scope) -> bool:
     return False
 
 
+def ask_npc(name, text, top_k=2) -> str:
+    """问队友找东西/回忆：检索该 NPC 视角的记忆（含物品位置事件）。"""
+    try:
+        from memory import reasoning, subjects
+        q = str(text or "")
+        hits = reasoning.retrieve_subject(name, q, top_k=int(top_k), min_score=0.25)
+        if not hits:
+            return ""
+        lines = [f"- {f}" for f, _s, _sc in hits]
+        return f"【问队友·{name}】她记得：{'；'.join(lines)}（内部参考：被问起时按她说的转述，注明'她说的'）"
+    except Exception as e:
+        _stats_err(e)
+        return ""
+
+
 def search_progress(scope) -> dict:
     """搜索推进（broadcast 汇报循环调用）：当前容器找到→成功；否则下一处或失败。
     返回 {done, found, name, container, prompt}。"""
@@ -1293,6 +1308,15 @@ def home_block(scope="", text="", now=None) -> str:
     try:
         if any(w in t for w in _CANCEL_WORDS) and cancel_search(scope):
             parts.append("【找东西·取消】用户说别找了，别再继续翻找了，自然带一句'行，不找了'即可，别提系统。")
+    except Exception as e:
+        _stats_err(e)
+        pass
+    try:
+        from memory import subjects
+        if any(w in t for w in ("在哪", "找", "见过", "有没有", "记得")):
+            for nm in subjects.detect(t)[:1]:
+                if s := ask_npc(nm, t):
+                    parts.append(s)
     except Exception as e:
         _stats_err(e)
         pass

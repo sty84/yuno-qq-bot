@@ -124,6 +124,10 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
             )
             if row.get("mclass") == "core" or scope == "ai" or scope.startswith("ai:"):
                 _db.audit_add("review_required", fact[:100], "核心记忆被纠正并更新", operator="auto")
+            try:
+                _db.invalidation_add(scope, key, fact, "supersede")
+            except Exception as e:
+                _stats_err(e)
             details.append(
                 {"fact": fact, "confidence": cur, "new_confidence": 0.0, "kind": "update", "decision": "update"}
             )
@@ -132,6 +136,10 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
             new_conf = policy.update(cur, "conflict", resistance=policy.resistance_for(cls))
             _db.memory_set_confidence(scope, key, fact, new_conf)
             _db.memory_set_status(scope, key, fact, "contested")
+            try:
+                _db.invalidation_add(scope, key, fact, "conflict")
+            except Exception as e:
+                _stats_err(e)
             _db.history_add(
                 scope, key, fact, "conflict",
                 reason=f"纠正待核查（uncertain：{decision['reason']}）",
@@ -323,6 +331,13 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
             ev_source = "explicit"
     except Exception as e:
         _stats_err(e)
+    # 多主体记忆（v2.2）：识别在场主体（队友/NPC），后续逐条扇出
+    _participants = []
+    try:
+        from memory import subjects
+        _participants = subjects.detect((text or "") + " " + (reply or ""))
+    except Exception as e:
+        _stats_err(e)
     consent = {"keep": True, "reason": ""}
     # Memory Consent Layer（v5 §P1-3 + v7 语言层）：玩笑/夸张表达且无实质信息 → 不长期保存
     joke_prob = float(an.get("joke_probability", 0.0)) if an else 0.0
@@ -368,6 +383,13 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
     disputed = []
     if an.get("correction"):
         disputed = _decay_conflicts(scope, key, text, an)
+        try:
+            from memory import consistency
+            for dd in disputed:
+                if dd.get("decision") in ("update", "uncertain"):
+                    consistency.reconcile(scope, key, dd.get("fact", ""), reason=f"correction:{dd.get('decision')}")
+        except Exception as e:
+            _stats_err(e)
         if any(d.get("decision") == "update" for d in disputed):
             conf = max(conf, 0.7)  # 用户纠正被核实 → 新事实给更高可信度
         action = disputed[0]["decision"] if disputed else "uncertain"
@@ -509,9 +531,48 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
         if eid and tid:
             _db.event_set_topic(eid, tid)
         policy.touch(scope, key, f, importance=importance)
+        if _participants:
+            try:
+                from memory import subjects, world as world_mod
+                nscope_aud = (
+                    f"group:{scope.split(':', 1)[1]}"
+                    if scope.startswith("group:")
+                    else "public"
+                )
+                for pname in _participants[: subjects.top_k()]:
+                    if not world_mod.subject_gate(scope, key, f):
+                        continue
+                    nscope = subjects.scope_of(pname)
+                    nconf = round(min(subjects.confidence_cap(), world_mod.subject_confidence("overheard")), 2)
+                    _db.memory_add(
+                        nscope, "", f, ts, None, confidence=nconf,
+                        source="overheard", audience=nscope_aud, mclass="short",
+                    )
+                    _db.event_add(
+                        nscope, "", an.get("event_type") or "event",
+                        graph.title_of(f), content=f, importance=importance,
+                        ts=ev_ts, ts_source=ev_source,
+                        memory_scope=nscope, memory_key="", memory_fact=f,
+                    )
+                    try:
+                        from memory import lexical as lexical_mod
+                        lexical_mod.bm25_upsert(nscope, "", [f])
+                        _db.lexicon_sync(nscope, "")
+                    except Exception as e:
+                        _stats_err(e)
+                    policy.touch(nscope, "", f, importance=importance * 0.8)
+            except Exception as e:
+                _stats_err(e)
     _db.lexicon_sync(scope, key)
     lexical.bm25_upsert(scope, key, [f for f in additions if privacies.get(f, 0.0) < 0.8])
     _record_ai_experience(scope, key, text, ts, importance)
+    if _participants:
+        try:
+            from memory import subjects, relationship as rel_mod
+            for pname in set(_participants):
+                rel_mod.update(subjects.scope_of(pname), subject=key or scope, event="chat", detail=(text or "")[:40])
+        except Exception as e:
+            _stats_err(e)
     # Memory Trace（v10）：可解释的处理结果与决策理由
     try:
         modules = trace.detect_modules(scope, key, text)

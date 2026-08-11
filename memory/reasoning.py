@@ -496,6 +496,16 @@ def retrieve(
 
 
 # ===== 重排：轻量（子串+词元覆盖+议题一致）始终可用；CrossEncoder/LLM 可选 =====
+def retrieve_subject(name, query, top_k=3, min_score=0.3):
+    """按主体视角检索（薄封装：npc:<name> 作为 scope，复用六路检索）。"""
+    try:
+        from memory import subjects
+        return retrieve(query, [subjects.scope_of(name)], top_k=max(1, int(top_k)), min_score=float(min_score))
+    except Exception as e:
+        _stats_err(e)
+        return []
+
+
 def light_rerank(query, candidates, top_k, topic_facts=None):
     """按 精确子串(0.6) + 查询词覆盖率(0.4) + 议题一致性(0.15) 重排。返回 [(fact, score)]。"""
     qt = set(tokenize(query))

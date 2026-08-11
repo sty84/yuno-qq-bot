@@ -67,6 +67,28 @@ def snapshot(scope, budget=None, force=False) -> str:
     return text
 
 
+def subject_gate(scope, key, fact) -> bool:
+    """多主体可见性门控：私聊 / 高隐私事实不传播到 NPC 视角。"""
+    try:
+        row = next((r for r in _db.memory_rows(scope, key or "") if r["fact"] == fact), None)
+    except Exception:
+        row = None
+    if row is None:
+        return False
+    aud = str(row.get("audience") or "")
+    privacy = float(row.get("privacy", 0.0))
+    if str(scope).startswith("c2c:") or aud == "private":
+        return False
+    if privacy >= 0.8:
+        return False
+    return True
+
+
+def subject_confidence(source) -> float:
+    """NPC 视角可信度：experienced=0.9 / overheard=0.6 / inferred=0.4。"""
+    return {"experienced": 0.9, "overheard": 0.6, "inferred": 0.4}.get(str(source or ""), 0.5)
+
+
 def _rule_decision(old_conf, valid_from, scope="", access_count=0) -> dict:
     try:
         age_days = (

@@ -10,7 +10,9 @@
 
 import argparse
 import json
+import os
 import pathlib
+import shutil
 import threading
 import time
 import uuid
@@ -21,6 +23,20 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from plugins import _db, _shared
+
+
+def _apply_light_config():
+    """4C4G 约束：webapp 是独立进程，默认关闭 embedding——
+    否则跑 memory_eval/grow 时会和 bot 进程各自加载一份模型（torch ~1G+）挤爆内存。
+    需要向量参与评测时设环境变量 YUNO_WEB_EMBEDDER=local。"""
+    if os.getenv("YUNO_WEB_EMBEDDER", "none") == "none":
+        try:
+            _shared.CONFIG.setdefault("memory", {}).setdefault("embedder", {})["provider"] = "none"
+        except Exception:
+            pass
+
+
+_apply_light_config()
 
 ROOT = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "static"
@@ -39,11 +55,43 @@ def _run_task(task_id, kind, fn):
                 _tasks[task_id]["status"] = "done"
                 _tasks[task_id]["result"] = result
                 _tasks[task_id]["finished_ts"] = time.time()
+            if kind in ("memory_eval", "space_eval", "time_eval", "emotion_eval", "subjects_eval"):
+                try:
+                    hist = _db.kv_get("memory", "baseline_history") or []
+                    hist.append(_history_entry(kind, result))
+                    _db.kv_set("memory", "baseline_history", hist[-200:])
+                except Exception:
+                    pass
         except Exception as e:
             with _lock:
                 _tasks[task_id]["status"] = "error"
                 _tasks[task_id]["error"] = str(e)
                 _tasks[task_id]["finished_ts"] = time.time()
+
+
+def _history_entry(kind, result):
+    """把一次评测结果压成一行历史（趋势图数据源）。"""
+    m = {}
+    if isinstance(result, dict):
+        if kind == "memory_eval":
+            m = {"recall": result.get("recall_at_k"), "mrr": result.get("mrr"), "ndcg": result.get("ndcg")}
+        elif kind == "space_eval":
+            m = {
+                "where_acc": (result.get("where_accuracy") or {}).get("accuracy"),
+                "where_recall": (result.get("where_recall") or {}).get("recall"),
+                "avg_steps": (result.get("search_sim") or {}).get("avg_steps"),
+            }
+        elif kind == "time_eval":
+            m = {
+                "window_recall": (result.get("window_recall") or {}).get("recall"),
+                "timeline_rate": (result.get("timeline_order") or {}).get("rate"),
+                "date_acc": (result.get("date_accuracy") or {}).get("accuracy"),
+            }
+        elif kind == "emotion_eval":
+            m = {"accuracy": result.get("accuracy"), "vad_mae": result.get("vad_mae")}
+        elif kind == "subjects_eval":
+            m = {"write_rate": result.get("write_rate"), "privacy_rate": result.get("privacy_rate")}
+    return {"ts": time.strftime("%Y-%m-%d %H:%M"), "kind": kind, "metrics": m}
 
 
 def submit(kind, fn) -> str:
@@ -75,6 +123,29 @@ def _load_probes():
         return json.load(f)
 
 
+def _emotion_probes():
+    """情绪评测集：没有就把 memory/emotion_probes.example.json 种子成 data/emotion_probes.json。"""
+    p = _shared.DATA_DIR / "emotion_probes.json"
+    if not p.exists():
+        seed = ROOT / "memory" / "emotion_probes.example.json"
+        if seed.exists():
+            shutil.copyfile(seed, p)
+    if not p.exists():
+        raise HTTPException(400, f"情绪评测集不存在（{p}）")
+    with open(p, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _count(table, where=""):
+    try:
+        sql = f"SELECT COUNT(*) FROM {table}"
+        if where:
+            sql += f" WHERE {where}"
+        return int(_db._connect().execute(sql).fetchone()[0])
+    except Exception:
+        return 0
+
+
 def _task_fn(kind):
     if kind == "space_eval":
         def fn():
@@ -84,6 +155,17 @@ def _task_fn(kind):
         def fn():
             from memory import time_eval
             return time_eval.run(save=True)
+    elif kind == "emotion_eval":
+        def fn():
+            import memory
+            probes = _emotion_probes()
+            res = memory.emotion_eval(probes)
+            _db.kv_set("memory", "emotion_baseline", res)
+            return res
+    elif kind == "subjects_eval":
+        def fn():
+            from memory import subjects_eval
+            return subjects_eval.run(save=True)
     elif kind == "memory_eval":
         def fn():
             import memory
@@ -123,8 +205,14 @@ def counters():
 @app.get("/api/dashboard")
 def dashboard():
     import memory.stats as stats_mod
+    try:
+        import memory
+        emotion_log_count = len(memory.emotion_log_rows(7))
+    except Exception:
+        emotion_log_count = 0
     return {
         "counters": stats_mod.counters(),
+        "emotion_log_count": emotion_log_count,
         "memory_counts": {
             "memories": len(_db.memory_rows()),
             "events": len(_db.event_rows()),
@@ -134,9 +222,85 @@ def dashboard():
             "memory_eval": _db.kv_get("memory", "eval_baseline"),
             "space_eval": _baseline_file("space_eval_baseline.json"),
             "time_eval": _baseline_file("time_eval_baseline.json"),
+            "emotion_eval": _db.kv_get("memory", "emotion_baseline"),
+            "subjects_eval": _baseline_file("subjects_eval_baseline.json"),
         },
         "grow_report": _db.kv_get("memory", "last_grow_report"),
     }
+
+
+@app.get("/api/diagnostics")
+def diagnostics():
+    """数据与诊断：路由命中率 / 程序记忆 / 数据量 / 人工评分进度 / 标定状态。"""
+    out = {"route_stats": {}, "procedures": {}, "calibrate": "", "data_counts": {}, "review": {}}
+    try:
+        from memory import procedures, reasoning
+        rs = reasoning._route_stats()
+        for algo, s in rs.items():
+            trials = int(s.get("trials", 0))
+            hits = int(s.get("hits", 0))
+            out["route_stats"][algo] = {
+                "trials": trials, "hits": hits,
+                "rate": round(hits / trials, 3) if trials else None,
+            }
+        out["procedures"] = procedures.stats()
+    except Exception:
+        pass
+    try:
+        from memory import policy
+        out["calibrate"] = str(policy.calibrate_report())[:600]
+    except Exception:
+        pass
+    probes = 0
+    try:
+        p = _shared.DATA_DIR / "probes.json"
+        if p.exists():
+            probes = len(json.loads(p.read_text(encoding="utf-8")))
+    except Exception:
+        pass
+    out["data_counts"] = {
+        "probes": probes,
+        "query_log": _count("query_log"),
+        "item_events": _count("item_events"),
+        "explicit_events": _count("events", "ts_source='explicit'"),
+        "trace": _count("memory_trace"),
+        "feedback": _count("feedback_log"),
+        "procedures": _count("procedures"),
+    }
+    try:
+        rows = _db.trace_review_recent(limit=200)
+        dims = ("extraction", "decision", "confidence", "provenance", "privacy")
+        sums = {d: 0 for d in dims}
+        total_score = 0
+        n = len(rows)
+        for r in rows:
+            total_score += float(r.get("score") or 0)
+            scores = r.get("scores")
+            if isinstance(scores, str):
+                try:
+                    scores = json.loads(scores)
+                except Exception:
+                    scores = {}
+            if isinstance(scores, dict):
+                for d in dims:
+                    try:
+                        sums[d] += float(scores.get(d) or 0)
+                    except (TypeError, ValueError):
+                        pass
+        out["review"] = {
+            "n": n,
+            "avg_total": round(total_score / n, 2) if n else None,
+            **{f"avg_{d}": round(sums[d] / n, 2) if n else None for d in dims},
+        }
+    except Exception:
+        pass
+    return out
+
+
+@app.get("/api/history")
+def history():
+    """基线历史趋势（每次跑评测自动记录，最多 200 条）。"""
+    return _db.kv_get("memory", "baseline_history") or []
 
 
 @app.post("/api/tasks")

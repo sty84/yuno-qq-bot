@@ -295,6 +295,18 @@
           "毒舌": 0.6
         }
       },
+      "agents": {
+        "_comment": "多主体记忆：注册队友/NPC 作为独立记忆 scope（npc:<名>），群聊/公开事实可被主体'听到'写入各自视角；私聊与高隐私事实不传播。",
+        "enabled": true,
+        "cast": [
+          "仲町阿拉蕾",
+          "宫永野乃花",
+          "峰月律",
+          "藤都子"
+        ],
+        "npc_top_k": 2,
+        "npc_confidence_cap": 0.8
+      },
       "weights": {
         "lexical": 0.6,
         "vector": 0.7,

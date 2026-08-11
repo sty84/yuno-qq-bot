@@ -138,6 +138,34 @@ def _scope_tag(scope) -> str:
     return ""
 
 
+def npc_memory_block(query, names, top_k=2) -> str:
+    """多主体视角注入：独立的【队友视角·<名>】块（不混进主记忆块，避免身份混淆）。"""
+    try:
+        from memory import extract as extract_mod, reasoning, subjects, time_extract
+        parts = []
+        for name in names[: int(top_k)]:
+            nscope = subjects.scope_of(name)
+            hits = reasoning.retrieve(query, [nscope], top_k=int(top_k), min_score=0.25)
+            if not hits:
+                continue
+            tmap = reasoning._event_time_map([nscope])
+            lines = []
+            for f, _s, _sc in hits:
+                label = extract_mod.nice_fact(f)
+                tinfo = tmap.get(f)
+                if tinfo and tinfo[0]:
+                    ttag = time_extract.label_for(tinfo[0], tinfo[1], scope=nscope)
+                    if ttag:
+                        label = ttag + label
+                lines.append("- " + label)
+            parts.append(f"【队友视角·{name}】她记得：\n" + "\n".join(lines))
+        if not parts:
+            return ""
+        return "\n".join(parts) + "\n（以上是队友视角记忆，可能不准；引用时区分'我亲眼所见'和'她告诉我的'）"
+    except Exception:
+        return ""
+
+
 def user_state_block(scope) -> str:
     """用户近期状态：从最近记忆的情绪维度判断，注入 prompt 供 AI 调整语气（v3 §14）。"""
     if not scope or not scope.startswith("c2c:"):
@@ -213,6 +241,11 @@ def assemble_context(
     """令牌预算分级注入：议题（核心）→ 记忆 → 事件脉络，逐级填充到预算上限。
     budget 单位为字符（中文 1 字 ≈ 1 token 量级），默认 2000，可配
     config.json → memory.core.context_budget_chars。"""
+    try:
+        from memory import consistency
+        consistency.reconcile_pending()  # 双轨制一致性：纠错失效队列惰性重算
+    except Exception:
+        pass
     core = _shared.CONFIG.get("memory", {}).get("core", {}) or {}
     budget = int(budget or core.get("context_budget_chars", 2000))
     blocks = [

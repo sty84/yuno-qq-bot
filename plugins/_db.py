@@ -296,6 +296,13 @@ def _create_tables():
                 tries INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT,
                 PRIMARY KEY(situation, action));
+            CREATE TABLE IF NOT EXISTS state_invalidations(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scope TEXT NOT NULL,
+                key TEXT NOT NULL DEFAULT '',
+                fact TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT '',
+                ts TEXT NOT NULL DEFAULT '');
             CREATE TABLE IF NOT EXISTS space_state(
                 id INTEGER PRIMARY KEY CHECK(id=1),
                 room TEXT NOT NULL DEFAULT '客厅',
@@ -836,6 +843,36 @@ def procedure_clear():
     with _lock:
         c = _connect()
         c.execute("DELETE FROM procedures")
+        c.commit()
+
+
+def invalidation_add(scope, key, fact, reason=""):
+    """双轨制一致性：纠错后写入"待重算队列"。"""
+    with _lock:
+        c = _connect()
+        c.execute(
+            "INSERT INTO state_invalidations(scope,key,fact,reason,ts) VALUES(?,?,?,?,?)",
+            (str(scope), str(key or ""), str(fact)[:200], str(reason)[:40],
+             datetime.now().isoformat(timespec="seconds")),
+        )
+        c.commit()
+
+
+def invalidation_rows(limit=100):
+    with _lock:
+        cur = _connect().execute(
+            "SELECT id, scope, key, fact, reason FROM state_invalidations "
+            "ORDER BY id ASC LIMIT ?",
+            (max(1, int(limit)),),
+        )
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def invalidation_clear_all():
+    with _lock:
+        c = _connect()
+        c.execute("DELETE FROM state_invalidations")
         c.commit()
 
 
@@ -1922,6 +1959,14 @@ def event_set_topic(event_id, topic_id):
     with _lock:
         c = _connect()
         c.execute("UPDATE events SET topic_id=? WHERE id=?", (int(topic_id), int(event_id)))
+        c.commit()
+
+
+def topic_param_invalidate(value):
+    """纠错联动：含该事实的议题参数降权（标记 stale，供重算）。"""
+    with _lock:
+        c = _connect()
+        c.execute("UPDATE topic_params SET confidence=MIN(confidence, 0.3) WHERE value=?", (str(value),))
         c.commit()
 
 

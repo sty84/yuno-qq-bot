@@ -282,6 +282,42 @@ def test_all_features():
         list(tv.keys()),
     )
 
+    # ---- 多主体记忆（v2.2）----
+    from memory import consistency, context as context_mod, subjects, world as world_mod
+    check("subjects-registered", "仲町阿拉蕾" in subjects.registered(), subjects.registered())
+    check(
+        "subjects-detect",
+        subjects.detect("仲町阿拉蕾上次在排练室") == ["仲町阿拉蕾"],
+        subjects.detect("仲町阿拉蕾上次在排练室"),
+    )
+    check("subjects-scope", subjects.scope_of("仲町阿拉蕾") == "npc:仲町阿拉蕾")
+    memory.ingest("group:testg", "", "仲町阿拉蕾上次在排练室见过那把伞", "", facts=["仲町阿拉蕾上次在排练室见过那把伞"])
+    npc_rows = _db.memory_rows("npc:仲町阿拉蕾")
+    check("subjects-write", any("排练室" in r["fact"] for r in npc_rows), npc_rows[:2])
+    memory.ingest("c2c:priv", "", "我银行卡密码是 123456，仲町阿拉蕾也知道", "", facts=["用户说我银行卡密码是 123456"])
+    priv_npc = [r for r in _db.memory_rows("npc:仲町阿拉蕾") if "密码" in r["fact"]]
+    check("subjects-privacy-gate", not priv_npc, priv_npc)
+    reasoning._event_time_cache.update({"ts": 0.0, "key": None, "map": {}})
+    hits_subj = reasoning.retrieve_subject("仲町阿拉蕾", "伞", top_k=3, min_score=0.0)
+    check("subjects-retrieve", any("伞" in f for f, _s, _sc in hits_subj), hits_subj[:2])
+    blk_npc = context_mod.npc_memory_block("伞", ["仲町阿拉蕾"], top_k=2)
+    check("subjects-block", "队友视角" in blk_npc, blk_npc[:80])
+    sev = memory.subjects_eval_run(save=True, compare=True)
+    check(
+        "subjects-eval-run",
+        sev.get("write_rate") is not None and sev.get("baseline_saved"),
+        list(sev.keys()),
+    )
+
+    # ---- 双轨制一致性（v2.2）----
+    _db.invalidation_add("c2c:t", "", "旧事实", "conflict")
+    rd = consistency.reconcile_pending()
+    check(
+        "consistency-drain",
+        rd.get("reconciled", 0) >= 1 and len(_db.invalidation_rows()) == 0,
+        rd,
+    )
+
     # ---- 夜晚槽只能在家活动（v2.2 修复：正常人不会凌晨还在外面）----
     from memory import schedule as schedule_mod
     bad_plan = {wd: ["sleep", "home_rest", "home_entertain", "friend"] for wd in range(7)}
@@ -315,7 +351,7 @@ def test_all_features():
         return "……嗯。"
 
     _shared.ask_deepseek = fake_compose
-    sharing._compose("c2c:t", "【此刻状态】在家休息\n【天气】晴 32℃", "rehearsal")
+    sharing._compose("c2c:share", "【此刻状态】在家休息\n【天气】晴 32℃", "rehearsal")
     check(
         "compose-time-weather-rules",
         "现在是" in cap.get("prompt", "") and "天气" in cap.get("prompt", ""),
@@ -330,8 +366,22 @@ def test_all_features():
          "reasons": ["rehearsal"]},
     )
     _shared.ask_deepseek = lambda *a, **k: "……傍晚排练完回来，懒得动。"
-    dr = sharing.drive("c2c:t", datetime(2026, 8, 11, 15, 0))
+    dr = sharing.drive("c2c:share", datetime(2026, 8, 11, 15, 0))
     check("share-day-send", dr.get("sent") is True, dr)
+
+    # ---- 复合情绪（v2.2）----
+    from memory import emotion as emotion_mod
+    j1 = emotion_mod.judge("又气又好笑，这都能输")
+    check("compound-kuxiaobude", j1.get("compound") == "哭笑不得", j1)
+    j2 = emotion_mod.judge("既期待又害怕明天的面试")
+    check("compound-qidai", j2.get("compound") == "期待又不安", j2)
+    ev2 = emotion_mod.eval_probes([
+        {"text": "又气又好笑，这都能输", "emotion": "愤怒", "compound": "哭笑不得"},
+        {"text": "既期待又害怕明天的面试", "emotion": "期待", "compound": "期待又不安"},
+        {"text": "悲喜交加，被夸了很开心但想到加班又难过", "emotion": "开心", "compound": "悲喜交加"},
+        {"text": "嘴上说算了，心里五味杂陈", "emotion": "低落", "compound": "五味杂陈"},
+    ])
+    check("compound-eval", ev2.get("compound_n") == 4 and ev2.get("compound_accuracy") == 1.0, ev2)
 
     # ---- 计数器（P0 可观测性）----
     c = stats_mod.counters()

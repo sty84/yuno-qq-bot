@@ -2,6 +2,8 @@ qq-botpy>=1.1.5
 openai>=1.30.0
 python-dotenv>=1.0.0
 mcp>=1.0.0
+fastapi>=0.100
+uvicorn>=0.23
 # 本地向量化（云端本地计算）：小内存/无 GPU 服务器建议先装 CPU 版 torch 再装本依赖：
 #   pip install torch --index-url https://download.pytorch.org/whl/cpu
 # 否则会随 sentence-transformers 安装全量（含 CUDA）torch，体积约 2.5GB
