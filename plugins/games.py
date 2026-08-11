@@ -96,11 +96,6 @@ def _build_index():
 _BY_FIRST, _FOLLOW = _build_index()
 
 QUIZ = [
-    {"q": "《BanG Dream!》中梦限大MewType的DJ担当是谁？", "options": ["A. 仲町阿拉蕾", "B. 千石由乃", "C. 藤都子", "D. 宫永野乃花"], "answer": "B"},
-    {"q": "千石由乃的生日是哪一天？", "options": ["A. 1月4日", "B. 4月1日", "C. 11月4日", "D. 4月11日"], "answer": "C"},
-    {"q": "千石由乃的代表色是？", "options": ["A. #EE5577", "B. #9977CC", "C. #55AA77", "D. #FFCC00"], "answer": "A"},
-    {"q": "由乃喜欢喝的饮料是？", "options": ["A. 咖啡", "B. 能量饮料", "C. 牛奶", "D. 果汁"], "answer": "B"},
-    {"q": "由乃最喜欢吃的零食是？", "options": ["A. 白巧克力", "B. 薯片", "C. 饼干", "D. 棉花糖"], "answer": "A"},
     {"q": "《BanG Dream!》中「Poppin'Party」的主唱是？", "options": ["A. 花园多惠", "B. 户山香澄", "C. 山吹沙绫", "D. 市谷有咲"], "answer": "B"},
     {"q": "成语「画龙点睛」中的「睛」指的是？", "options": ["A. 眼睛", "B. 镜子", "C. 精彩", "D. 精神"], "answer": "A"},
     {"q": "「亡羊补牢」告诉我们？", "options": ["A. 出了差错及时补救", "B. 不要养羊", "C. 牢房要结实", "D. 羊会逃跑"], "answer": "A"},
@@ -112,11 +107,26 @@ QUIZ = [
     {"q": "我国的国宝动物是？", "options": ["A. 老虎", "B. 熊猫", "C. 狮子", "D. 大象"], "answer": "B"},
     {"q": "彩虹通常有几种颜色？", "options": ["A. 五种", "B. 六种", "C. 七种", "D. 八种"], "answer": "C"},
     {"q": "「千钧一发」中的「钧」是古代什么单位？", "options": ["A. 长度", "B. 重量", "C. 时间", "D. 面积"], "answer": "B"},
-    {"q": "由乃喜欢玩的卡牌游戏是？", "options": ["A. 炉石传说", "B. 卡片战斗先导者", "C. 三国杀", "D. 游戏王"], "answer": "B"},
-    {"q": "「梦限大MewType」的名字寓意是？", "options": ["A. 梦想无限大", "B. 梦醒了", "C. 梦境限定", "D. 梦幻组合"], "answer": "A"},
     {"q": "一天有多少小时？", "options": ["A. 12", "B. 20", "C. 24", "D. 48"], "answer": "C"},
     {"q": "「一心一意」的意思是？", "options": ["A. 三心二意", "B. 专一用心", "C. 贪得无厌", "D. 马马虎虎"], "answer": "B"},
 ]
+
+
+def _pack_quiz():
+    try:
+        from memory import pack
+        g = pack.load("games.json", None)
+        q = (g or {}).get("quiz")
+        if isinstance(q, list) and q:
+            return q
+    except Exception:
+        pass
+    return []
+
+
+_pack_q = _pack_quiz()
+if _pack_q:
+    QUIZ = _pack_q + QUIZ
 
 
 def add_score(ukey, game):

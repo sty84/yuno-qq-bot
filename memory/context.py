@@ -99,6 +99,14 @@ def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, r
         if has_approx_time:
             lines.append("（注：以上部分时间记得不确切——用户追问具体日期时如实说'大概'，别编造具体日子；"
                          "能查证就帮 TA 确认。）")
+            try:
+                # P2-1：追问"到底是哪天"时，沿 follows 链找邻近显式时间锚点，让 AI 可查证而非编造
+                from memory import reasoning as reasoning_mod
+                anchor = reasoning_mod.anchor_time(query, scopes)
+                if anchor and anchor.get("anchored") and anchor.get("hint"):
+                    lines.append(anchor["hint"])
+            except Exception:
+                pass
         if shown < len(hits):  # 记忆压缩（v5 §P1-4）：超出预算部分合并
             lines.append(f"- …等 {len(hits) - shown} 条相关记忆（已压缩）")
         return (
@@ -242,8 +250,8 @@ def assemble_context(
     budget 单位为字符（中文 1 字 ≈ 1 token 量级），默认 2000，可配
     config.json → memory.core.context_budget_chars。"""
     try:
-        from memory import consistency
-        consistency.reconcile_pending()  # 双轨制一致性：纠错失效队列惰性重算
+        from memory import controller as controller_mod
+        controller_mod.reconcile_pending()  # 双轨制一致性：纠错失效队列惰性重算
     except Exception:
         pass
     core = _shared.CONFIG.get("memory", {}).get("core", {}) or {}

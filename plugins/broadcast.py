@@ -68,7 +68,7 @@ async def random_event_loop(make_ctx):
             continue
         try:
             prompt = (
-                f"你现在是千石由乃，当前心情「{_shared.state.get('mood', '慵懒')}」。"
+                f"你现在是{_persona_name()}，当前心情「{_shared.state.get('mood', '慵懒')}」。"
                 "请以她的口吻给群里的大家发一条简短的生活动态（60字以内），"
                 "自然、不刻意、像日常发言。"
             )
@@ -212,3 +212,11 @@ def _stats_err(e):
         _st.bump_err("broadcast", e)
     except Exception:
         pass
+
+
+def _persona_name() -> str:
+    try:
+        from agent import persona
+        return persona.persona_name()
+    except Exception:
+        return "YUNO"

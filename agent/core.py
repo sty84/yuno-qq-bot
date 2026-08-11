@@ -216,7 +216,7 @@ def ask(
         cur = schedule_mod.current_activity()
         if cur and cur.get("activity") in ("rehearsal", "performance"):
             ctx_parts.append(
-                "【忙碌中】此刻她在排练/演出，回复尽量简短，被追问才展开，别长篇大论。"
+                "【忙碌中】此刻正处于忙碌日程（排练/演出），回复尽量简短，被追问才展开，别长篇大论。"
             )
     except Exception as e:
         _stats_err(e)

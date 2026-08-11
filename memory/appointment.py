@@ -10,6 +10,14 @@
 import re
 import json
 from datetime import datetime, timedelta
+
+
+def _persona_name() -> str:
+    try:
+        from agent import persona
+        return persona.persona_name()
+    except Exception:
+        return "YUNO"
 from zoneinfo import ZoneInfo
 
 from plugins import _db, _shared
@@ -157,7 +165,7 @@ def _poke_message(appt, round_no, now) -> str:
         f"你和用户约好了「{appt['text']}」（{time_text}），现在已经过了 {mins} 分钟，对方还没出现。\n"
         + ("用户当时没约具体钟点：催促时不要编造精确时间，只说约好的日期和事情。\n"
            if not appt.get("has_time") else "")
-        + f"请以千石由乃的口吻发一条简短消息（50字以内）催对方：这是第 {round_no} 次催。\n"
+        + f"请以{_persona_name()}的口吻发一条简短消息（50字以内）催对方：这是第 {round_no} 次催。\n"
         "第1次：平静、带点不耐烦，慵懒地随口一问，不咄咄逼人。\n"
         "第2次：开始担心但又嘴硬，语气里藏不住在意，可以有一点点委屈。\n"
         "禁止用括号标注动作；禁止复述身份设定；不要长篇大论。"

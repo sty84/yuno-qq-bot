@@ -384,10 +384,9 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
     if an.get("correction"):
         disputed = _decay_conflicts(scope, key, text, an)
         try:
-            from memory import consistency
             for dd in disputed:
                 if dd.get("decision") in ("update", "uncertain"):
-                    consistency.reconcile(scope, key, dd.get("fact", ""), reason=f"correction:{dd.get('decision')}")
+                    reconcile(scope, key, dd.get("fact", ""), reason=f"correction:{dd.get('decision')}")
         except Exception as e:
             _stats_err(e)
         if any(d.get("decision") == "update" for d in disputed):
@@ -646,6 +645,37 @@ def add_fact(scope, key, fact, importance=0.5, confidence=0.8, source="mcp"):
     _db.lexicon_sync(scope, key)
     lexical.bm25_upsert(scope, key, [fact])
     return fact
+
+
+# ===== 双轨制一致性（v2.2，原 memory/consistency.py 并入）=====
+def reconcile(scope, key, fact, reason="") -> dict:
+    """对一条失效事实做状态重算（纠错后调用）：关系降 trust + 议题降权。"""
+    changed = {}
+    try:
+        from memory import relationship as rel_mod
+        rel_mod.update(scope, subject=key or scope, event="dispute", detail=f"纠错:{str(fact)[:40]}")
+        changed["relationship"] = 1
+    except Exception as e:
+        _stats_err(e)
+    try:
+        from memory import topic as topic_mod
+        topic_mod.invalidate_for_fact(scope, key, fact)
+        changed["topic"] = 1
+    except Exception as e:
+        _stats_err(e)
+    return changed
+
+
+def reconcile_pending(limit=100) -> dict:
+    """惰性重算：消费失效队列（assemble_context 开头调用，量小不热）。"""
+    rows = _db.invalidation_rows(limit)
+    n = 0
+    for r in rows:
+        reconcile(r.get("scope", ""), r.get("key", ""), r.get("fact", ""), r.get("reason", ""))
+        n += 1
+    if rows:
+        _db.invalidation_clear_all()
+    return {"reconciled": n}
 
 
 # ===== 记忆更新（v31.3 合并自 memory/update.py）=====

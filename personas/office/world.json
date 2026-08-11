@@ -1,0 +1,38 @@
+{
+  "role": "普通上班族（朝九晚五）",
+  "layout": {
+    "客厅": {"furniture": ["沙发", "电视柜", "茶几"]},
+    "卧室": {"furniture": ["床", "衣柜", "床头柜"]},
+    "书房": {"furniture": ["书桌", "电脑椅", "书架"]},
+    "厨房": {"furniture": ["冰箱", "料理台", "橱柜"]}
+  },
+  "edges": [["客厅", "卧室"], ["客厅", "书房"], ["客厅", "厨房"]],
+  "doors": {"客厅门": "开", "卧室门": "开", "书房门": "开", "厨房门": "开"},
+  "visuals": {
+    "客厅": {"size": "普通", "tone": "中性", "desc": "沙发对着电视，茶几上放着遥控器和水杯"},
+    "卧室": {"size": "普通", "tone": "浅色", "desc": "床铺得很整齐，衣柜门关着"},
+    "书房": {"size": "小", "tone": "偏亮", "desc": "书桌上摆着笔记本电脑，书架堆满了"},
+    "厨房": {"size": "窄", "tone": "白", "desc": "冰箱贴着便签，料理台上放着电饭煲"}
+  },
+  "places": {
+    "公司": {"walk_min": 30, "bike_min": 15, "transit_min": 25, "drive_min": 18, "default_mode": "transit"},
+    "超市": {"walk_min": 12, "bike_min": 6, "transit_min": 15, "drive_min": 8, "default_mode": "walk"},
+    "健身房": {"walk_min": 20, "bike_min": 10, "transit_min": 18, "drive_min": 12, "default_mode": "bike"},
+    "咖啡店": {"walk_min": 8, "bike_min": 4, "transit_min": 10, "drive_min": 5, "default_mode": "walk"},
+    "商场": {"walk_min": 25, "bike_min": 12, "transit_min": 20, "drive_min": 14, "default_mode": "transit"}
+  },
+  "activity_place": {
+    "work": "公司", "exercise": "健身房", "shopping": "超市", "friend": "咖啡店",
+    "out_entertain": "商场", "study": "家", "home_entertain": "家", "home_rest": "家",
+    "gaming": "家", "sleep": "家", "rehearsal": "家", "performance": "家", "compose": "家"
+  },
+  "memorable_places": ["公司"],
+  "items": [
+    {"name": "咖啡豆", "category": "饮品", "qty": 2, "room": "厨房", "container": "橱柜", "position": "中层", "difficulty": "浅", "status": "有"},
+    {"name": "笔记本电脑", "category": "设备", "qty": 1, "room": "书房", "container": "书桌", "position": "桌面上", "difficulty": "浅", "status": "有"},
+    {"name": "面包", "category": "食品", "qty": 3, "room": "厨房", "container": "冰箱", "position": "冷藏层", "difficulty": "浅", "status": "有"},
+    {"name": "哑铃", "category": "运动", "qty": 1, "room": "卧室", "container": "衣柜", "position": "角落", "difficulty": "浅", "status": "有"}
+  ],
+  "container_capacity": 10,
+  "home_location": "上海·普通小区"
+}

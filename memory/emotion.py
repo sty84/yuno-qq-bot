@@ -177,9 +177,18 @@ def _cfg(key, default):
 
 # ===== AI 情绪状态机 =====
 def ai_baseline():
-    """人设基线（千石由乃：平静慵懒——低唤醒、中等支配、略正效价）。可在 config 覆盖。"""
-    b = _cfg("baseline", None) or {"v": 0.15, "a": -0.55, "d": 0.5}
-    return _v(b)
+    """人设情绪基线（平静慵懒——低唤醒、中等支配、略正效价）。可在 config / Persona Pack 覆盖。"""
+    b = _cfg("baseline", None)
+    if isinstance(b, dict) and "v" in b:
+        return _v(b)
+    try:
+        from memory import pack
+        b = pack.behavior().get("emotion_baseline")
+        if isinstance(b, dict) and "v" in b:
+            return _v(b)
+    except Exception:
+        pass
+    return _v({"v": 0.15, "a": -0.55, "d": 0.5})
 
 
 def ai_state():
@@ -292,7 +301,7 @@ def attribution_block(scope="") -> str:
         age_h = 999.0
     if age_h > 3:
         return ""
-    return "【情绪归因】她现在的情绪不是因为你，是刚才和其他人互动留下的。别让这份情绪全撒在用户身上，适当收着点；被问起也别甩锅给具体的人。"
+    return "【情绪归因】刚才的情绪与当前对话无关，是此前互动留下的。别让这份情绪全撒在用户身上，适当收着点；被问起也别甩锅给具体的人。"
 
 
 def ai_display(s=None):
@@ -438,6 +447,7 @@ def log_judgment(scope, text, j):
             "v": j["vad"]["v"],
             "a": j["vad"]["a"],
             "d": j["vad"]["d"],
+            "compound": j.get("compound", ""),
             "confidence": j["confidence"],
             "source": j["source"],
         }
@@ -494,6 +504,7 @@ def user_observe(scope, an, text=""):
             "d": s["d"],
             "emotion": str(an.get("emotion") or "平静"),
             "playful": bool(an.get("playful")) or float(an.get("joke_probability", 0.0)) >= 0.5,
+            "compound": j.get("compound", ""),
             "confidence": j["confidence"],
             "source": j["source"],
         }
@@ -533,6 +544,7 @@ def user_estimate(scope):
     rest = rows[half:]
     v_last = sum(float(r["v"]) for r in rest) / len(rest) if rest else v_first
     trend = "变好" if v_last - v_first > 0.2 else ("变差" if v_first - v_last > 0.2 else "平稳")
+    compound = next((r.get("compound") for r in reversed(rows) if r.get("compound")), "")
     return {
         "vad": s,
         "label": user_label(s),
@@ -541,6 +553,7 @@ def user_estimate(scope):
         "confidence": round(conf, 2),
         "decay_n": sum(1 for r in rows if _age_hours(r) <= 24),
         "playful_recent": any(r.get("playful") for r in rows[-2:]),
+        "compound": compound,
     }
 
 
@@ -567,6 +580,8 @@ def user_block(scope):
         parts.append("内部提示：用户带着情绪，别硬顶，先顺一下再讲道理。")
     elif est.get("playful_recent"):
         parts.append("内部提示：用户最近在玩梗/开玩笑，别当真。")
+    if est.get("compound"):
+        parts.append(f"内部提示：用户此刻情绪是复合的（{est['compound']}），回复别只接一边，带一点'既…又…'的底色。")
     return "；".join(parts)
 
 

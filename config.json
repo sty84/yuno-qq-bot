@@ -159,15 +159,8 @@
         "ttl_s": 1800
       },
       "environment": {
-        "_comment": "cast = 梦限大MewType 队友名单：排练/演出/偶遇时会以具名人物出现（可被记忆识别为“认识的人”）。",
         "enabled": true,
-        "ttl_min": 60,
-        "cast": [
-          "仲町阿拉蕾",
-          "宫永野乃花",
-          "峰月律",
-          "藤都子"
-        ]
+        "ttl_min": 60
       },
       "sharing": {
         "enabled": true,
@@ -183,9 +176,7 @@
       },
       "living": {
         "enabled": true,
-        "lazy_factor": 1.15,
         "daily_tick": true,
-        "container_capacity": 10,
         "activation_half_life_days": 30,
         "search_activation_low": 0.35,
         "search_activation_mid": 0.6,
@@ -196,62 +187,11 @@
         "search_quiet": true,
         "bootstrap": true,
         "bootstrap_max_items": 8,
-        "bootstrap_on_grow": false,
-        "home_location": "上海·普通公寓",
-        "birthday": "11-04",
-        "birth_year": 2004,
-        "birthday_hint_days": 7,
-        "birthday_threshold": 0.4
+        "bootstrap_on_grow": false
       },
       "space": {
         "enabled": true,
-        "_comment": "home_edges = 家内房间邻接图（真实移动用）；edge_min = 每跨一个房间的分钟数。",
-        "home_edges": [
-          ["客厅", "厨房"],
-          ["客厅", "卧室"],
-          ["卧室", "工作室"],
-          ["厨房", "工作室"]
-        ],
-        "edge_min": 1,
-        "pair_times": {
-          "排练室:演出场地": 15,
-          "排练室:录音室": 10,
-          "演出场地:录音室": 20
-        },
-        "recurring_npcs": [
-          "便利店店员"
-        ],
-        "container_capacity": 10,
-        "cast_schedule": {
-          "仲町阿拉蕾": {
-            "default_place": "排练室",
-            "week": [
-              {"days": [0, 1, 2, 3, 4], "start_hour": 14, "end_hour": 18, "place": "排练室"},
-              {"days": [5, 6], "start_hour": 13, "end_hour": 21, "place": "演出场地"}
-            ]
-          },
-          "宫永野乃花": {
-            "default_place": "家",
-            "week": [
-              {"days": [0, 2, 4], "start_hour": 10, "end_hour": 16, "place": "录音室"},
-              {"days": [1, 3], "start_hour": 18, "end_hour": 21, "place": "排练室"}
-            ]
-          },
-          "峰月律": {
-            "default_place": "排练室",
-            "week": [
-              {"days": [0, 1, 2, 3, 4, 5], "start_hour": 15, "end_hour": 19, "place": "排练室"},
-              {"days": [6], "start_hour": 10, "end_hour": 14, "place": "便利店"}
-            ]
-          },
-          "藤都子": {
-            "default_place": "家",
-            "week": [
-              {"days": [0, 1, 2, 3, 4], "start_hour": 9, "end_hour": 17, "place": "学校"},
-              {"days": [5, 6], "start_hour": 13, "end_hour": 18, "place": "排练室"}
-            ]
-          }
-        }
+        "edge_min": 1
       },
       "interaction": {
         "enabled": true,
@@ -277,35 +217,17 @@
         "system1_min_success": 0.75,
         "system1_min_overlap": 0.5,
         "cognitive_turn": false,
-        "intention_ttl_hours": 72,
-        "persona_weights": {
-          "节能": 0.8,
-          "省电": 0.8,
-          "懒": 0.7,
-          "休息": 0.6,
-          "音乐": 0.9,
-          "演出": 0.9,
-          "排练": 0.85,
-          "作曲": 0.85,
-          "打碟": 0.85,
-          "游戏": 0.7,
-          "漫画": 0.6,
-          "队友": 0.6,
-          "朋友": 0.6,
-          "毒舌": 0.6
-        }
+        "intention_ttl_hours": 72
       },
       "agents": {
         "_comment": "多主体记忆：注册队友/NPC 作为独立记忆 scope（npc:<名>），群聊/公开事实可被主体'听到'写入各自视角；私聊与高隐私事实不传播。",
         "enabled": true,
-        "cast": [
-          "仲町阿拉蕾",
-          "宫永野乃花",
-          "峰月律",
-          "藤都子"
-        ],
         "npc_top_k": 2,
         "npc_confidence_cap": 0.8
+      },
+      "persona_pack": {
+        "_comment": "Persona Pack：角色可插拔（名字/世界/活动/基线参数收进 personas/<pack>/）。切换：tools.py persona-switch --pack <名>。",
+        "pack": "yuno"
       },
       "weights": {
         "lexical": 0.6,

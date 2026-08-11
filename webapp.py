@@ -60,6 +60,20 @@ def _run_task(task_id, kind, fn):
                     hist = _db.kv_get("memory", "baseline_history") or []
                     hist.append(_history_entry(kind, result))
                     _db.kv_set("memory", "baseline_history", hist[-200:])
+                    # 回归门禁：与上一次同类型评测对比，退化写入实验日志
+                    if len(hist) >= 2:
+                        before = hist[-2]["metrics"]
+                        after = _history_entry(kind, result)["metrics"]
+                        delta = {
+                            k: round(float(after[k]) - float(before[k]), 3)
+                            for k in after
+                            if k in before and after[k] is not None and before[k] is not None
+                        }
+                        regression = any(v < -0.03 for v in delta.values())
+                        _db.exp_log_add(
+                            kind, detail="webapp eval", before=before, after=after,
+                            delta=delta, regression=regression,
+                        )
                 except Exception:
                     pass
         except Exception as e:
@@ -164,8 +178,8 @@ def _task_fn(kind):
             return res
     elif kind == "subjects_eval":
         def fn():
-            from memory import subjects_eval
-            return subjects_eval.run(save=True)
+            from memory import subjects
+            return subjects.eval_run(save=True)
     elif kind == "memory_eval":
         def fn():
             import memory
@@ -301,6 +315,12 @@ def diagnostics():
 def history():
     """基线历史趋势（每次跑评测自动记录，最多 200 条）。"""
     return _db.kv_get("memory", "baseline_history") or []
+
+
+@app.get("/api/experiments")
+def experiments(limit: int = 50):
+    """实验日志：基线前后与回归标记。"""
+    return _db.exp_log_rows(limit)
 
 
 @app.post("/api/tasks")

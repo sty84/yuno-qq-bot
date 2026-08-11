@@ -58,9 +58,3 @@ print(agent.grow())
 AI 自身记忆与用户记忆同表同格式（`memories.confidence`）：persona 身份可信度 1.0、
 对话经历 0.6、LLM 巩固的观点 0.5；用户纠正会下调相关记忆可信度，
 低于 0.35 的记忆不注入人格。这样 AI 的"成长"带上了可解释的可信度约束。
-
-## 与 Hermes 的关系
-
-本仓库的 QQ 聊天前台直接用 `agent.ask`；Hermes（管理端 Agent）通过 MCP
-`memory.search / add / clear` 读写同一套记忆库，人设经 `tools.py sync-persona`
-同步为 `SOUL.md`——两端始终共享同一份长期记忆与人格来源。

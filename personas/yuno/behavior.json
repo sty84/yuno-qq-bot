@@ -1,0 +1,16 @@
+{
+  "lazy_factor": 1.15,
+  "emotion_baseline": {"v": 0.15, "a": -0.55, "d": 0.5},
+  "sharing_threshold": 0.6,
+  "sleep_deep_window": [2, 5],
+  "birthday": "11-04",
+  "birth_year": 2004,
+  "birthday_hint_days": 7,
+  "birthday_threshold": 0.4,
+  "inspect_delay_s": 30,
+  "persona_weights": {
+    "节能": 0.8, "省电": 0.8, "懒": 0.7, "休息": 0.6,
+    "音乐": 0.9, "演出": 0.9, "排练": 0.85, "作曲": 0.85, "打碟": 0.85,
+    "游戏": 0.7, "漫画": 0.6, "队友": 0.6, "朋友": 0.6, "毒舌": 0.6
+  }
+}

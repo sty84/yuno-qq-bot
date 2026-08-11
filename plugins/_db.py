@@ -303,6 +303,15 @@ def _create_tables():
                 fact TEXT NOT NULL,
                 reason TEXT NOT NULL DEFAULT '',
                 ts TEXT NOT NULL DEFAULT '');
+            CREATE TABLE IF NOT EXISTS experiment_log(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                action TEXT NOT NULL,
+                detail TEXT NOT NULL DEFAULT '',
+                before TEXT NOT NULL DEFAULT '',
+                after TEXT NOT NULL DEFAULT '',
+                delta TEXT NOT NULL DEFAULT '',
+                regression INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS space_state(
                 id INTEGER PRIMARY KEY CHECK(id=1),
                 room TEXT NOT NULL DEFAULT '客厅',
@@ -874,6 +883,45 @@ def invalidation_clear_all():
         c = _connect()
         c.execute("DELETE FROM state_invalidations")
         c.commit()
+
+
+def exp_log_add(action, detail="", before=None, after=None, delta=None, regression=False):
+    """实验日志：每次改动/评测的基线前后与偏差（回归门禁）。"""
+    with _lock:
+        c = _connect()
+        c.execute(
+            "INSERT INTO experiment_log(ts,action,detail,before,after,delta,regression) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (
+                datetime.now().isoformat(timespec="seconds"),
+                str(action)[:60], str(detail)[:200],
+                json.dumps(before, ensure_ascii=False)[:400] if before is not None else "",
+                json.dumps(after, ensure_ascii=False)[:400] if after is not None else "",
+                json.dumps(delta, ensure_ascii=False)[:400] if delta is not None else "",
+                1 if regression else 0,
+            ),
+        )
+        c.commit()
+
+
+def exp_log_rows(limit=50):
+    with _lock:
+        cur = _connect().execute(
+            "SELECT id, ts, action, detail, before, after, delta, regression "
+            "FROM experiment_log ORDER BY id DESC LIMIT ?",
+            (max(1, int(limit)),),
+        )
+        cols = [d[0] for d in cur.description]
+        out = []
+        for r in cur.fetchall():
+            d = dict(zip(cols, r))
+            for k in ("before", "after", "delta"):
+                try:
+                    d[k] = json.loads(d[k]) if d[k] else None
+                except Exception:
+                    pass
+            out.append(d)
+        return out
 
 
 # ===== 空间/心智状态表（P0 数据模型优化：kv JSON → 正规表，带一次性迁移）=====

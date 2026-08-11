@@ -18,7 +18,7 @@ pytest 回归套件 + CI；日程夜晚槽合理化（22–02 在家夜生活、
 flowchart LR
     QQ[QQ 聊天前台 bot.py] --> AG[agent.ask 人格+记忆+LLM]
     SDK[Python SDK / FastAPI yuno_memory] --> AG
-    HER[Hermes / 其他 Agent] -->|HTTP / MCP| SDK
+    EXT[其他 Agent / SDK] -->|HTTP / MCP| SDK
     AG --> MEM[memory/ 统一记忆系统]
     MEM --> DB[(SQLite data/bot.db)]
     MEM --> ST[状态层: 情绪/日程/睡眠/环境/分享/生活/空间/传感器]
@@ -37,7 +37,7 @@ flowchart LR
 | 关系 | 无 | AI-用户关系状态机（trust/familiarity/stage，行为证据驱动） |
 | 决策 | 无 | 一次一问的真人式顾问（结合记忆、考虑现实约束、去模板化） |
 | 世界层 | 无 | 情绪/睡眠/日程/天气/环境/分享欲/生活/空间/传感器——AI 有自己的生活节奏与作息 |
-| 管理 | 指令暴露在 QQ 聊天 | 管理迁出 QQ（MCP 能力层 + Hermes；App 见详细设计），QQ 只聊天 |
+| 管理 | 指令暴露在 QQ 聊天 | 管理迁出 QQ（MCP 能力层；App 见详细设计），QQ 只聊天 |
 | 接入 | 只能 QQ | Python SDK + FastAPI，任意 Agent 可接入同一份记忆 |
 | 工程化 | 无测试 | e2e / 负载 / 专项验收测试、记忆轨迹、五维人工评分、评测基线闭环 |
 
@@ -67,13 +67,12 @@ flowchart LR
 ### SDK / HTTP（yuno_memory/）
 
 任意 Python 程序或 Agent 接入同一套记忆：pip 可安装包 + FastAPI 服务 + 统一
-`memory.search / add / clear` 接口，供 Hermes 等外部 Agent 读写同一份记忆库。
+`memory.search / add / clear` 接口，供外部 Agent 读写同一份记忆库。
 
-### MCP（tools.py mcp / hermes/）
+### MCP（tools.py mcp）
 
-服务管理、配置、审计、记忆读写、播报能力封装为 MCP 工具，供 Hermes 或管理 App 调用；
-人设经 `tools.py sync-persona` 同步为 Hermes 的 SOUL.md，两端共享同一份长期记忆与人格来源。
-详见 [hermes/README.md](hermes/README.md)。
+服务管理、配置、审计、记忆读写、播报能力封装为 MCP 工具，供管理端 / 外部 Agent 调用；
+人设单一来源为 `persona.md`（Persona Pack），不随外部工具分发。
 
 ## 新增功能介绍
 
@@ -187,7 +186,7 @@ flowchart LR
   底线类不道歉松口概率为 0，道歉后按关系分/信任/熟悉度计算原谅概率。
 - **人物设定（character）**：`/设定 角色名` 生成档案入记忆并双写
   `docs/characters/<名>.md`，`tools.py character-sync` 一键同步回（md 为权威来源）。
-- **人设单一来源**：`persona.md` → QQ 直接读、`tools.py sync-persona` 同步 Hermes SOUL.md；
+- **人设单一来源**：`persona.md`（Persona Pack）；
   AI 自身对话经历按重要度沉淀为 experience、每日巩固成 belief，人格随经历缓慢成长。
 - **会话结构**：时间窗口 + 同主题续接（sessions），跨天同主题自然衔接。
 - **对话质量**：自动消息自洽带前因、设备问题意图推测、反重复句式（同一梗一天最多一次）、
@@ -316,7 +315,7 @@ printf '0 3 * * * cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py backup >>
 | `memory.core.mind` | 心智状态中枢（system1 开关与阈值、cognitive_turn、persona_weights、意图 TTL） |
 | `memory.core.analysis` / `world` / `trace` | 情绪 LLM 兜底 / 世界模型 / 记忆轨迹 |
 | `chat_bridge` | 慢响应衔接语开关 |
-| `services` | MCP 服务注册表（管理 App / Hermes 用） |
+| `services` | MCP 服务注册表（管理端 / 外部 Agent 用） |
 
 ## 常用指令
 
@@ -372,7 +371,6 @@ python v29_test.py             # 专项验收：用户记忆不被 AI 自述污�
 |---|---|
 | [memory/README.md](memory/README.md) | 记忆系统框架、算法、设计决策、瓶颈 |
 | [agent/README.md](agent/README.md) | Agent 层：记忆/人设/LLM 编排与成长闭环 |
-| [hermes/README.md](hermes/README.md) | Hermes 接入方案与 MCP 工具说明 |
 
 ## 已知问题与未来方向
 

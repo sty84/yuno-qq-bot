@@ -80,7 +80,7 @@ _ITEM_UNIT = {
 # 跨房间查看（v31.4）：先回"我去看看"，后台延迟一条自然汇报
 INSPECT_GO = "【待办】{container}在{room}（你现在在{room_now}）。先回一句“我去看看”就行，不要现在回答里面的内容；系统会在你走过去后自动汇报，这句是内部参考，别对用户提“系统”。"
 INSPECT_GOING = "【待办】你已经在去{room}看{container}的路上了，回复里带一句“马上到/这就看”就行，别重复答应。"
-INSPECT_PROMPT = "你是千石由乃（节能系宅女、乐队DJ）。你刚才答应用户“我去看看”，现在你走到了{room}，打开{container}，看到：{items}。用她的口吻给用户发一条简短消息（15~35字），像真人聊天自然地汇报里面有什么；名称和数量照实说，不要加“盒/罐/袋/碎”等原文没有的单位，不要提“系统/数据/汇报”。"
+INSPECT_PROMPT = "你是{name}（{role}）。你刚才答应用户“我去看看”，现在你走到了{room}，打开{container}，看到：{items}。用她的口吻给用户发一条简短消息（15~35字），像真人聊天自然地汇报里面有什么；名称和数量照实说，不要加“盒/罐/袋/碎”等原文没有的单位，不要提“系统/数据/汇报”。"
 
 _BUY_RE = re.compile(r"(?:顺路买了|刚买了|买了点|买了)([\u4e00-\u9fffA-Za-z0-9]{1,8}?)(?:，|。|！|！|$)")
 _EMPTY_RE = re.compile(r"([\u4e00-\u9fffA-Za-z0-9]{1,8}?)(?:吃完了|喝完了|用完了|吃光了|喝光了|用光了)")
@@ -92,15 +92,44 @@ def _cfg(key, default):
     return lv.get(key, default)
 
 
+def _pack_world() -> dict:
+    try:
+        from memory import pack
+        return pack.world()
+    except Exception:
+        return {}
+
+
+def _pack_behavior() -> dict:
+    try:
+        from memory import pack
+        return pack.behavior()
+    except Exception:
+        return {}
+
+
+def _container_capacity() -> int:
+    return int(_cfg("container_capacity", _pack_world().get("container_capacity", 10)))
+
+
 def home_layout() -> dict:
+    w = _pack_world().get("layout")
+    if isinstance(w, dict) and w:
+        return w
     return _cfg("layout", HOME_LAYOUT_DEFAULT) or HOME_LAYOUT_DEFAULT
 
 
 def home_location() -> str:
+    w = _pack_world().get("home_location")
+    if w:
+        return str(w)
     return str(_cfg("home_location", "") or "").strip()
 
 
 def places() -> dict:
+    w = _pack_world().get("places")
+    if isinstance(w, dict) and w:
+        return w
     return _cfg("places", PLACES_DEFAULT) or PLACES_DEFAULT
 
 
@@ -109,7 +138,9 @@ def _load() -> dict:
     data = _db.kv_get("memory", "living_items") or {}
     if data and data.get("items") is not None:
         return data
-    data = {"items": [dict(i) for i in DEFAULT_ITEMS], "moves": []}
+    w = _pack_world().get("items")
+    items = [dict(i) for i in w] if isinstance(w, list) and w else [dict(i) for i in DEFAULT_ITEMS]
+    data = {"items": items, "moves": []}
     _db.kv_set("memory", "living_items", data)
     return data
 
@@ -383,6 +414,22 @@ def where_is_block(scope, text, now=None) -> str:
 _CANCEL_WORDS = ("别找了", "不找了", "算了", "不用找", "别找", "放弃吧")
 
 
+def _persona_name() -> str:
+    try:
+        from agent import persona
+        return persona.persona_name()
+    except Exception:
+        return "YUNO"
+
+
+def _persona_role() -> str:
+    try:
+        from memory import pack
+        return str(pack.world().get("role") or pack.behavior().get("role") or "")
+    except Exception:
+        return ""
+
+
 def cancel_search(scope) -> bool:
     """用户说别找了 → 取消进行中的搜索。"""
     d = _db.item_search_rows()
@@ -455,7 +502,7 @@ def search_progress(scope) -> dict:
         _finish()
         return {
             "done": True, "found": False, "name": name, "container": "",
-            "prompt": f"你是千石由乃。你翻遍了家里几处都没找到{name}。用她的口吻回一句（15~35字），像'……没找到，不知道塞哪了'，别说'系统'。",
+            "prompt": f"你是{_persona_name()}。你翻遍了家里几处都没找到{name}。用她的口吻回一句（15~35字），像'……没找到，不知道塞哪了'，别说'系统'。",
         }
     container = queue[step]
     hit = next((i for i in lookup(container) if str(i.get("name", "")) == name), None)
@@ -484,7 +531,7 @@ def search_progress(scope) -> dict:
             pass
         return {
             "done": True, "found": True, "name": name, "container": container,
-            "prompt": f"你是千石由乃。你在{container}里找到了{name}（{hit.get('position','')}）。用她的口吻给用户发一条简短消息（15~35字）汇报找到了，别加原文没有的单位，别提系统。",
+            "prompt": f"你是{_persona_name()}。你在{container}里找到了{name}（{hit.get('position','')}）。用她的口吻给用户发一条简短消息（15~35字）汇报找到了，别加原文没有的单位，别提系统。",
         }
     nxt_step = step + 1
     st["step"] = nxt_step
@@ -518,7 +565,7 @@ def search_progress(scope) -> dict:
             pass
         return {
             "done": True, "found": False, "name": name, "container": container,
-            "prompt": f"你是千石由乃。你翻遍家里几处都没找到{name}，这次是真的找不到了。用她的口吻回一句（15~35字），像'……找不到了，不知道塞哪去了'，别硬编一个位置，别提系统。",
+            "prompt": f"你是{_persona_name()}。你翻遍家里几处都没找到{name}，这次是真的找不到了。用她的口吻回一句（15~35字），像'……找不到了，不知道塞哪去了'，别硬编一个位置，别提系统。",
         }
     nxt = queue[nxt_step]
     schedule_inspection(scope, nxt, kind="search")
@@ -534,7 +581,7 @@ def search_progress(scope) -> dict:
                 "name": name, "container": container, "prompt": ""}
     return {
         "done": False, "found": False, "name": name, "container": container,
-        "prompt": f"你是千石由乃。你在{container}里没找到{name}，准备再去{nxt}看看。用她的口吻回一句（15~35字），像'这没有，去{nxt}看看'，别提系统。",
+        "prompt": f"你是{_persona_name()}。你在{container}里没找到{name}，准备再去{nxt}看看。用她的口吻回一句（15~35字），像'这没有，去{nxt}看看'，别提系统。",
     }
 
 
@@ -635,7 +682,7 @@ def give(name, n=1, scope="", source="user_gift"):
     data = _load()
     hit = next((i for i in data["items"] if str(i.get("name", "")) == name), None)
     if hit:
-        cap = int(_cfg("container_capacity", 10))
+        cap = _container_capacity()
         if int(hit.get("qty", 0)) + n > cap:
             return {"ok": False, "reason": f"{hit.get('container', '容器')}满了，放不下"}
         hit["qty"] = int(hit.get("qty", 0)) + n
@@ -646,7 +693,7 @@ def give(name, n=1, scope="", source="user_gift"):
                "container": "茶几", "position": "桌面上", "difficulty": "浅",
                "status": "有", "source": source}
         room_count = sum(1 for i in data["items"] if i.get("container") == "茶几")
-        if room_count + 1 > int(_cfg("container_capacity", 10)):
+        if room_count + 1 > _container_capacity():
             hit["container"] = "储物箱"
         data["items"].append(hit)
     _move_log(data, "give", name, n, f"用户送来了{n}个{name}")
@@ -675,7 +722,7 @@ def give(name, n=1, scope="", source="user_gift"):
 
 
 _WORLD_PROMPT = (
-    "你是千石由乃家里的世界状态解析器。根据用户这句话，判断世界发生了什么变化，"
+    "你是{name}家里的世界状态解析器。根据用户这句话，判断世界发生了什么变化，"
     "只输出 JSON：{\"ops\":[{\"type\":\"take|give|consume|move|device\",\"item\":\"物品名\",\"qty\":1,"
     "\"room\":\"房间\",\"container\":\"容器\",\"device\":\"设备名\",\"state\":\"状态\"}]}。"
     "type 含义：take=由乃拿取；give=用户送东西给由乃；consume=物品被消耗（用户喝/吃了）；"
@@ -701,7 +748,7 @@ def propose_world_delta(scope, text, now=None):
         return {"changed": 0, "reason": "throttled"}
     _WORLD_LAST[scope or ""] = now
     item_hint = "；".join(f"{i['name']}×{i['qty']}在{i.get('container', '')}" for i in all_items()) or "无"
-    prompt = _WORLD_PROMPT + "\n已知物品：" + item_hint + "\n用户说：" + str(text)[:200]
+    prompt = _WORLD_PROMPT.format(name=_persona_name()) + "\n已知物品：" + item_hint + "\n用户说：" + str(text)[:200]
     try:
         from plugins import _shared
         reply = _shared.ask_deepseek(prompt, temperature=0)
@@ -818,7 +865,7 @@ def repair_spatial() -> dict:
             it["room"] = croom
             fixed.append({"name": name, "issue": f"房间不符，修正为{croom}"})
     # 容器超容量：只记录不搬动（等人工整理）
-    cap = int(_cfg("container_capacity", 10))
+    cap = _container_capacity()
     per_container = {}
     for it in data["items"]:
         if it.get("status") == "没有了":
@@ -833,7 +880,7 @@ def repair_spatial() -> dict:
 
 
 _BOOTSTRAP_PROMPT = (
-    "你是千石由乃家里的场景设计师。根据她的身份/性格/动机/偏好（见人设），"
+    "你是{name}家里的场景设计师。根据她的身份/性格/动机/偏好（见人设），"
     "补全她的家应该有什么物品。只输出 JSON：{\"items\":[{\"name\":\"物品名\",\"category\":\"类别\","
     "\"qty\":1,\"room\":\"房间\",\"container\":\"容器\",\"position\":\"位置\",\"difficulty\":\"浅|深\","
     "\"origin\":\"为什么有（引用人设依据）\"}]}。要求：房间必须是 客厅/工作室/卧室/厨房 之一，"
@@ -872,7 +919,7 @@ def bootstrap_from_persona(scope="", now=None) -> dict:
             _stats_err(e)
             pass
         max_items = int(_cfg("bootstrap_max_items", 8))
-        prompt = _BOOTSTRAP_PROMPT.replace("{max_items}", str(max_items)) + "\n人设摘要：\n" + persona
+        prompt = _BOOTSTRAP_PROMPT.replace("{name}", _persona_name()).replace("{max_items}", str(max_items)) + "\n人设摘要：\n" + persona
         if extra:
             prompt += "\n她的经历/偏好（记忆库）：\n" + "\n".join(extra[:6])
         reply = _shared.ask_deepseek(prompt, temperature=0.7)
@@ -885,7 +932,7 @@ def bootstrap_from_persona(scope="", now=None) -> dict:
     data = _load()
     existing = {str(i.get("name", "")) for i in data["items"]}
     layout = home_layout()
-    cap = int(_cfg("container_capacity", 10))
+    cap = _container_capacity()
     added = []
     for it in (delta.get("items") or [])[:max_items]:
         name = str(it.get("name", "")).strip()
@@ -929,7 +976,7 @@ def move_item(name, room, container):
         return {"ok": False, "reason": f"没有{name}"}
     if not _valid_target(room, container):
         return {"ok": False, "reason": f"家里没有{room}的{container}"}
-    cap = int(_cfg("container_capacity", 10))
+    cap = _container_capacity()
     occupants = [i for i in data["items"] if i.get("container") == container and i.get("name") != name]
     if len(occupants) + 1 > cap:
         return {"ok": False, "reason": f"{container}满了，放不下"}
@@ -1047,7 +1094,7 @@ def travel_time(place, mode=None, now=None) -> dict:
         pass
 
     if mode in ("walk", "bike"):
-        lazy = float(_cfg("lazy_factor", 1.15))
+        lazy = float(_pack_behavior().get("lazy_factor", _cfg("lazy_factor", 1.15)))
         mult *= lazy
         factors.append("由乃懒得动")
         try:
@@ -1231,7 +1278,10 @@ def inspection_prompt(item) -> str:
         f"{i['name']}×{i['qty']}{_ITEM_UNIT.get(i['name'], '')}（{i.get('position', '')}）"
         for i in items
     ) or "空的"
-    return INSPECT_PROMPT.format(room=item.get("room", ""), container=item.get("container", ""), items=item_text)
+    return INSPECT_PROMPT.format(
+        name=_persona_name(), role=_persona_role(),
+        room=item.get("room", ""), container=item.get("container", ""), items=item_text,
+    )
 
 
 def home_block(scope="", text="", now=None) -> str:
@@ -1362,7 +1412,7 @@ def home_block(scope="", text="", now=None) -> str:
 # ===== AI 生日与年龄（v31.3）=====
 def ai_birthday():
     """AI 生日 (月, 日)，config → memory.core.living.birthday，格式 MM-DD。"""
-    b = str(_cfg("birthday", "") or "").strip()
+    b = str(_cfg("birthday", _pack_behavior().get("birthday", "")) or "").strip()
     if not b:
         return None
     try:
@@ -1376,7 +1426,7 @@ def ai_birthday():
 def ai_age(now=None):
     """AI 年龄 = 当前年 - birth_year（config）。"""
     now = now or datetime.now()
-    by = _cfg("birth_year", None)
+    by = _cfg("birth_year", _pack_behavior().get("birth_year", None))
     if not by:
         return None
     try:
@@ -1404,11 +1454,13 @@ def birthday_hint_block(scope="", text="", now=None) -> str:
     """生日临近暗示（内部参考）：关系达到门槛才注入——她不好意思直说，但渴望你在意。"""
     now = now or datetime.now()
     d = days_to_birthday(now)
-    if d <= 0 or d > int(_cfg("birthday_hint_days", 7)):
+    if d <= 0 or d > int(_cfg("birthday_hint_days", _pack_behavior().get("birthday_hint_days", 7))):
         return ""
     try:
         from memory import interaction as interaction_mod
-        if interaction_mod.familiarity_effective(scope) < float(_cfg("birthday_threshold", 0.4)):
+        if interaction_mod.familiarity_effective(scope) < float(
+            _cfg("birthday_threshold", _pack_behavior().get("birthday_threshold", 0.4))
+        ):
             return ""
     except Exception as e:
         _stats_err(e)

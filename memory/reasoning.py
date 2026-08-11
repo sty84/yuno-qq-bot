@@ -284,19 +284,6 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
             return list(_result_cache["hits"])
     all_scopes = list(scopes) + list(extra_scopes or [])
     loc_mark = f"[地点：{location}]" if location else ""
-    rows = []
-    for scope in all_scopes:
-        privacy_th = float(trace.adjustments().get("privacy_threshold", 0.8))
-        rows += [
-            r
-            for r in _db.memory_rows(scope, exclude_status=("superseded",))
-            if _visible(r, scopes)
-            and not str(r.get("fact", "")).startswith("enc:")
-            and (not loc_mark or loc_mark in str(r.get("fact", "")))
-            and float(r.get("privacy", 0.0)) < privacy_th
-        ]
-    if not rows:
-        return []
 
     # 注意力系统（v6）：活跃目标相关记忆加权
     try:
@@ -313,6 +300,23 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
     time_hint = extract.understand(query_text).get("time_hint")
     lists = _ranked_lists(query_text, all_scopes, top_k, weights, plan)
     structured_hits = set(lists["structured"])
+    # P2-3 检索优化：只加载通道命中的候选记忆行（避免全量扫描），可见性/隐私仍逐行校验
+    candidates = {f for lst in lists.values() for f in lst}
+    rows = []
+    if candidates:
+        for scope in all_scopes:
+            privacy_th = float(trace.adjustments().get("privacy_threshold", 0.8))
+            rows += [
+                r
+                for r in _db.memory_rows(scope, exclude_status=("superseded",))
+                if r["fact"] in candidates
+                and _visible(r, scopes)
+                and not str(r.get("fact", "")).startswith("enc:")
+                and (not loc_mark or loc_mark in str(r.get("fact", "")))
+                and float(r.get("privacy", 0.0)) < privacy_th
+            ]
+    if not rows:
+        return []
 
     # RRF 融合
     fusion = {}
@@ -456,7 +460,7 @@ def retrieve(
         _stats_err(e)
     if not query_text or not scopes:
         return []
-    if window is None:
+    if window is None and not _cfg("ablation_disable_time", False):
         try:
             from memory import time_extract
             te = time_extract.extract(query_text or "", scopes[0] if scopes else None)
@@ -493,6 +497,108 @@ def retrieve(
         if info:
             policy.touch(info[0], info[1], fact)
     return hits
+
+
+_ANCHOR_RE = None
+
+
+def _anchor_re():
+    """追问日期类句式（P2-1）：approx 事件 + 用户追问 → 沿 follows 链锚定。"""
+    global _ANCHOR_RE
+    if _ANCHOR_RE is None:
+        import re
+        _ANCHOR_RE = re.compile(r"到底是哪天|具体是哪天|具体哪天|具体.{0,6}时候|几号|哪天来着|是哪一天")
+    return _ANCHOR_RE
+
+
+def anchor_time(query_text, scopes, top_k=3, max_depth=3) -> dict:
+    """时间锚定（P2-1）：approx 事件 + "到底是哪天"式追问 → 沿 follows 链找邻近 explicit 锚点。
+
+    返回 {"anchored", "fact", "approx_ts", "before": [...], "after": [...], "hint"}；
+    hint 可直接注入上下文，让模型"能查证就帮 TA 确认"，而不是编造具体日期。
+    """
+    try:
+        if not _anchor_re().search(str(query_text or "")):
+            return {}
+        hits = retrieve(query_text, scopes, top_k=max(1, int(top_k)), min_score=0.1)
+        if not hits:
+            return {}
+        evs, seen = [], set()
+        for scope in list(scopes or []):
+            for ev in _db.event_rows(scope, limit=3000):
+                if ev["id"] in seen:
+                    continue
+                seen.add(ev["id"])
+                evs.append(ev)
+        by_fact = {}
+        for ev in evs:
+            by_fact.setdefault(str(ev.get("memory_fact") or ev.get("title") or ""), []).append(ev)
+        for fact, _s, _sc in hits:
+            for ev in by_fact.get(fact, []):
+                if str(ev.get("ts_source") or "approx") != "explicit":
+                    return _anchor_from_event(ev, evs, max_depth)
+    except Exception as e:
+        _stats_err(e)
+    return {}
+
+
+def _anchor_from_event(ev, evs, max_depth) -> dict:
+    """沿 follows 链（前后各 max_depth 跳）收集显式时间事件，锚定 approx 事件。"""
+    try:
+        from memory import graph, time_extract
+        by_id = {e["id"]: e for e in evs}
+        nids = set(graph.ancestors([ev["id"]], rel="follows", depth=max_depth))
+        nids |= set(graph.descendants([ev["id"]], rel="follows", depth=max_depth))
+        anchors = []
+        for nid in nids:
+            nb = by_id.get(nid)
+            if not nb or str(nb.get("ts_source") or "approx") != "explicit":
+                continue
+            ts = str(nb.get("ts") or "")
+            if not ts:
+                continue
+            try:
+                dt = datetime.fromisoformat(ts[:19])
+            except Exception:
+                continue
+            anchors.append((dt, ts, str(nb.get("memory_fact") or nb.get("title") or "")))
+        if not anchors:
+            return {}
+        anchors.sort(key=lambda x: x[0])
+        try:
+            ev_dt = datetime.fromisoformat(str(ev.get("ts") or "")[:19])
+        except Exception:
+            ev_dt = None
+        before = [a for a in anchors if ev_dt is None or a[0] <= ev_dt]
+        after = [a for a in anchors if ev_dt is None or a[0] > ev_dt]
+
+        def _brief(dt, ts, title):
+            return {
+                "ts": ts,
+                "title": title,
+                "days_offset": round((dt - ev_dt).total_seconds() / 86400, 1) if ev_dt else None,
+            }
+
+        out = {
+            "anchored": True,
+            "fact": str(ev.get("memory_fact") or ev.get("title") or ""),
+            "approx_ts": str(ev.get("ts") or ""),
+            "before": [_brief(*a) for a in before[-2:]],
+            "after": [_brief(*a) for a in after[:2]],
+        }
+        parts = []
+        if before:
+            _dt, ts, title = before[-1]
+            parts.append(f"在「{title}」（{time_extract.label_for(ts, 'explicit', scope=str(ev.get('scope') or ''))}）之后")
+        if after:
+            _dt, ts, title = after[0]
+            parts.append(f"在「{title}」（{time_extract.label_for(ts, 'explicit', scope=str(ev.get('scope') or ''))}）之前")
+        if parts:
+            out["hint"] = "（时间锚定：这条记忆" + "、".join(parts) + "——用这些前后事件回答具体日期，但别把“大概”说成确定）"
+        return out
+    except Exception as e:
+        _stats_err(e)
+        return {}
 
 
 # ===== 重排：轻量（子串+词元覆盖+议题一致）始终可用；CrossEncoder/LLM 可选 =====

@@ -32,13 +32,24 @@ deepseek = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
 
 
 def _load_persona() -> str:
-    """人设单一来源：优先 .env 的 SYSTEM_PROMPT，否则读 persona.md。"""
+    """人设单一来源：优先 .env 的 SYSTEM_PROMPT，否则读 Persona Pack 的 persona.md。"""
     if os.getenv("SYSTEM_PROMPT"):
         return os.getenv("SYSTEM_PROMPT")
     try:
-        text = (
-            pathlib.Path(__file__).resolve().parent.parent / "persona.md"
-        ).read_text(encoding="utf-8").strip()
+        try:
+            pk = str(
+                (CONFIG.get("memory", {}) or {}).get("core", {})
+                .get("persona_pack", {}).get("pack", "yuno") or "yuno"
+            ).strip() or "yuno"
+            text = (
+                pathlib.Path(__file__).resolve().parent.parent / "personas" / pk / "persona.md"
+            ).read_text(encoding="utf-8").strip()
+        except Exception:
+            text = ""
+        if not text:
+            text = (
+                pathlib.Path(__file__).resolve().parent.parent / "persona.md"
+            ).read_text(encoding="utf-8").strip()
         if text:
             return text
     except OSError:
@@ -88,6 +99,13 @@ def reload_config():
     global CONFIG
     CONFIG = load_config()
     _sync_config_deps()
+    try:
+        from memory import pack
+        pack.invalidate()
+        from agent import persona
+        persona._persona_name_cache = None
+    except Exception:
+        pass
 
 
 def reload_if_changed():
@@ -105,7 +123,24 @@ def reload_if_changed():
 
 def data_dir() -> pathlib.Path:
     paths = [pathlib.Path(p).resolve() for p in (CONFIG.get("allowed_paths") or [])]
-    return paths[0] if paths else pathlib.Path(CONFIG_PATH).parent / "data"
+    base = paths[0] if paths else pathlib.Path(CONFIG_PATH).parent / "data"
+    # 记忆隔离（v2.2 P3）：每个 Persona Pack 独立数据目录，换人设不污染
+    try:
+        pk = str(
+            (CONFIG.get("memory", {}) or {}).get("core", {})
+            .get("persona_pack", {}).get("pack", "yuno") or "yuno"
+        ).strip() or "yuno"
+    except Exception:
+        pk = "yuno"
+    d = base / ("persona-" + pk)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        if not (d / "bot.db").exists() and (base / "bot.db").exists():
+            import shutil
+            shutil.copy(base / "bot.db", d / "bot.db")
+    except Exception:
+        pass
+    return d
 
 
 DATA_DIR = data_dir()

@@ -57,6 +57,20 @@ def _cfg(key, default):
     return s.get(key, default)
 
 
+def _threshold() -> float:
+    v = _cfg("threshold", None)
+    if v is not None:
+        return float(v)
+    try:
+        from memory import pack
+        b = pack.behavior()
+        if "sharing_threshold" in b:
+            return float(b["sharing_threshold"])
+    except Exception:
+        pass
+    return float(_cfg("threshold", 0.6))
+
+
 def _state() -> dict:
     st = _db.kv_get("memory", "sharing_state") or {}
     if not st:
@@ -321,10 +335,10 @@ def _eligible(scope, now) -> tuple:
             scope, "share", 1.0, now,
             scene="group" if str(scope).startswith("group") else "c2c", axis="disturb",
         )
-        th = float(_cfg("threshold", 0.6)) / max(0.3, mod)
+        th = _threshold() / max(0.3, mod)
     except Exception as e:
         _stats_err(e)
-        th = float(_cfg("threshold", 0.6))
+        th = _threshold()
     if d["effective"] < th:
         return False, f"分享欲不足 {d['effective']}<{round(th, 2)}"
     st = _state()
@@ -383,9 +397,11 @@ def _compose(scope, ctx: str, reason: str) -> str:
     try:
         from agent import persona
         system = persona.compose(include_ai=False)
+        pname = persona.persona_name()
     except Exception as e:
         _stats_err(e)
         system = _shared.BASE_SYSTEM_PROMPT
+        pname = "YUNO"
     try:
         from memory import tz as tz_mod
         now_txt = tz_mod.now_text(scope)
@@ -393,7 +409,7 @@ def _compose(scope, ctx: str, reason: str) -> str:
         _stats_err(e)
         now_txt = datetime.now().strftime("%m月%d日 %H:%M")
     prompt = (
-        "你是千石由乃。你在主动找用户说话（用户此刻没发消息），下面是你此刻的状态素材（内部参考，不要全部复述）：\n"
+        f"你是{pname}。你在主动找用户说话（用户此刻没发消息），下面是你此刻的状态素材（内部参考，不要全部复述）：\n"
         f"{ctx}\n"
         f"想发这条消息的缘由：{_reason_text(reason)}\n"
         f"现在是：{now_txt}。\n"

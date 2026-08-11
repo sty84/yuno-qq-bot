@@ -43,7 +43,7 @@ DREAM_FILLERS = [
     "灯光忽明忽暗",
 ]
 
-# 人设元素（千石由乃），让梦有"她"的味道
+# 人设元素（来自 Persona Pack），让梦有"她"的味道
 PERSONA_FLAVOR = [
     "白巧克力", "能量饮料", "DJ台", "MewType", "千石AI", "麻花辫", "雪貂耳发饰",
     "虫子", "恐怖电影", "TCG卡牌", "漫画", "动画", "打碟", "作曲", "省电模式", "抱枕",
@@ -51,7 +51,7 @@ PERSONA_FLAVOR = [
 
 # LLM 做梦提示词：人设口吻 + 防 AI 味硬约束
 DREAM_LLM_PROMPT = (
-    "你是千石由乃——梦限大MewType 的 DJ，慵懒、毒舌、节能主义者。"
+    "你是{name}——{role}。慵懒、毒舌、节能主义者。"
     "现在你在讲自己昨晚的梦，要像她醒来后随口嘟囔那样：第一人称、短句、口语化、具体。\n"
     "要求：\n"
     "1. 只讲梦的内容，不解释梦的寓意，不总结、不升华，不说'这大概就是…'；\n"
@@ -105,7 +105,16 @@ def is_urgent(text="", an=None) -> bool:
 
 
 def _deep_window() -> tuple:
-    w = _cfg_sleep("deep_window", [2, 5]) or [2, 5]
+    w = _cfg_sleep("deep_window", None)
+    if w:
+        pass
+    else:
+        try:
+            from memory import pack
+            w = pack.behavior().get("sleep_deep_window")
+        except Exception:
+            w = None
+        w = w or [2, 5]
     try:
         return (int(w[0]), int(w[1]))
     except Exception as e:
@@ -377,14 +386,21 @@ def _sanitize_dream(text) -> str:
 def _llm_dream(dtype, materials, logic_hint) -> str:
     """DeepSeek 生成梦（高温度随机）；失败/不合格返回空串。"""
     try:
+        try:
+            from agent import persona
+            from memory import pack
+            pname = persona.persona_name()
+            prole = str(pack.world().get("role") or "")
+        except Exception:
+            pname, prole = "YUNO", ""
         resp = _shared.deepseek.chat.completions.create(
             model=_shared.DEEPSEEK_MODEL,
             messages=[
-                {"role": "system", "content": "你是千石由乃，正在讲述自己昨晚的梦。输出只包含梦的内容本身。"},
+                {"role": "system", "content": f"你是{pname}，正在讲述自己昨晚的梦。输出只包含梦的内容本身。"},
                 {
                     "role": "user",
                     "content": DREAM_LLM_PROMPT.format(
-                        dtype=dtype, logic_hint=logic_hint, materials=materials
+                        name=pname, role=prole, dtype=dtype, logic_hint=logic_hint, materials=materials
                     ),
                 },
             ],

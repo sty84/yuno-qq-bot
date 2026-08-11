@@ -53,7 +53,16 @@ def _cfg(key, default):
 
 
 def _cast() -> list:
-    return [str(x).strip() for x in (_cfg("cast", []) or []) if str(x).strip()]
+    cast = [str(x).strip() for x in (_cfg("cast", []) or []) if str(x).strip()]
+    if not cast:
+        try:
+            from memory import pack
+            cs = pack.world().get("cast_schedule")
+            if isinstance(cs, dict):
+                cast = [str(x) for x in cs.keys()]
+        except Exception:
+            pass
+    return cast
 
 
 def _people_for(activity, rng) -> list:

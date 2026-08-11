@@ -8,6 +8,7 @@ persona.md 按 `# 段落` 拆成结构化字段（身份/性格/喜好/说话风
 
 import re
 import os
+import pathlib
 from datetime import datetime
 
 from plugins import _db, _shared
@@ -15,6 +16,29 @@ from memory import ai_memory_rows, controller as memory_controller
 from memory import topic
 
 MIN_CONFIDENCE = 0.35
+_persona_name_cache = None
+
+
+def persona_name() -> str:
+    """从 persona.md 身份段解析角色名（Persona Pack 优先）。"""
+    global _persona_name_cache
+    if _persona_name_cache:
+        return _persona_name_cache
+    text = ""
+    try:
+        from memory import pack
+        text = pack.persona_text()
+    except Exception:
+        pass
+    if not text:
+        try:
+            p = pathlib.Path(__file__).resolve().parent.parent / "persona.md"
+            text = p.read_text(encoding="utf-8")
+        except Exception:
+            text = ""
+    m = re.search(r"你是([^（(，,。\s]+)", str(text or ""))
+    _persona_name_cache = m.group(1) if m else "YUNO"
+    return _persona_name_cache
 
 
 def _ai_scope() -> str:
@@ -137,7 +161,7 @@ OUTPUT_RULE = (
     "\n\n【输出规范】禁止用括号标注动作或情绪（例如“（歪了歪头）（打了个哈欠）”）。"
     "动作和情绪必须直接用文字本身表达（语气词、句式、用词、标点），"
     "像真人打字聊天一样，不要说任何舞台提示。"
-    "不要在回复里复述或介绍自己的身份设定（如“我是千石由乃、DJ、节能主义者”）；"
+    "不要在回复里复述或介绍自己的身份设定（例如“我是谁、我是什么身份标签”）；"
     "身份是你天然拥有的背景，除非用户直接问“你是谁”，否则不要主动自报家门。"
     "不要刻意向用户提起自己的喜好、口头禅或设定细节，除非用户先提起或当前话题直接相关；"
     "更不要每次聊天都硬塞一句自己的偏好当万能回复。"

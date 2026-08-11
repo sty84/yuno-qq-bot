@@ -4,7 +4,6 @@
   python tools.py health [--notify]       # 独立健康检查（cron 用）
   python tools.py backup                    # 每日 SQLite 备份（保留 7 份）
   python tools.py recover [--notify]        # 一键恢复 services 注册表中未运行的服务
-  python tools.py sync-persona [--target]   # 人设同步到 Hermes SOUL.md
   python tools.py character 千石由乃          # 生成人物档案入记忆 + docs/characters/<名>.md
   python tools.py character-sync 千石由乃    # 把编辑后的 md 档案同步回记忆库（或传文件路径）
   python tools.py mcp                       # 启动 MCP Server（需 mcp SDK）
@@ -163,7 +162,7 @@ def cmd_config_validate() -> str:
         "rerank", "mmr", "cache", "telemetry", "session", "reflection", "analysis",
         "persona", "world", "trace", "emotion", "sleep", "schedule", "weather",
         "environment", "sharing", "living", "space", "interaction", "weights",
-        "vector_index", "policy", "mind", "sensors", "agents",
+        "vector_index", "policy", "mind", "sensors", "agents", "persona_pack",
     }
     for k in core:
         if k.startswith("_") or k in KNOWN:
@@ -308,6 +307,17 @@ def cmd_memory_clear_user(uid: str) -> str:
 def cmd_memory_probes(limit: int, out: str) -> str:
     """把查询日志导出为评测集（弱监督：当时返回的即期望）。"""
     from plugins import _db
+
+    def _probe_category(query):
+        q = str(query or "")
+        if any(w in q for w in ("昨天", "前天", "上周", "这周", "上个月", "去年", "今天", "什么时候", "哪天", "最近")):
+            return "time"
+        if any(w in q for w in ("哪", "在哪", "哪里", "房间", "柜", "冰箱", "客厅", "卧室", "厨房", "找")):
+            return "space"
+        if any(w in q for w in ("开心", "难过", "生气", "烦", "怕", "心情", "情绪", "高兴", "哭", "气")):
+            return "emotion"
+        return "lexical"
+
     rows = _db.query_log_pending(limit)
     probes = []
     for r in rows:
@@ -320,6 +330,7 @@ def cmd_memory_probes(limit: int, out: str) -> str:
                 "query": r["query"],
                 "expected": hits[:5],
                 "scope": scopes[0] if scopes else None,
+                "category": "subject" if scopes and str(scopes[0]).startswith("npc:") else _probe_category(r["query"]),
             }
         )
     if not probes:
@@ -575,27 +586,6 @@ def cmd_world(scope: str) -> str:
     )
 
 
-# ===== sync-persona =====
-def cmd_sync_persona(target: str) -> str:
-    source = ROOT / "persona.md"
-    text = source.read_text(encoding="utf-8").strip()
-    if not text:
-        return "persona.md 为空，未同步。"
-    dest = pathlib.Path(target).expanduser()
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, dest)
-    try:
-        import agent
-        agent.persona.sync_identity()
-    except Exception as e:
-        print(f"同步记忆库 identity 失败：{e}")
-    env_line = 'SYSTEM_PROMPT="' + text.replace('"', '\\"').replace("\n", "\\n") + '"'
-    return (
-        f"已同步到 {dest}（并写入统一记忆库人设字段：向量化 + 事件图 + 议题化）\n"
-        f"如需用 .env 覆盖（服务器快速改），复制这一行到 .env：\n{env_line}"
-    )
-
-
 def cmd_character_build(name: str) -> str:
     """输入人物名称，自动生成设定/经历档案并存入统一记忆（char:<名>），
     同时写入 docs/characters/<名>.md 供人工审阅/编辑。"""
@@ -753,17 +743,213 @@ def cmd_subjects_status():
 
 def cmd_subjects_eval(save=False, compare=False) -> str:
     """多主体评测：写入成功 / 隐私门控 / 对话引用（--save 落基线 / --compare 对比）。"""
-    from memory import subjects_eval
-    return json.dumps(subjects_eval.run(save=save, compare=compare), ensure_ascii=False, indent=2)
+    from memory import subjects
+    return json.dumps(subjects.eval_run(save=save, compare=compare), ensure_ascii=False, indent=2)
 
 
 def cmd_consistency_eval() -> str:
     """双轨制一致性：失效队列长度 + 本次重算数。"""
-    from memory import consistency
     from plugins import _db
     pending = len(_db.invalidation_rows(100))
-    done = consistency.reconcile_pending()
+    from memory import controller
+    done = controller.reconcile_pending()
     return json.dumps({"pending": pending, "reconciled": done["reconciled"]}, ensure_ascii=False, indent=2)
+
+
+def cmd_persona_smoke() -> str:
+    """Persona Pack 冒烟：加载校验 + 房间图连通 + 模板渲染 + 代码硬编码扫描。"""
+    from agent import persona as persona_mod
+    from memory import living, pack
+    issues = []
+    pk = pack.active()
+    name = persona_mod.persona_name()
+    if not name:
+        issues.append("persona_name 为空")
+    w = pack.world()
+    layout = w.get("layout") or {}
+    if not layout:
+        issues.append("world.json 缺少 layout")
+    if not w.get("items"):
+        issues.append("world.json 缺少 items")
+    rooms = list(layout.keys())
+    edges = w.get("edges") or []
+    if rooms:
+        adj = {}
+        for a, b in edges:
+            adj.setdefault(a, []).append(b)
+            adj.setdefault(b, []).append(a)
+        seen, queue = {rooms[0]}, [rooms[0]]
+        while queue:
+            cur = queue.pop()
+            for n in adj.get(cur, []):
+                if n not in seen:
+                    seen.add(n)
+                    queue.append(n)
+        if len(seen) != len(rooms):
+            issues.append(f"房间图不连通：{set(rooms) - seen}")
+    try:
+        t = living.INSPECT_PROMPT.format(name=name, role=w.get("role", ""), room="客厅", container="茶几", items="空的")
+        if name not in t:
+            issues.append("INSPECT_PROMPT 渲染未包含名字")
+    except Exception as e:
+        issues.append(f"模板渲染失败：{e}")
+    hardcoded = []
+    for root, _dirs, files in os.walk(ROOT):
+        if ".git" in root or "personas" in root:
+            continue
+        for fn in files:
+            if not fn.endswith(".py") or fn in ("games.py", "tools.py"):
+                continue
+            p = os.path.join(root, fn)
+            try:
+                text = open(p, encoding="utf-8").read()
+            except Exception:
+                continue
+            for i, line in enumerate(text.splitlines(), 1):
+                if "千石由乃" in line:
+                    hardcoded.append(f"{os.path.relpath(p, ROOT)}:{i}")
+    return json.dumps({
+        "pack": pk, "persona_name": name, "world_rooms": len(rooms),
+        "issues": issues,
+        "hardcoded_count": len(hardcoded),
+        "hardcoded_code": hardcoded[:20],
+    }, ensure_ascii=False, indent=2)
+
+
+def cmd_persona_switch(pack_name: str) -> str:
+    """切换 Persona Pack：校验 pack 文件 → 写 config（重启生效）。"""
+    from memory import pack
+    d = pack.pack_dir(pack_name)
+    if not d.exists() or not (d / "world.json").exists():
+        return f"pack 不存在或缺少 world.json：{d}"
+    _capability, _db, _shared = _plugins()
+    core = _shared.CONFIG.setdefault("memory", {}).setdefault("core", {})
+    core.setdefault("persona_pack", {})["pack"] = pack_name
+    _shared.save_config()
+    from memory import pack
+    pack.invalidate()
+    from agent import persona
+    persona._persona_name_cache = None
+    return f"已切换 persona pack → {pack_name}（重启后生效；记忆隔离需独立数据库，另见说明）"
+
+
+def cmd_ablation() -> str:
+    """机制消融：临时覆盖 config 单开关，同一套 probes 各跑一遍，输出贡献表 + 实验日志。"""
+    import copy
+    import memory
+    _capability, _db, _shared = _plugins()
+    probes_path = _shared.DATA_DIR / "probes.json"
+    if not probes_path.exists():
+        return "评测集不存在（先 tools.py memory-probes 生成）"
+    probes = json.loads(probes_path.read_text(encoding="utf-8"))
+    core = _shared.CONFIG.setdefault("memory", {}).setdefault("core", {})
+    saved_core = copy.deepcopy(core)
+
+    def _run():
+        try:
+            res = memory.run_eval(probes, k=5)
+            return {"recall": res.get("recall_at_k"), "mrr": res.get("mrr"), "ndcg": res.get("ndcg")}
+        except Exception as e:
+            return {"error": str(e)}
+
+    switches = {
+        "all_on": lambda: None,
+        "off_vector": lambda: core.setdefault("weights", {}).update({"vector": 0}),
+        "off_graph": lambda: core.setdefault("weights", {}).update({"graph": 0}),
+        "off_lexical": lambda: core.setdefault("weights", {}).update({"lexical": 0}),
+        "off_time_window": lambda: core.update({"ablation_disable_time": True}),
+        "off_emotion": lambda: core.update({"emotion": {"enabled": False}}),
+        "off_sharing": lambda: core.update({"sharing": {"enabled": False}}),
+        "off_space": lambda: core.update({"space": {"enabled": False}}),
+        "off_system1": lambda: core.setdefault("mind", {}).update({"system1": False}),
+        "on_cognitive": lambda: core.setdefault("mind", {}).update({"cognitive_turn": True}),
+    }
+    base_res = _run()
+    rows = [{"switch": "all_on", **base_res}]
+    for name, apply in list(switches.items())[1:]:
+        apply()
+        r = _run()
+        delta = {
+            k: round((r.get(k) or 0) - (base_res.get(k) or 0), 3)
+            for k in ("recall", "mrr", "ndcg")
+            if r.get(k) is not None and base_res.get(k) is not None
+        }
+        regression = any(v < -0.03 for v in delta.values())
+        _db.exp_log_add("ablation", detail=name, before=base_res, after=r, delta=delta, regression=regression)
+        rows.append({"switch": name, **r, "delta": delta, "regression": regression})
+    core.clear()
+    core.update(saved_core)
+    return json.dumps({"baseline": base_res, "matrix": rows}, ensure_ascii=False, indent=2)
+
+
+def cmd_experiments(limit=50) -> str:
+    """实验日志：改动/评测的基线前后与回归标记。"""
+    from plugins import _db
+    return json.dumps(_db.exp_log_rows(limit), ensure_ascii=False, indent=2)
+
+
+def cmd_scenario_eval(path: str = "", score: bool = False) -> str:
+    """场景回放评分：重放多轮对话（agent.ask 逐条），--score 用 DeepSeek 五维 rubric 打分。
+    场景集：data/eval/scenarios.json = [{"id","scope","messages":[{"user":...}],"expected":[...]}]"""
+    from plugins import _shared
+    p = path or str(_shared.DATA_DIR / "eval" / "scenarios.json")
+    if not os.path.exists(p):
+        return f"场景集不存在：{p}（可建 data/eval/scenarios.json）"
+    with open(p, encoding="utf-8") as f:
+        scenarios = json.load(f)
+    import agent
+    results = []
+    for sc in scenarios or []:
+        scope = str(sc.get("scope") or "c2c:scenario")
+        history, replies = [], []
+        for m in (sc.get("messages") or []):
+            if "user" not in m:
+                continue
+            try:
+                reply, _meta = agent.ask(
+                    str(m["user"]), history=history[-6:], scopes=[scope], learn=False,
+                )
+            except Exception as e:
+                reply = f"（回放失败：{e}）"
+            history.append({"role": "user", "content": str(m["user"])})
+            history.append({"role": "assistant", "content": reply})
+            replies.append({"user": str(m["user"]), "ai": reply})
+        results.append({"id": sc.get("id"), "scope": scope, "replies": replies})
+    if not score:
+        return json.dumps({"replayed": len(results), "scenarios": results}, ensure_ascii=False, indent=2)
+    rubric = (
+        "你是对话质量评委。按 5 个维度各打 1~5 分，只输出 JSON："
+        '{"recall":n,"precision":n,"coherence":n,"consistency":n,"naturalness":n,"avg":n,"comment":"…"}。'
+        "维度：recall=是否覆盖用户需求/记忆；precision=是否答非所问/编造；coherence=多轮是否连贯；"
+        "consistency=是否前后矛盾；naturalness=是否自然像真人。"
+    )
+    scored = []
+    for r in results:
+        conv = "\n".join(f"用户：{x['user']}\nAI：{x['ai']}" for x in r["replies"])
+        s2 = {}
+        try:
+            raw = _shared.ask_deepseek(rubric + "\n对话：\n" + conv, max_tokens=200, temperature=0.2)
+            s, e = raw.find("{"), raw.rfind("}")
+            if s >= 0:
+                s2 = json.loads(raw[s:e + 1])
+                s2["avg"] = round(
+                    sum(float(s2.get(k, 0)) for k in ("recall", "precision", "coherence", "consistency", "naturalness")) / 5,
+                    2,
+                )
+        except Exception as ex:
+            s2 = {"error": str(ex)}
+        scored.append({"id": r["id"], "scores": s2})
+    avg = {}
+    vals = {k: [] for k in ("recall", "precision", "coherence", "consistency", "naturalness")}
+    for r in scored:
+        s = r.get("scores") or {}
+        for k in vals:
+            if s.get(k) is not None:
+                vals[k].append(float(s[k]))
+    for k, v in vals.items():
+        if v:
+            avg[k] = round(sum(v) / len(v), 2)
+    return json.dumps({"scored": scored, "avg": avg}, ensure_ascii=False, indent=2)
 
 
 def main() -> int:
@@ -963,14 +1149,6 @@ def main() -> int:
     p.add_argument("--scope", default="cli")
     p.set_defaults(func=lambda a: print(cmd_world(a.scope)) or 0)
 
-    p = sub.add_parser("sync-persona", help="人设同步到 Hermes SOUL.md")
-    p.add_argument(
-        "--target",
-        default=os.path.expanduser("~/.hermes/SOUL.md"),
-        help="目标文件（默认 ~/.hermes/SOUL.md）",
-    )
-    p.set_defaults(func=lambda a: print(cmd_sync_persona(a.target)) or 0)
-
     p = sub.add_parser("character", help="输入人物名称，自动搜索设定/经历并存入记忆")
     p.add_argument("name", help="人物名称（如：千石由乃）")
     p.set_defaults(func=lambda a: print(cmd_character_build(a.name)) or 0)
@@ -1009,6 +1187,25 @@ def main() -> int:
 
     p = sub.add_parser("consistency-eval", help="双轨制一致性：失效队列长度 + 重算数")
     p.set_defaults(func=lambda a: print(cmd_consistency_eval()) or 0)
+
+    p = sub.add_parser("persona-smoke", help="Persona Pack 冒烟：加载校验 + 房间连通 + 模板渲染 + 硬编码扫描")
+    p.set_defaults(func=lambda a: print(cmd_persona_smoke()) or 0)
+
+    p = sub.add_parser("persona-switch", help="切换 Persona Pack（校验 pack 文件并写 config）")
+    p.add_argument("--pack", required=True, help="pack 名（personas/<名>/）")
+    p.set_defaults(func=lambda a: print(cmd_persona_switch(a.pack)) or 0)
+
+    p = sub.add_parser("ablation", help="机制消融矩阵：单开关 × probes，输出贡献表并写实验日志")
+    p.set_defaults(func=lambda a: print(cmd_ablation()) or 0)
+
+    p = sub.add_parser("experiments", help="实验日志：基线前后与回归标记")
+    p.add_argument("--limit", type=int, default=50)
+    p.set_defaults(func=lambda a: print(cmd_experiments(a.limit)) or 0)
+
+    p = sub.add_parser("scenario-eval", help="场景回放评分：重放多轮对话，--score 用 LLM 五维评分")
+    p.add_argument("--file", default="", help="场景集 JSON（默认 data/eval/scenarios.json）")
+    p.add_argument("--score", action="store_true", help="用 DeepSeek 按五维 rubric 打分")
+    p.set_defaults(func=lambda a: print(cmd_scenario_eval(a.file, a.score)) or 0)
 
     sub.add_parser("mcp", help="启动 MCP Server").set_defaults(func=lambda a: cmd_mcp())
 

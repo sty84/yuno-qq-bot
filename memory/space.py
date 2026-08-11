@@ -43,12 +43,34 @@ def _cfg(key, default):
     return sp.get(key, default)
 
 
+def _pack_world() -> dict:
+    try:
+        from memory import pack
+        return pack.world()
+    except Exception:
+        return {}
+
+
+def _memorable_places() -> tuple:
+    m = _pack_world().get("memorable_places")
+    return tuple(m) if isinstance(m, list) and m else _MEMORABLE_PLACES
+
+
+def _activity_place_map() -> dict:
+    ap = dict(_ACTIVITY_PLACE)
+    ap.update(_pack_world().get("activity_place") or {})
+    return ap
+
+
 def _now_iso():
     return datetime.now().isoformat(timespec="seconds")
 
 
 # ===== 家内房间图（P1-1：邻接 / 最短路径 / 门灯）=====
 def home_edges() -> list:
+    w = _pack_world().get("edges")
+    if isinstance(w, list) and w:
+        return w
     e = _cfg("home_edges", None)
     return e if isinstance(e, list) and e else _HOME_EDGES_DEFAULT
 
@@ -95,7 +117,8 @@ def route_minutes(a, b) -> int:
 def _doors_data() -> dict:
     d = _db.kv_get("memory", "space_doors") or {}
     if not d.get("doors"):
-        d = {"doors": dict(_DOORS_DEFAULT)}
+        doors = _pack_world().get("doors") or _DOORS_DEFAULT
+        d = {"doors": dict(doors)}
         _db.kv_set("memory", "space_doors", d)
     return d
 
@@ -134,6 +157,9 @@ def light_on(room) -> bool:
 
 # ===== 队友确定性位置（P2：周表，替代随机人物桶）=====
 def cast_schedule() -> dict:
+    w = _pack_world().get("cast_schedule")
+    if isinstance(w, dict) and w:
+        return w
     return _cfg("cast_schedule", {}) or {}
 
 
@@ -290,7 +316,7 @@ def _planned_place(now) -> str:
     except Exception as e:
         _stats_err(e)
         act = ""
-    return _ACTIVITY_PLACE.get(act, "家")
+    return _activity_place_map().get(act, "家")
 
 
 def _next_slot_start(now) -> datetime:
@@ -442,7 +468,7 @@ def position(now=None) -> dict:
             npos.update({"location": loc, "state": "在场",
                          "arrive_ts": pos.get("arrive_ts") or _now_iso()})
             _set_pos(npos)
-            emit("arrive", f"到了{loc}", memorable=loc in _MEMORABLE_PLACES)
+            emit("arrive", f"到了{loc}", memorable=loc in _memorable_places())
             remember("", f"到了{loc}")
             return npos
         return pos
@@ -478,7 +504,7 @@ def position(now=None) -> dict:
                      "mode": mode, "depart_ts": _now_iso(),
                      "arrive_ts": start.isoformat(timespec="seconds")})
         _set_pos(npos)
-        emit("depart", f"出发去{plan}", memorable=plan in _MEMORABLE_PLACES)
+        emit("depart", f"出发去{plan}", memorable=plan in _memorable_places())
         remember("", f"出发去{plan}")
         return npos
     # 已经在目的地的槽位时段内：按槽位开始到达
@@ -486,7 +512,7 @@ def position(now=None) -> dict:
     npos.update({"location": plan, "state": "在场",
                  "arrive_ts": start.isoformat(timespec="seconds")})
     _set_pos(npos)
-    emit("arrive", f"到了{plan}", memorable=plan in _MEMORABLE_PLACES)
+    emit("arrive", f"到了{plan}", memorable=plan in _memorable_places())
     remember("", f"到了{plan}")
     return npos
 
@@ -507,7 +533,7 @@ def depart(to, mode=None, now=None):
                  "depart_ts": _now_iso(),
                  "arrive_ts": (now + timedelta(minutes=minutes)).isoformat(timespec="seconds")})
     _set_pos(npos)
-    emit("depart", f"出发去{to}", memorable=to in _MEMORABLE_PLACES)
+    emit("depart", f"出发去{to}", memorable=to in _memorable_places())
     remember("", f"出发去{to}")
     return npos
 
@@ -557,7 +583,8 @@ def travel_between(frm, to, mode=None, now=None) -> dict:
             return living_mod.travel_time(to, mode, now)
         except Exception as e:
             return {"ok": False, "reason": f"living 不可用：{e}"}
-    pair = _cfg("pair_times", {}) or {}
+    pair = dict(_pack_world().get("pair_times") or {})
+    pair.update(_cfg("pair_times", {}) or {})
     key, rkey = f"{frm}:{to}", f"{to}:{frm}"
     if key in pair:
         return {"ok": True, "place": to, "mode": mode or "默认", "minutes": int(pair[key]),
@@ -577,7 +604,8 @@ def travel_between(frm, to, mode=None, now=None) -> dict:
 
 # ===== 视觉一致性 =====
 def room_visual(room) -> dict:
-    return ROOM_VISUALS.get(room, {"size": "", "tone": "", "desc": ""})
+    w = _pack_world().get("visuals") or {}
+    return w.get(room) or ROOM_VISUALS.get(room, {"size": "", "tone": "", "desc": ""})
 
 
 def can_see(room, container, now=None) -> dict:

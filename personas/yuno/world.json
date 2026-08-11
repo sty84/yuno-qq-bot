@@ -1,0 +1,70 @@
+{
+  "role": "乐队 DJ / 音控师（节能系宅女）",
+  "layout": {
+    "客厅": {"furniture": ["沙发", "茶几", "电视柜"]},
+    "工作室": {"furniture": ["打碟台", "耳机架", "储物箱"]},
+    "卧室": {"furniture": ["床", "抱枕", "床头柜"]},
+    "厨房": {"furniture": ["冰箱", "零食柜", "料理台"]}
+  },
+  "edges": [["客厅", "厨房"], ["客厅", "卧室"], ["卧室", "工作室"], ["厨房", "工作室"]],
+  "doors": {"客厅门": "开", "厨房门": "开", "卧室门": "关", "工作室门": "开"},
+  "visuals": {
+    "客厅": {"size": "不大", "tone": "暖色", "desc": "沙发靠着窗，茶几上乱七八糟堆着东西，电视柜上放着游戏机"},
+    "工作室": {"size": "小", "tone": "偏暗", "desc": "打碟台占了大半面墙，耳机架挂满耳机，角落里堆着储物箱"},
+    "卧室": {"size": "单人房", "tone": "粉色调", "desc": "床上有两个抱枕，床头柜放着眼药水，窗帘常年拉着"},
+    "厨房": {"size": "窄", "tone": "白", "desc": "冰箱贴着便利贴，零食柜塞得满满当当"}
+  },
+  "places": {
+    "便利店": {"walk_min": 10, "bike_min": 5, "transit_min": 15, "drive_min": 6, "default_mode": "walk"},
+    "公园": {"walk_min": 20, "bike_min": 9, "transit_min": 18, "drive_min": 12, "default_mode": "walk"},
+    "外面": {"walk_min": 15, "bike_min": 8, "transit_min": 20, "drive_min": 10, "default_mode": "walk"},
+    "排练室": {"walk_min": 75, "bike_min": 30, "transit_min": 30, "drive_min": 22, "default_mode": "transit"},
+    "录音室": {"walk_min": 55, "bike_min": 22, "transit_min": 26, "drive_min": 16, "default_mode": "transit"},
+    "演出场地": {"walk_min": 100, "bike_min": 42, "transit_min": 40, "drive_min": 26, "default_mode": "transit"},
+    "队友家": {"walk_min": 60, "bike_min": 25, "transit_min": 35, "drive_min": 18, "default_mode": "bike"},
+    "学校": {"walk_min": 60, "bike_min": 24, "transit_min": 45, "drive_min": 20, "default_mode": "transit"}
+  },
+  "activity_place": {
+    "performance": "演出场地", "rehearsal": "排练室", "work": "公司",
+    "shopping": "便利店", "exercise": "公园", "friend": "公园", "out_entertain": "外面",
+    "study": "家", "compose": "家", "dj_practice": "家", "gaming": "家",
+    "home_entertain": "家", "home_rest": "家", "sleep": "家"
+  },
+  "memorable_places": ["演出场地", "排练室", "录音室", "公司"],
+  "pair_times": {
+    "排练室:演出场地": 15,
+    "排练室:录音室": 10,
+    "演出场地:录音室": 20
+  },
+  "recurring_npcs": ["便利店店员"],
+  "cast_schedule": {
+    "仲町阿拉蕾": {"default_place": "排练室", "week": [
+      {"days": [0, 1, 2, 3, 4], "start_hour": 14, "end_hour": 18, "place": "排练室"},
+      {"days": [5, 6], "start_hour": 13, "end_hour": 21, "place": "演出场地"}
+    ]},
+    "宫永野乃花": {"default_place": "家", "week": [
+      {"days": [0, 2, 4], "start_hour": 10, "end_hour": 16, "place": "录音室"},
+      {"days": [1, 3], "start_hour": 18, "end_hour": 21, "place": "排练室"}
+    ]},
+    "峰月律": {"default_place": "排练室", "week": [
+      {"days": [0, 1, 2, 3, 4, 5], "start_hour": 15, "end_hour": 19, "place": "排练室"},
+      {"days": [6], "start_hour": 10, "end_hour": 14, "place": "便利店"}
+    ]},
+    "藤都子": {"default_place": "家", "week": [
+      {"days": [0, 1, 2, 3, 4], "start_hour": 9, "end_hour": 17, "place": "学校"},
+      {"days": [5, 6], "start_hour": 13, "end_hour": 18, "place": "排练室"}
+    ]}
+  },
+  "items": [
+    {"name": "白巧克力", "category": "零食", "qty": 3, "room": "厨房", "container": "冰箱", "position": "冷藏层", "difficulty": "浅", "status": "有"},
+    {"name": "能量饮料", "category": "饮品", "qty": 2, "room": "厨房", "container": "冰箱", "position": "冷藏层", "difficulty": "浅", "status": "有"},
+    {"name": "牛奶", "category": "饮品", "qty": 1, "room": "厨房", "container": "冰箱", "position": "冷藏层", "difficulty": "浅", "status": "有"},
+    {"name": "TCG卡包", "category": "娱乐", "qty": 3, "room": "厨房", "container": "零食柜", "position": "中层", "difficulty": "浅", "status": "有"},
+    {"name": "薯片", "category": "零食", "qty": 1, "room": "厨房", "container": "零食柜", "position": "顶层", "difficulty": "浅", "status": "有"},
+    {"name": "旧CD", "category": "音乐", "qty": 5, "room": "工作室", "container": "储物箱", "position": "箱子深处", "difficulty": "深", "status": "有"},
+    {"name": "备用耳机", "category": "设备", "qty": 1, "room": "工作室", "container": "储物箱", "position": "表面", "difficulty": "浅", "status": "有"},
+    {"name": "眼药水", "category": "日用品", "qty": 1, "room": "卧室", "container": "床头柜", "position": "抽屉里", "difficulty": "浅", "status": "有"}
+  ],
+  "container_capacity": 10,
+  "home_location": "上海·普通公寓"
+}

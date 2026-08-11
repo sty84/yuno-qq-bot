@@ -282,8 +282,35 @@ def test_all_features():
         list(tv.keys()),
     )
 
+    # ---- 时间锚定（P2-1）：approx 事件沿 follows 链找 explicit 锚点 ----
+    from memory import graph as graph_mod
+    from memory import reasoning as reasoning_mod
+    old30 = (_now - timedelta(days=30)).isoformat(timespec="seconds")
+    old20 = (_now - timedelta(days=20)).isoformat(timespec="seconds")
+    _db.memory_add("ai", "anchor", "月初去了趟深圳出差", _now.isoformat(timespec="seconds"), None, 0.7, "test")
+    graph_mod.build_for_fact("ai", "anchor", "月初去了趟深圳出差", ts=old30, ts_source="explicit")
+    _db.memory_add("ai", "anchor", "上周三买了只猫", _now.isoformat(timespec="seconds"), None, 0.6, "test")
+    graph_mod.build_for_fact("ai", "anchor", "上周三买了只猫", ts=old20, ts_source="approx")
+    _db.memory_add("ai", "anchor", "周末去海边露营", _now.isoformat(timespec="seconds"), None, 0.7, "test")
+    graph_mod.build_for_fact("ai", "anchor", "周末去海边露营", ts=old10, ts_source="explicit")
+    lexical.bm25_upsert("ai", "anchor", ["月初去了趟深圳出差", "上周三买了只猫", "周末去海边露营"])
+    _db.lexicon_sync("ai", "anchor")
+    reasoning_mod._event_time_cache.update({"ts": 0.0, "key": None, "map": {}})
+    anchor = reasoning_mod.anchor_time("上周三买了只猫到底是哪天", ["ai"])
+    check(
+        "anchor-time",
+        anchor.get("anchored") is True and anchor.get("before") and anchor.get("after"),
+        anchor,
+    )
+    check("anchor-hint", "时间锚定" in (anchor.get("hint") or ""), anchor.get("hint"))
+    check(
+        "anchor-no-trigger",
+        reasoning_mod.anchor_time("上周三买了只猫", ["ai"]) == {},
+        reasoning_mod.anchor_time("上周三买了只猫", ["ai"]),
+    )
+
     # ---- 多主体记忆（v2.2）----
-    from memory import consistency, context as context_mod, subjects, world as world_mod
+    from memory import context as context_mod, controller as consistency, subjects, world as world_mod
     check("subjects-registered", "仲町阿拉蕾" in subjects.registered(), subjects.registered())
     check(
         "subjects-detect",
@@ -308,6 +335,13 @@ def test_all_features():
         sev.get("write_rate") is not None and sev.get("baseline_saved"),
         list(sev.keys()),
     )
+    check(
+        "subjects-eval-decay",
+        isinstance(sev.get("decay"), dict)
+        and sev["decay"].get("cap_rate") == 1.0
+        and sev["decay"].get("source_ceiling_rate") == 1.0,
+        sev.get("decay"),
+    )
 
     # ---- 双轨制一致性（v2.2）----
     _db.invalidation_add("c2c:t", "", "旧事实", "conflict")
@@ -317,6 +351,18 @@ def test_all_features():
         rd.get("reconciled", 0) >= 1 and len(_db.invalidation_rows()) == 0,
         rd,
     )
+
+    # ---- Persona Pack（v2.2 去人设化）----
+    from agent import persona as persona_mod
+    from memory import pack as pack_mod
+    check("pack-active", pack_mod.active() == "yuno", pack_mod.active())
+    w = pack_mod.world()
+    check("pack-world", "layout" in w and "items" in w and w.get("role"), list(w.keys()))
+    check("persona-name", persona_mod.persona_name() == "千石由乃", persona_mod.persona_name())
+    tpl = living.INSPECT_PROMPT.format(
+        name="测试角色", role="测试身份", room="客厅", container="茶几", items="空的",
+    )
+    check("prompt-templated", "测试角色" in tpl and "千石由乃" not in tpl, tpl[:60])
 
     # ---- 夜晚槽只能在家活动（v2.2 修复：正常人不会凌晨还在外面）----
     from memory import schedule as schedule_mod

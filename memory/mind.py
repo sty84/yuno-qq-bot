@@ -29,6 +29,13 @@ def persona_weights() -> dict:
     w = _cfg("persona_weights", None)
     if isinstance(w, dict) and w:
         return w
+    try:
+        from memory import pack
+        w = pack.behavior().get("persona_weights")
+        if isinstance(w, dict) and w:
+            return w
+    except Exception:
+        pass
     return PERSONA_WEIGHTS_DEFAULT
 
 

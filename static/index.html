@@ -4,8 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Yuno Ops Web</title>
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- P2-4 离线化：本地 vendor 优先，CDN 兜底（服务器无外网也能用图表/Excel 导出） -->
+  <script src="/static/vendor/echarts.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js';"></script>
+  <script src="/static/vendor/xlsx.full.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #0f172a; color: #e2e8f0; padding: 16px; }
@@ -88,6 +89,8 @@
     <div class="cards" id="diag-proc"></div>
     <div class="chart" id="diag-route"></div>
     <pre id="diag-cal" style="display:none"></pre>
+    <h2 style="margin-top:14px;font-size:15px">实验日志（回归门禁）</h2>
+    <div id="diag-exp"></div>
   </div>
 
   <div class="page" id="page-charts">
@@ -259,6 +262,17 @@
         }],
       });
       if (d.calibrate) { $('diag-cal').style.display = 'block'; $('diag-cal').textContent = d.calibrate; }
+      try {
+        const exps = await api('/api/experiments?limit=30');
+        if (!exps.length) { $('diag-exp').innerHTML = '<div class="muted">暂无实验记录（跑一次评测会自动记录）</div>'; return; }
+        let html = '<table><tr><th>时间</th><th>动作</th><th>delta (recall/…) </th><th>回归</th></tr>';
+        exps.forEach(e => {
+          const dlt = e.delta ? Object.entries(e.delta).map(([k, v]) => k + '=' + fmt(v)).join(' ') : '—';
+          html += `<tr><td>${e.ts}</td><td>${e.action}${e.detail ? '·' + e.detail : ''}</td><td>${dlt}</td><td class="${e.regression ? 'red' : ''}">${e.regression ? '⚠ 退化' : '正常'}</td></tr>`;
+        });
+        html += '</table>';
+        $('diag-exp').innerHTML = html;
+      } catch (err) { $('diag-exp').innerHTML = '<div class="muted">实验日志加载失败：' + err.message + '</div>'; }
     }
 
     async function renderCharts() {

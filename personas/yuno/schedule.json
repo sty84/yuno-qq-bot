@@ -1,0 +1,30 @@
+{
+  "profile": "yuno",
+  "nocturnal": true,
+  "fixed": {
+    "0": {"0": "sleep", "1": "home_rest", "2": "compose", "3": "dj_practice"},
+    "1": {"0": "sleep", "1": "home_rest", "2": "rehearsal", "3": "home_rest"},
+    "2": {"0": "sleep", "1": null, "2": "home_entertain", "3": null},
+    "3": {"0": "sleep", "1": "home_rest", "2": "gaming", "3": null},
+    "4": {"0": "sleep", "1": "home_rest", "2": "rehearsal", "3": "home_rest"},
+    "5": {"0": "sleep", "1": null, "2": null, "3": null},
+    "6": {"0": "home_rest", "1": "home_rest", "2": "home_entertain", "3": "compose"}
+  },
+  "pool": {
+    "compose": 3.0, "dj_practice": 3.0, "gaming": 2.0, "home_entertain": 2.0,
+    "home_rest": 1.5, "friend": 0.8, "shopping": 0.6, "out_entertain": 0.5,
+    "study": 0.4, "exercise": 0.2
+  },
+  "slot_pool": {
+    "2": {"1": {"compose": 2.0, "study": 1.0, "home_entertain": 1.5},
+          "3": {"dj_practice": 2.0, "gaming": 1.5}},
+    "3": {"3": {"home_entertain": 2.0, "dj_practice": 1.5}},
+    "5": {"1": {"rehearsal": 1.0, "home_rest": 1.0, "shopping": 0.8},
+          "2": {"rehearsal": 1.2, "dj_practice": 1.0, "performance": 1.0, "home_rest": 0.5},
+          "3": {"dj_practice": 1.0, "home_rest": 1.0}}
+  },
+  "state_chains": {
+    "performance": {"before": "rehearsal", "after": "rest"},
+    "work": {"after": "rest"}
+  }
+}

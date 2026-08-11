@@ -130,7 +130,9 @@ def _walk(event_ids, direction, rel=None, depth=2):
         for e in edges:
             if rel and e["rel"] != rel:
                 continue
-            nid = e["dst"] if direction == "in" else e["src"]
+            # direction=in：边 src→dst，frontier 是 dst，邻居取 src（更早的事件）
+            # direction=out：边 src→dst，frontier 是 src，邻居取 dst（更晚的事件）
+            nid = e["src"] if direction == "in" else e["dst"]
             if nid not in seen:
                 seen.add(nid)
                 nxt.add(nid)

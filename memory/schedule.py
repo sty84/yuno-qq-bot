@@ -1,7 +1,7 @@
 """AI 日程表（v31）：人设驱动的"生活层"。
 
 - 活动注册表：工作/学习/宅家休息/宅家娱乐/外出娱乐/运动/和朋友玩/排练/演出/作曲/打碟…
-- 人设档案：不同人格有不同周模板（上班族天天上班；千石由乃夜行、排练/演出/宅家为主）。
+- 人设档案：不同人格有不同周模板（上班族 vs 夜行演出型等，随 Persona Pack 变化）。
 - 种子化周生成：seed = hash(人设ID + 自然周) → 同一周内结果稳定（不会一天一个样），
   下周种子变化才有新变化；演出前合练、演出后恢复这类状态链保证连续性。
 - 运行时：按当前时间查"此刻状态"，注入 prompt（内部参考，不主动播报）。
@@ -42,7 +42,7 @@ ACTIVITIES = {
 
 # ===== 人设档案 =====
 PROFILES = {
-    # 千石由乃：夜行型、节能、乐队成员——排练/演出/宅家为主，出门少
+    # 示例人设：夜行型、节能、乐队成员——排练/演出/宅家为主，出门少（由 Persona Pack 提供）
     "yuno": {
         "seed_id": "yuno",
         "nocturnal": True,
@@ -101,7 +101,33 @@ def profile_id() -> str:
 
 
 def profile() -> dict:
-    return PROFILES.get(profile_id(), PROFILES["yuno"])
+    prof = PROFILES.get(profile_id(), PROFILES["yuno"])
+    try:
+        from memory import pack
+        ps = pack.schedule()
+        if ps:
+            base_key = str(ps.get("profile") or profile_id())
+            prof = PROFILES.get(base_key, PROFILES["yuno"])
+            merged = dict(prof)
+            for k in ("fixed", "pool", "slot_pool", "state_chains", "nocturnal", "activities"):
+                if k in ps:
+                    merged[k] = ps[k]
+            if ps.get("profile"):
+                merged["seed_id"] = str(ps["profile"])
+            if "fixed" in merged:
+                merged["fixed"] = {
+                    int(k): {int(s): v for s, v in (v or {}).items()}
+                    for k, v in merged["fixed"].items()
+                }
+            if "slot_pool" in merged:
+                merged["slot_pool"] = {
+                    int(k): {int(s): v for s, v in v.items()}
+                    for k, v in merged["slot_pool"].items()
+                }
+            return merged
+    except Exception:
+        pass
+    return prof
 
 
 def slot_index(hour: int) -> int:
@@ -170,16 +196,21 @@ def generate_week(profile, week_key, rng=None) -> dict:
                 if act in ("rehearsal", "performance", "work", "exercise", "out_entertain", "friend"):
                     plan[wd][slot] = "home_rest"
                     break
-    # 演出状态链：演出 → 次日早晨强制休息
+    # 状态链（Persona Pack 配置）：{"activity": {"before": "x", "after": "y"}}
+    _CHAIN_ALIAS = {"rest": "home_rest", "workday": "work", "class": "study"}
+    chains = profile.get("state_chains") or {}
     for wd in range(7):
-        if plan[wd][2] == "performance" or plan[wd][3] == "performance":
-            plan[(wd + 1) % 7][0] = "home_rest"
-    # 演出前合练：演出前一天傍晚若空闲 → 排练
-    for wd in range(7):
-        if plan[wd][2] == "performance":
-            prev = (wd - 1) % 7
-            if plan[prev][2] in ("idle", "home_entertain", "gaming", "compose"):
-                plan[prev][2] = "rehearsal"
+        for slot in (2, 3):
+            act = plan[wd][slot]
+            chain = chains.get(act) or {}
+            after = chain.get("after")
+            if after:
+                plan[(wd + 1) % 7][0] = _CHAIN_ALIAS.get(after, after)  # 活动后次日早晨
+            before = chain.get("before")
+            if before and slot == 2:
+                prev = (wd - 1) % 7
+                if plan[prev][2] in ("idle", "home_entertain", "gaming", "compose"):
+                    plan[prev][2] = _CHAIN_ALIAS.get(before, before)
     return plan
 
 
