@@ -14,6 +14,25 @@ _query_cache = {"ts": 0.0, "text": "", "vec": None}
 _route_cache = None
 _route_flush_ts = {"ts": 0.0}
 RRF_K = 60
+_event_time_cache = {"key": None, "map": {}, "ts": 0.0}
+
+
+def _event_time_map(scopes) -> dict:
+    """fact → (事件 ts, ts_source)，供时间窗口加权（时间当元数据，不污染事实文本）。"""
+    key = tuple(sorted(scopes or []))
+    if _event_time_cache["key"] == key and time.time() - _event_time_cache["ts"] < 60:
+        return _event_time_cache["map"]
+    m = {}
+    for scope in scopes or []:
+        try:
+            for ev in _db.event_rows(scope, limit=3000):
+                mf = str(ev.get("memory_fact") or "")
+                if mf:
+                    m.setdefault(mf, (str(ev.get("ts") or ""), str(ev.get("ts_source") or "approx")))
+        except Exception as e:
+            _stats_err(e)
+    _event_time_cache.update({"key": key, "map": m, "ts": time.time()})
+    return m
 
 
 def _cfg(key, default):
@@ -254,12 +273,12 @@ def _cache_cfg() -> dict:
     return {"enabled": bool(c.get("enabled", True)), "ttl": float(c.get("ttl_s", 60))}
 
 
-def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=None, use_cache=True, location=None):
+def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=None, use_cache=True, location=None, window=None):
     """单查询检索（含结果缓存）：返回 [(fact, score, scope)]（score 已归一化 0~1）。"""
     if not query_text or not scopes:
         return []
     cc = _cache_cfg()
-    cache_key = hash((query_text, tuple(scopes), tuple(extra_scopes or []), top_k, min_score, location))
+    cache_key = hash((query_text, tuple(scopes), tuple(extra_scopes or []), top_k, min_score, location, window))
     if use_cache and cc["enabled"] and _result_cache["key"] == cache_key:
         if time.time() - _result_cache["ts"] < cc["ttl"]:
             return list(_result_cache["hits"])
@@ -314,6 +333,7 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
 
     scored, policy_contrib = [], {}
     goal_boost = float(_cfg("goal_boost", 0.08))
+    et_map = _event_time_map(all_scopes) if window else {}
     for r in rows:
         fact = r["fact"]
         s = fusion.get(fact, 0.0)
@@ -330,6 +350,17 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
             except Exception as e:
                 _stats_err(e)
                 pass
+        if window:
+            et = et_map.get(fact)
+            if et and et[0]:
+                try:
+                    ev_dt = datetime.fromisoformat(str(et[0])[:19])
+                    if window[0] <= ev_dt < window[1]:
+                        s *= 1.5  # 窗口内强提升
+                    else:
+                        s *= 0.7  # 窗口外软惩罚（不做硬过滤，防漏召回）
+                except Exception as e:
+                    _stats_err(e)
         if goal_token_sets:
             ft = fact_keywords(fact)
             if any(ft & gt for gt in goal_token_sets):
@@ -392,10 +423,13 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
     return hits
 
 
-def retrieve_detailed(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=None, location=None):
+def retrieve_detailed(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=None, location=None, window=None):
     """带分数来源分解的检索（单查询）：[{fact, scope, score, rrf, policy, confidence, rerank}]。
     location 可限定只召回带 [地点：X] 标签的空间记忆（P0-2）。"""
-    hits = _retrieve_single(query_text, scopes, top_k, min_score, extra_scopes, use_cache=False, location=location)
+    hits = _retrieve_single(
+        query_text, scopes, top_k, min_score, extra_scopes,
+        use_cache=False, location=location, window=window,
+    )
     return [
         {"fact": f, "scope": sc, "score": s, **_last_details.get(f, {})}
         for f, s, sc in hits
@@ -411,6 +445,7 @@ def retrieve(
     expand_query=False,
     recent=None,
     location=None,
+    window=None,
 ):
     """对外检索入口：多查询变体（指代消解/同义扩展）合并 → MMR 多样性 → 隐式反馈。
     返回 [(fact, score, scope)]（score 已归一化 0~1），兼容旧签名。"""
@@ -421,13 +456,23 @@ def retrieve(
         _stats_err(e)
     if not query_text or not scopes:
         return []
+    if window is None:
+        try:
+            from memory import time_extract
+            te = time_extract.extract(query_text or "", scopes[0] if scopes else None)
+            # 只有显式时间词（昨天/上周三…）才启用窗口；指代类（那天/上次/之前）不设窗口，
+            # 否则 (now,now) 会误压历史记忆（v2.2 修复）
+            if te.get("explicit") and te.get("start"):
+                window = (te["start"], te["end"])
+        except Exception as e:
+            _stats_err(e)
     variants = extract.expand(query_text, recent) if expand_query else [query_text]
     if len(variants) == 1:
-        hits = _retrieve_single(query_text, scopes, top_k, min_score, extra_scopes, location=location)
+        hits = _retrieve_single(query_text, scopes, top_k, min_score, extra_scopes, location=location, window=window)
     else:
         merged = {}
         for v in variants:
-            for f, s, sc in _retrieve_single(v, scopes, top_k, min_score, extra_scopes, location=location):
+            for f, s, sc in _retrieve_single(v, scopes, top_k, min_score, extra_scopes, location=location, window=window):
                 if f not in merged or s > merged[f][0]:
                     merged[f] = (s, sc)
         hits = sorted(

@@ -129,6 +129,7 @@ def _create_tables():
                 content TEXT,
                 importance REAL NOT NULL DEFAULT 0.5,
                 ts TEXT NOT NULL DEFAULT '',
+                ts_source TEXT NOT NULL DEFAULT 'approx',
                 embedding TEXT,
                 updated_at TEXT,
                 topic_id INTEGER,
@@ -435,6 +436,16 @@ def _create_tables():
                 c.commit()
             except sqlite3.OperationalError:
                 pass
+        try:
+            c.execute("ALTER TABLE events ADD COLUMN ts_source TEXT NOT NULL DEFAULT 'approx'")
+            c.commit()
+        except sqlite3.OperationalError:
+            pass
+        try:
+            c.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts)")
+            c.commit()
+        except sqlite3.OperationalError:
+            pass
         for col, ddl in (
             ("valid_from", "TEXT"),
             ("valid_to", "TEXT"),
@@ -1572,6 +1583,7 @@ def event_add(
     content="",
     importance=0.5,
     ts="",
+    ts_source="approx",
     embedding=None,
     updated_at="",
     memory_scope="",
@@ -1584,12 +1596,13 @@ def event_add(
     with _lock:
         c = _connect()
         c.execute(
-            "INSERT INTO events(scope,key,etype,title,content,importance,ts,embedding,updated_at,"
+            "INSERT INTO events(scope,key,etype,title,content,importance,ts,ts_source,embedding,updated_at,"
             "memory_scope,memory_key,memory_fact) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(scope,key,title) DO UPDATE SET "
             "etype=excluded.etype, content=excluded.content, importance=excluded.importance, "
-            "ts=excluded.ts, embedding=excluded.embedding, updated_at=excluded.updated_at, "
+            "ts=excluded.ts, ts_source=excluded.ts_source, embedding=excluded.embedding, "
+            "updated_at=excluded.updated_at, "
             "memory_scope=excluded.memory_scope, memory_key=excluded.memory_key, memory_fact=excluded.memory_fact",
             (
                 scope,
@@ -1599,6 +1612,7 @@ def event_add(
                 str(content)[:1000],
                 float(importance),
                 str(ts),
+                str(ts_source)[:20] or "approx",
                 vec_dumps(embedding),
                 updated_at or datetime.now().isoformat(timespec="seconds"),
                 str(memory_scope),
@@ -1612,6 +1626,30 @@ def event_add(
             (scope, key, title),
         ).fetchone()
         return row[0] if row else None
+
+
+def event_set_ts(event_id, ts, ts_source="explicit"):
+    """纠正/精化事件时间（保持事件图不变）。"""
+    with _lock:
+        c = _connect()
+        c.execute(
+            "UPDATE events SET ts=?, ts_source=?, updated_at=? WHERE id=?",
+            (str(ts), str(ts_source)[:20] or "approx",
+             datetime.now().isoformat(timespec="seconds"), int(event_id)),
+        )
+        c.commit()
+
+
+def event_set_ts_by_title(scope, key, title, ts, ts_source="explicit"):
+    """按 scope+key+title 更新事件时间（纠错联动用）。"""
+    with _lock:
+        c = _connect()
+        c.execute(
+            "UPDATE events SET ts=?, ts_source=?, updated_at=? WHERE scope=? AND key=? AND title=?",
+            (str(ts), str(ts_source)[:20] or "approx",
+             datetime.now().isoformat(timespec="seconds"), str(scope), str(key or ""), str(title)),
+        )
+        c.commit()
 
 
 def event_rows(scope=None, key=None, since=None, min_importance=None, limit=None):

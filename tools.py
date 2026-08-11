@@ -730,6 +730,12 @@ def cmd_space_eval(save=False, compare=False):
     return json.dumps(space_eval.run(save=save, compare=compare), ensure_ascii=False, indent=2)
 
 
+def cmd_time_eval(save=False, compare=False):
+    """时间感知评测：时间段召回 / 时间线序列 / 日期精确度（--save 落基线 / --compare 对比）。"""
+    from memory import time_eval
+    return json.dumps(time_eval.run(save=save, compare=compare), ensure_ascii=False, indent=2)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="YUNO 2.0 运维/入口工具")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -957,6 +963,11 @@ def main() -> int:
     p.add_argument("--save", action="store_true", help="把结果存为 baseline")
     p.add_argument("--compare", action="store_true", help="与上次 baseline 对比")
     p.set_defaults(func=lambda a: print(cmd_space_eval(save=a.save, compare=a.compare)) or 0)
+
+    p = sub.add_parser("time-eval", help="时间感知评测：时间段召回 / 时间线序列 / 日期精确度")
+    p.add_argument("--save", action="store_true", help="把结果存为 baseline")
+    p.add_argument("--compare", action="store_true", help="与上次 baseline 对比")
+    p.set_defaults(func=lambda a: print(cmd_time_eval(save=a.save, compare=a.compare)) or 0)
 
     sub.add_parser("mcp", help="启动 MCP Server").set_defaults(func=lambda a: cmd_mcp())
 

@@ -46,6 +46,8 @@ from memory import (
     sleep,
     space_eval,
     space,
+    time_eval,
+    time_extract,
     topic,
     trace,
     tz,
@@ -140,6 +142,9 @@ mind_intention = mind.intention_current
 mind_recompute = mind.recompute_intention
 procedures_stats = procedures.stats
 space_eval_run = space_eval.run
+time_extract_extract = time_extract.extract
+time_label = time_extract.label_for
+time_eval_run = time_eval.run
 goal_add = advisor.goal_add
 goal_list = advisor.goal_list
 goal_update = advisor.goal_update

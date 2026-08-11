@@ -105,6 +105,18 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
         if decision["action"] == "update":
             # 调查确认旧记忆过时 → 直接废弃（保留历史，不删除）
             _db.memory_set_status(scope, key, fact, "superseded", valid_to=now_ts)
+            # 时间纠错联动（v2.2）：update 时顺带改事件时间
+            try:
+                from memory import time_extract, graph as _graph
+                _te = time_extract.extract(text or "", scope)
+                _nts = _te.get("start") or datetime.now()
+                _db.event_set_ts_by_title(
+                    scope, key, _graph.title_of(fact),
+                    _nts.isoformat(timespec="seconds"),
+                    "explicit" if _te.get("explicit") else "approx",
+                )
+            except Exception as e:
+                _stats_err(e)
             _db.history_add(
                 scope, key, fact, "supersede",
                 reason=f"用户纠正并经核查（update：{decision['reason']}）",
@@ -301,6 +313,16 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
     adj = trace.adjustments()
     conf = min(0.95, conf * float(adj.get("confidence_factor", 1.0)))
     ts = datetime.now().isoformat(timespec="seconds")
+    # 时间感知（v2.2）：口语里的过去时间 → 事件时间；解析失败用 now + approx
+    ev_ts, ev_source = ts, "approx"
+    try:
+        from memory import time_extract
+        _te = time_extract.extract(text or "", scope)
+        if _te.get("explicit") and _te.get("start"):
+            ev_ts = _te["start"].isoformat(timespec="seconds")
+            ev_source = "explicit"
+    except Exception as e:
+        _stats_err(e)
     consent = {"keep": True, "reason": ""}
     # Memory Consent Layer（v5 §P1-3 + v7 语言层）：玩笑/夸张表达且无实质信息 → 不长期保存
     joke_prob = float(an.get("joke_probability", 0.0)) if an else 0.0
@@ -478,7 +500,8 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
         if analysis.attr_of(f, an):
             _db.attr_set(scope, key, analysis.attr_of(f, an), f, conf, ts)
         eid, _linked = graph.build_for_fact(
-            scope, key, f, etype=an.get("event_type"), importance=importance, ts=ts
+            scope, key, f, etype=an.get("event_type"), importance=importance,
+            ts=ev_ts, ts_source=ev_source,
         )
         if eid:
             event_count += 1

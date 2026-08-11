@@ -54,17 +54,36 @@ def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, r
         conf_map = {}
         src_map = {}
         status_map = {}
+        time_map = {}
         for scope in list(scopes) + list(extra_scopes or []):
             for r in _db.memory_rows(scope):
                 conf_map[r["fact"]] = float(r.get("confidence", 0.7))
                 src_map.setdefault(r["fact"], r.get("source", ""))
                 status_map.setdefault(r["fact"], r.get("status", "active"))
+        try:
+            # 复用 reasoning 的 60 秒缓存，避免每轮 O(3000×scopes) 扫描
+            from memory import reasoning as reasoning_mod
+            time_map = reasoning_mod._event_time_map(list(scopes) + list(extra_scopes or []))
+        except Exception:
+            time_map = {}
         lines = []
         shown = 0
+        has_approx_time = False
         for f, _s, sc in hits:
             if shown >= 8:  # 记忆压缩（v5 §P1-4）：最多注入 8 条完整，其余合并
                 break
             label = extract.nice_fact(f)
+            tinfo = time_map.get(f)
+            if tinfo and tinfo[0]:
+                try:
+                    from memory import time_extract
+                    ttag = time_extract.label_for(tinfo[0], tinfo[1], scope=sc)
+                    if ttag:
+                        label = ttag + label
+                        if str(tinfo[1]) != "explicit":
+                            has_approx_time = True
+                except Exception:
+                    pass
             if status_map.get(f, "active") == "contested":  # v6 建议 §11：待核实标注
                 label = f"（待核实）{label}"
             conf = conf_map.get(f, 0.7)
@@ -77,6 +96,9 @@ def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, r
             src_label = _source_label(src_map.get(f, ""))
             lines.append("- " + tag + label + src_label)
             shown += 1
+        if has_approx_time:
+            lines.append("（注：以上部分时间记得不确切——用户追问具体日期时如实说'大概'，别编造具体日子；"
+                         "能查证就帮 TA 确认。）")
         if shown < len(hits):  # 记忆压缩（v5 §P1-4）：超出预算部分合并
             lines.append(f"- …等 {len(hits) - shown} 条相关记忆（已压缩）")
         return (

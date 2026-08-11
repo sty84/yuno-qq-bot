@@ -251,6 +251,37 @@ def test_all_features():
     rv = space_eval.run()["where_recall"]
     check("recall-not-selfproof", rv.get("recall") is not None and rv.get("recall", 1.0) < 1.0, rv)
 
+    # ---- 时间感知回忆（v2.2）----
+    from memory import graph, lexical, reasoning, time_extract
+    _now = datetime.now()
+    old10 = (_now - timedelta(days=10)).isoformat(timespec="seconds")
+    _db.memory_add("ai", "test", "上个月去了北京出差", _now.isoformat(timespec="seconds"), None, 0.7, "test")
+    graph.build_for_fact("ai", "test", "上个月去了北京出差", ts=old10, ts_source="explicit")
+    lexical.bm25_upsert("ai", "test", ["上个月去了北京出差"])
+    _db.lexicon_sync("ai", "test")
+    reasoning._event_time_cache.update({"ts": 0.0, "key": None, "map": {}})  # 清缓存让新事件生效
+    w = (_now - timedelta(days=11), _now - timedelta(days=9))
+    th = memory.retrieve_detailed("出差", ["ai"], window=w)
+    check("time-window-boost", any("北京出差" in h["fact"] for h in th), th[:2])
+    te = time_extract.extract("上周三买了猫")
+    check("time-extract-explicit", te.get("explicit") is True and te.get("label") == "上周三", te)
+    check("time-label", time_extract.label_for(old10, "explicit").startswith("【"))
+    # 指代类时间词（那天/上次/之前）不得误触发 (now,now) 窗口
+    te_ref = time_extract.extract("上次说的那个项目")
+    check(
+        "time-ref-no-window",
+        te_ref.get("detected") is True and te_ref.get("start") is None and te_ref.get("explicit") is False,
+        te_ref,
+    )
+    tr = memory.retrieve_detailed("上次说的那个项目", ["ai"])
+    check("time-ref-retrieve-ok", isinstance(tr, list), tr[:1])
+    tv = memory.time_eval_run()
+    check(
+        "time-eval",
+        isinstance(tv.get("window_recall"), dict) and isinstance(tv.get("timeline_order"), dict),
+        list(tv.keys()),
+    )
+
     # ---- 夜晚槽只能在家活动（v2.2 修复：正常人不会凌晨还在外面）----
     from memory import schedule as schedule_mod
     bad_plan = {wd: ["sleep", "home_rest", "home_entertain", "friend"] for wd in range(7)}

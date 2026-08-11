@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Yuno Ops Web</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #0f172a; color: #e2e8f0; padding: 16px; }
+    h1 { font-size: 20px; margin-bottom: 12px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .tab { padding: 8px 16px; border-radius: 8px; background: #1e293b; cursor: pointer; user-select: none; }
+    .tab.active { background: #3b82f6; color: #fff; }
+    .page { display: none; }
+    .page.active { display: block; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .card { background: #1e293b; border-radius: 10px; padding: 12px; }
+    .card .k { font-size: 12px; color: #94a3b8; }
+    .card .v { font-size: 22px; font-weight: 600; margin-top: 4px; }
+    .card .sub { font-size: 12px; color: #64748b; margin-top: 2px; }
+    .red { color: #f87171; }
+    .green { color: #4ade80; }
+    button { background: #3b82f6; color: #fff; border: 0; padding: 8px 16px; border-radius: 8px; cursor: pointer; margin: 4px 4px 4px 0; }
+    button:disabled { background: #475569; cursor: wait; }
+    pre { background: #0b1220; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; overflow: auto; font-size: 12px; margin-top: 10px; max-height: 420px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 13px; }
+    th, td { border: 1px solid #334155; padding: 6px 10px; text-align: left; }
+    th { background: #1e293b; }
+    .chart { width: 100%; height: 300px; margin-top: 10px; }
+    .muted { color: #64748b; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Yuno Ops Web · 评测管理台 <span class="muted">(v0.2 MVP)</span></h1>
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-page="dash">总览</div>
+    <div class="tab" data-page="mem">检索评测</div>
+    <div class="tab" data-page="space">空间评测</div>
+    <div class="tab" data-page="time">时间评测</div>
+  </div>
+
+  <div class="page active" id="page-dash">
+    <div class="cards" id="dash-cards"></div>
+    <div>
+      <button onclick="runTask('grow','grow')">跑一次 grow</button>
+      <button onclick="runTask('memory_eval','记忆评测')">跑检索评测</button>
+      <button onclick="runTask('space_eval','空间评测')">跑空间评测</button>
+      <button onclick="runTask('time_eval','时间评测')">跑时间评测</button>
+      <pre id="grow-report" style="display:none"></pre>
+    </div>
+  </div>
+
+  <div class="page" id="page-mem">
+    <button onclick="runTask('memory_eval','检索评测')">运行检索评测</button>
+    <div class="cards" id="mem-cards"></div>
+    <div class="chart" id="mem-chart"></div>
+    <pre id="mem-raw" style="display:none"></pre>
+  </div>
+
+  <div class="page" id="page-space">
+    <button onclick="runTask('space_eval','空间评测')">运行空间评测</button>
+    <div class="cards" id="space-cards"></div>
+    <pre id="space-raw" style="display:none"></pre>
+  </div>
+
+  <div class="page" id="page-time">
+    <button onclick="runTask('time_eval','时间评测')">运行时间评测</button>
+    <div class="cards" id="time-cards"></div>
+    <pre id="time-raw" style="display:none"></pre>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      $('page-' + t.dataset.page).classList.add('active');
+    });
+
+    async function api(path, opts) {
+      const r = await fetch(path, opts);
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      return r.json();
+    }
+
+    function fmt(x) { return x === null || x === undefined ? '—' : (typeof x === 'number' ? x.toFixed(3) : x); }
+    function deltaCls(d) { return d === null || d === undefined ? '' : (d < -0.03 ? 'red' : (d > 0 ? 'green' : '')); }
+
+    async function poll(taskId, cb) {
+      for (let i = 0; i < 600; i++) {
+        const t = await api('/api/tasks/' + taskId);
+        if (t.status === 'done') { cb(t.result); return; }
+        if (t.status === 'error') { alert('任务失败：' + t.error); cb(null); return; }
+        await new Promise(r => setTimeout(r, 2000));
+      }
+      alert('任务超时');
+    }
+
+    const running = {};
+    function runTask(kind, label) {
+      const btn = [...document.querySelectorAll('button')].find(b => b.textContent.includes(label));
+      if (running[kind]) return;
+      running[kind] = true;
+      if (btn) btn.disabled = true;
+      api('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }) })
+        .then(({ task_id }) => poll(task_id, () => { loadDash(); renderKind(kind); }))
+        .catch(e => alert(label + ' 启动失败：' + e.message))
+        .finally(() => { running[kind] = false; if (btn) btn.disabled = false; });
+    }
+
+    function card(k, v, sub, cls) {
+      return `<div class="card"><div class="k">${k}</div><div class="v ${cls || ''}">${fmt(v)}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
+    }
+
+    async function loadDash() {
+      const d = await api('/api/dashboard');
+      const c = d.counters || {};
+      const tickKeys = Object.keys(c).filter(k => k.startsWith('tick:')).sort();
+      const errKeys = Object.keys(c).filter(k => k.startsWith('err:'));
+      let html = card('记忆条数', d.memory_counts.memories) + card('事件', d.memory_counts.events)
+        + card('属性', d.memory_counts.attrs) + card('LLM 调用', c.llm_calls)
+        + card('tick 项', tickKeys.length, tickKeys.join(' ')) + card('err 项', errKeys.length, errKeys.join(' '));
+      const b = d.baselines || {};
+      html += card('检索 recall@5', b.memory_eval && b.memory_eval.recall_at_k, 'MRR ' + fmt(b.memory_eval && b.memory_eval.mrr));
+      html += card('空间 where_acc', b.space_eval && b.space_eval.where_accuracy && b.space_eval.where_accuracy.accuracy);
+      html += card('时间 window_recall', b.time_eval && b.time_eval.window_recall && b.time_eval.window_recall.recall);
+      $('dash-cards').innerHTML = html;
+      const g = d.grow_report;
+      if (g) { $('grow-report').style.display = 'block'; $('grow-report').textContent = JSON.stringify(g, null, 2); }
+    }
+
+    function renderKind(kind) {
+      if (kind === 'memory_eval') return renderMem();
+      if (kind === 'space_eval') return renderSpace();
+      if (kind === 'time_eval') return renderTime();
+    }
+
+    async function renderMem() {
+      const d = await api('/api/dashboard');
+      const b = (d.baselines || {}).memory_eval || {};
+      $('mem-cards').innerHTML = card('Recall@K', b.recall_at_k) + card('MRR', b.mrr) + card('NDCG', b.ndcg)
+        + card('Probes', b.probes);
+      $('mem-raw').style.display = 'block';
+      $('mem-raw').textContent = JSON.stringify(b, null, 2);
+      const cats = b.categories || {};
+      const chart = echarts.init($('mem-chart'));
+      chart.setOption({
+        title: { text: '分桶召回率', textStyle: { color: '#e2e8f0', fontSize: 13 } },
+        tooltip: {}, grid: { left: 40, right: 20, bottom: 40 },
+        xAxis: { type: 'category', data: Object.keys(cats), axisLabel: { color: '#94a3b8' } },
+        yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+        series: [{ type: 'bar', data: Object.values(cats).map(x => x.recall), itemStyle: { color: '#3b82f6' } }],
+      });
+    }
+
+    async function renderSpace() {
+      const b = ((await api('/api/dashboard')).baselines || {}).space_eval || {};
+      $('space-cards').innerHTML = card('where_accuracy', b.where_accuracy && b.where_accuracy.accuracy, 'n=' + (b.where_accuracy && b.where_accuracy.n))
+        + card('where_recall', b.where_recall && b.where_recall.recall, 'n=' + (b.where_recall && b.where_recall.n))
+        + card('搜索 avg_steps', b.search_sim && b.search_sim.avg_steps) + card('搜索 fail_rate', b.search_sim && b.search_sim.fail_rate);
+      $('space-raw').style.display = 'block';
+      $('space-raw').textContent = JSON.stringify(b, null, 2);
+    }
+
+    async function renderTime() {
+      const b = ((await api('/api/dashboard')).baselines || {}).time_eval || {};
+      $('time-cards').innerHTML = card('window_recall', b.window_recall && b.window_recall.recall)
+        + card('timeline_order', b.timeline_order && b.timeline_order.rate)
+        + card('date_accuracy', b.date_accuracy && b.date_accuracy.accuracy);
+      $('time-raw').style.display = 'block';
+      $('time-raw').textContent = JSON.stringify(b, null, 2);
+    }
+
+    loadDash().catch(e => $('dash-cards').innerHTML = '<div class="red">加载失败：' + e.message + '</div>');
+    setInterval(() => { if (!document.hidden) loadDash().catch(() => {}); }, 15000);
+  </script>
+</body>
+</html>

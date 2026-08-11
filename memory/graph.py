@@ -22,7 +22,7 @@ def _overlap(a: set, b: set) -> float:
     return len(a & b) / max(1, min(len(a), len(b)))
 
 
-def build_for_fact(scope, key, fact, etype=None, importance=0.5, ts="", content=""):
+def build_for_fact(scope, key, fact, etype=None, importance=0.5, ts="", ts_source="approx", content=""):
     """把一个事实写成事件，并与同范围已有事件建边。返回 (event_id, linked_count)。"""
     fact = str(fact).strip()
     etype = etype or classify_event_type(fact)
@@ -38,6 +38,7 @@ def build_for_fact(scope, key, fact, etype=None, importance=0.5, ts="", content=
         content=content or fact,
         importance=float(importance),
         ts=ts,
+        ts_source=ts_source,
         embedding=emb,
         memory_scope=scope,
         memory_key=key,
