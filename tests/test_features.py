@@ -343,6 +343,20 @@ def test_all_features():
         sev.get("decay"),
     )
 
+    # ---- 对话回放五维评分（webapp 场景页）----
+    _db.scenario_score_add(
+        "sc-time", "c2c:t",
+        {"recall": 4, "precision": 3, "coherence": 5, "consistency": 4, "naturalness": 4},
+        "人工备注", "manual",
+    )
+    srows = _db.scenario_score_rows()
+    check(
+        "scenario-score-save",
+        srows and srows[0]["scenario_id"] == "sc-time"
+        and srows[0]["avg"] == 4.0 and srows[0]["mode"] == "manual",
+        srows[:1],
+    )
+
     # ---- 双轨制一致性（v2.2）----
     _db.invalidation_add("c2c:t", "", "旧事实", "conflict")
     rd = consistency.reconcile_pending()

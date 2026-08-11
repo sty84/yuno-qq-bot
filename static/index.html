@@ -43,6 +43,7 @@
     <div class="tab" data-page="emotion">情绪评测</div>
     <div class="tab" data-page="diag">数据与诊断</div>
     <div class="tab" data-page="charts">图表分析</div>
+    <div class="tab" data-page="scenario">对话回放</div>
   </div>
 
   <div class="page active" id="page-dash">
@@ -102,6 +103,25 @@
     <div class="muted">图 2 最新 vs 历史平均：看当前基线是高于还是低于自己过去的表现，红色差距大的地方就是需要重点观察的指标。</div>
   </div>
 
+  <div class="page" id="page-scenario">
+    <div class="cards" id="scenario-meta"></div>
+    <div class="cards" id="scenario-score-summary"></div>
+    <div style="margin: 10px 0;">
+      <select id="scenario-select"></select>
+      <button id="btn-replay" onclick="replayScenario()">回放</button>
+      <label class="muted"><input type="checkbox" id="chk-score" checked> 附带 LLM 五维评分（消耗 token）</label>
+    </div>
+    <div id="scenario-conv"></div>
+    <div id="scenario-llm-score" style="display:none;"></div>
+    <div id="scenario-manual" style="display:none; margin-top: 12px;">
+      <div class="cards" id="scenario-dims"></div>
+      <div><input id="sc-comment" placeholder="备注（可选）" style="width:60%; padding:6px;"></div>
+      <button onclick="saveManualScore()">保存人工分</button>
+    </div>
+    <h3 style="margin-top: 18px;">评分历史</h3>
+    <div id="scenario-scores"></div>
+  </div>
+
   <script>
     const $ = (id) => document.getElementById(id);
     document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
@@ -111,6 +131,7 @@
       $('page-' + t.dataset.page).classList.add('active');
       if (t.dataset.page === 'diag') renderDiag();
       if (t.dataset.page === 'charts') renderCharts();
+      if (t.dataset.page === 'scenario') loadScenarios();
     });
 
     async function api(path, opts) {
@@ -352,6 +373,139 @@
       Object.keys(c).sort().forEach(k => cRows.push([k, c[k]]));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cRows), '计数器');
       XLSX.writeFile(wb, 'yuno_baseline_' + new Date().toISOString().slice(0, 10) + '.xlsx');
+    }
+
+    // ===== 对话回放 · 五维评分（人工 / LLM 双模式）=====
+    const SCORE_DIMS = [
+      ['recall', 'recall 覆盖需求/记忆'],
+      ['precision', 'precision 不答非所问/编造'],
+      ['coherence', 'coherence 多轮连贯'],
+      ['consistency', 'consistency 前后不矛盾'],
+      ['naturalness', 'naturalness 自然像真人'],
+    ];
+    let scenarioList = [];
+
+    function escapeHtml(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/\n/g, '<br>');
+    }
+
+    function selectedScenario() {
+      const i = +($('scenario-select').value || 0);
+      return scenarioList[i] || null;
+    }
+
+    async function loadScenarios() {
+      const d = await api('/api/scenarios');
+      scenarioList = d.scenarios || [];
+      $('scenario-select').innerHTML = scenarioList.length
+        ? scenarioList.map((s, i) => `<option value="${i}">${escapeHtml(s.id || ('场景' + i))}（${s.n_messages} 条 · ${escapeHtml(s.scope)}）</option>`).join('')
+        : '<option value="0">（无场景）</option>';
+      $('scenario-meta').innerHTML = card('场景数', scenarioList.length, d.exists ? '' : '已用内置示例播种，可在 data/eval/scenarios.json 增改');
+      const rows = await api('/api/scenario-scores?limit=200');
+      const manual = rows.filter(r => r.mode !== 'llm');
+      const llm = rows.filter(r => r.mode === 'llm');
+      const avgOf = arr => arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2) : null;
+      $('scenario-score-summary').innerHTML =
+        card('人工评分次数', manual.length, 'avg ' + fmt(avgOf(manual.map(r => r.avg))))
+        + card('LLM 机器分次数', llm.length, 'avg ' + fmt(avgOf(llm.map(r => r.avg))))
+        + card('校准建议', manual.length ? '人工抽检比例 ' + (manual.length / Math.max(1, manual.length + llm.length) * 100).toFixed(0) + '%' : '多打几次人工分用于校准机器分');
+      renderScenarioScores(rows);
+    }
+
+    async function replayScenario() {
+      const s = selectedScenario();
+      const btn = $('btn-replay');
+      btn.disabled = true;
+      try {
+        const { task_id } = await api('/api/scenarios/replay', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scenario_id: s ? s.id : '', score: $('chk-score').checked }),
+        });
+        $('scenario-conv').innerHTML = '<div class="muted">回放中…（逐条走 agent.ask，可能较慢）</div>';
+        await poll(task_id, renderReplay);
+      } catch (e) { alert('回放失败：' + e.message); }
+      btn.disabled = false;
+    }
+
+    function renderReplay(res) {
+      if (!res) return;
+      if (res.error) { $('scenario-conv').innerHTML = '<div class="red">' + escapeHtml(res.error) + '</div>'; return; }
+      let html = '';
+      (res.scenarios || []).forEach(s => {
+        html += `<h3>${escapeHtml(s.id)} <span class="muted">${escapeHtml(s.scope)}</span></h3>`;
+        (s.replies || []).forEach((r, i) => {
+          html += `<div style="margin:6px 0;padding:8px;background:#1e293b;border-radius:8px;">
+            <div class="muted">用户 ${i + 1}：${escapeHtml(r.user)}</div>
+            <div style="margin-top:4px;">AI：${escapeHtml(r.ai)}</div></div>`;
+        });
+      });
+      $('scenario-conv').innerHTML = html;
+      renderManualForm();
+      if (res.scored) renderLlmScore(res.scored, res.avg);
+      else { $('scenario-llm-score').style.display = 'none'; }
+    }
+
+    function renderManualForm() {
+      $('scenario-manual').style.display = 'block';
+      $('scenario-dims').innerHTML = SCORE_DIMS.map(([k, label]) =>
+        `<div class="card"><div class="k">${label}</div>
+         <input id="sc-${k}" type="number" min="1" max="5" step="1" value="3" style="width:70px;padding:6px;margin-top:6px;"></div>`
+      ).join('');
+    }
+
+    function renderLlmScore(scored, avg) {
+      $('scenario-llm-score').style.display = 'block';
+      let html = '<h3>LLM 机器分 <span class="muted">（DeepSeek rubric，供参考）</span></h3><table><tr><th>场景</th>';
+      SCORE_DIMS.forEach(([k]) => html += `<th>${k}</th>`);
+      html += '<th>avg</th><th>备注</th></tr>';
+      (scored || []).forEach(x => {
+        const s = x.scores || {};
+        html += `<tr><td>${escapeHtml(x.id)}</td>`;
+        SCORE_DIMS.forEach(([k]) => html += `<td>${s[k] != null ? s[k] : '—'}</td>`);
+        html += `<td>${s.avg != null ? s.avg : '—'}</td><td class="muted">${escapeHtml(s.comment || '')}</td></tr>`;
+      });
+      if (avg && Object.keys(avg).length) {
+        html += '<tr><td><b>平均</b></td>';
+        SCORE_DIMS.forEach(([k]) => html += `<td><b>${avg[k] != null ? avg[k] : '—'}</b></td>`);
+        html += '<td></td><td></td></tr>';
+      }
+      html += '</table>';
+      $('scenario-llm-score').innerHTML = html;
+    }
+
+    async function saveManualScore() {
+      const s = selectedScenario();
+      if (!s) { alert('请先选择场景'); return; }
+      const scores = {};
+      SCORE_DIMS.forEach(([k]) => {
+        const v = +($('sc-' + k).value);
+        scores[k] = (v >= 1 && v <= 5) ? v : 3;
+      });
+      await api('/api/scenarios/score', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scenario_id: s.id, scope: s.scope, scores,
+          comment: $('sc-comment').value || '', mode: 'manual',
+        }),
+      });
+      $('sc-comment').value = '';
+      await loadScenarios();
+    }
+
+    function renderScenarioScores(rows) {
+      if (!rows || !rows.length) { $('scenario-scores').innerHTML = '<div class="muted">暂无评分记录（回放后人工打分或勾选 LLM 评分）</div>'; return; }
+      let html = '<table><tr><th>时间</th><th>场景</th><th>模式</th>';
+      SCORE_DIMS.forEach(([k]) => html += `<th>${k}</th>`);
+      html += '<th>avg</th><th>备注</th></tr>';
+      rows.slice(0, 50).forEach(r => {
+        html += `<tr><td>${escapeHtml(r.ts)}</td><td>${escapeHtml(r.scenario_id)}</td><td>${r.mode === 'llm' ? '机器分' : '人工'}</td>`;
+        SCORE_DIMS.forEach(([k]) => html += `<td>${r.scores && r.scores[k] != null ? r.scores[k] : '—'}</td>`);
+        html += `<td><b>${r.avg}</b></td><td class="muted">${escapeHtml(r.comment || '')}</td></tr>`;
+      });
+      html += '</table>';
+      $('scenario-scores').innerHTML = html;
     }
 
     loadDash().catch(e => $('dash-cards').innerHTML = '<div class="red">加载失败：' + e.message + '</div>');

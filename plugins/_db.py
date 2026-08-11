@@ -312,6 +312,15 @@ def _create_tables():
                 after TEXT NOT NULL DEFAULT '',
                 delta TEXT NOT NULL DEFAULT '',
                 regression INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS scenario_scores(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                scenario_id TEXT NOT NULL DEFAULT '',
+                scope TEXT NOT NULL DEFAULT '',
+                mode TEXT NOT NULL DEFAULT 'manual',
+                scores TEXT NOT NULL DEFAULT '{}',
+                comment TEXT NOT NULL DEFAULT '',
+                avg REAL NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS space_state(
                 id INTEGER PRIMARY KEY CHECK(id=1),
                 room TEXT NOT NULL DEFAULT '客厅',
@@ -920,6 +929,61 @@ def exp_log_rows(limit=50):
                     d[k] = json.loads(d[k]) if d[k] else None
                 except Exception:
                     pass
+            out.append(d)
+        return out
+
+
+# ===== 对话回放五维评分（人工 / LLM 双模式）=====
+SCORE_DIMS = ("recall", "precision", "coherence", "consistency", "naturalness")
+
+
+def scenario_score_add(scenario_id, scope, scores, comment="", mode="manual"):
+    """保存一次五维评分（manual=人工，llm=机器分）。"""
+    scores = {k: float(scores.get(k, 0)) for k in SCORE_DIMS}
+    avg = round(sum(scores.values()) / len(SCORE_DIMS), 2)
+    with _lock:
+        c = _connect()
+        cur = c.execute(
+            "INSERT INTO scenario_scores(ts,scenario_id,scope,mode,scores,comment,avg) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (
+                datetime.now().isoformat(timespec="seconds"),
+                str(scenario_id or "")[:120],
+                str(scope or "")[:120],
+                str(mode or "manual")[:20],
+                json.dumps(scores, ensure_ascii=False),
+                str(comment or "")[:300],
+                avg,
+            ),
+        )
+        c.commit()
+        return {
+            "id": cur.lastrowid,
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "scenario_id": str(scenario_id or ""),
+            "scope": str(scope or ""),
+            "mode": str(mode or "manual")[:20],
+            "scores": scores,
+            "comment": str(comment or "")[:300],
+            "avg": avg,
+        }
+
+
+def scenario_score_rows(limit=100):
+    with _lock:
+        cur = _connect().execute(
+            "SELECT id, ts, scenario_id, scope, mode, scores, comment, avg "
+            "FROM scenario_scores ORDER BY id DESC LIMIT ?",
+            (max(1, int(limit)),),
+        )
+        cols = [d[0] for d in cur.description]
+        out = []
+        for r in cur.fetchall():
+            d = dict(zip(cols, r))
+            try:
+                d["scores"] = json.loads(d["scores"]) if d["scores"] else {}
+            except Exception:
+                d["scores"] = {}
             out.append(d)
         return out
 

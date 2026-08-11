@@ -1,0 +1,40 @@
+[
+  {
+    "id": "time-recall",
+    "scope": "c2c:scenario-time",
+    "expected": ["回答上周发生的事件", "不编造具体日期", "时间标签来源明确"],
+    "messages": [
+      {"user": "上周我们都干了什么来着？"},
+      {"user": "那具体是哪天？"},
+      {"user": "之后我们又聊了什么？"}
+    ]
+  },
+  {
+    "id": "space-search",
+    "scope": "c2c:scenario-space",
+    "expected": ["知道白巧克力不见了", "按地点逐个找", "找不到时如实说"],
+    "messages": [
+      {"user": "我的白巧克力放哪了？"},
+      {"user": "沙发和茶几都没有吗？"},
+      {"user": "那再找找电视柜那边"}
+    ]
+  },
+  {
+    "id": "compound-emotion",
+    "scope": "c2c:scenario-emotion",
+    "expected": ["识别复合情绪", "不只接一边情绪", "语气自然"],
+    "messages": [
+      {"user": "今天既开心又有点烦，排练完还被夸了但嗓子哑了。"},
+      {"user": "你觉得我现在什么心情？"}
+    ]
+  },
+  {
+    "id": "subject-perspective",
+    "scope": "group:scenario-subject",
+    "expected": ["能区分队友视角记忆", "引用队友说法时标明来源", "不混淆成自己的经历"],
+    "messages": [
+      {"user": "仲町阿拉蕾上次在哪见过那把伞？"},
+      {"user": "那她有没有说伞是什么颜色的？"}
+    ]
+  }
+]

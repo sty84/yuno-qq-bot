@@ -888,15 +888,36 @@ def cmd_experiments(limit=50) -> str:
     return json.dumps(_db.exp_log_rows(limit), ensure_ascii=False, indent=2)
 
 
-def cmd_scenario_eval(path: str = "", score: bool = False) -> str:
-    """场景回放评分：重放多轮对话（agent.ask 逐条），--score 用 DeepSeek 五维 rubric 打分。
-    场景集：data/eval/scenarios.json = [{"id","scope","messages":[{"user":...}],"expected":[...]}]"""
+SCENARIO_RUBRIC = (
+    "你是对话质量评委。按 5 个维度各打 1~5 分，只输出 JSON："
+    '{"recall":n,"precision":n,"coherence":n,"consistency":n,"naturalness":n,"avg":n,"comment":"…"}。'
+    "维度：recall=是否覆盖用户需求/记忆；precision=是否答非所问/编造；coherence=多轮是否连贯；"
+    "consistency=是否前后矛盾；naturalness=是否自然像真人。"
+)
+
+
+def scenario_replay(path: str = "", score: bool = False, scenario_id=None) -> dict:
+    """场景回放（可只回放单个场景），score=True 时附 DeepSeek 五维评分。
+    场景集：data/eval/scenarios.json = [{"id","scope","messages":[{"user":...}],"expected":[...]}]。
+    返回 {"replayed","scenarios"}；score=True 时附加 {"scored","avg"}。供 CLI 与 webapp 共用。
+    """
     from plugins import _shared
     p = path or str(_shared.DATA_DIR / "eval" / "scenarios.json")
     if not os.path.exists(p):
-        return f"场景集不存在：{p}（可建 data/eval/scenarios.json）"
+        # 无场景集时用内置示例播种（同 emotion_probes 的模式）
+        seed = ROOT / "memory" / "scenarios.example.json"
+        if seed.exists():
+            try:
+                pathlib.Path(p).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(seed, p)
+            except Exception:
+                pass
+    if not os.path.exists(p):
+        return {"error": f"场景集不存在：{p}（可建 data/eval/scenarios.json）"}
     with open(p, encoding="utf-8") as f:
         scenarios = json.load(f)
+    if scenario_id:
+        scenarios = [s for s in (scenarios or []) if str(s.get("id")) == str(scenario_id)]
     import agent
     results = []
     for sc in scenarios or []:
@@ -915,20 +936,15 @@ def cmd_scenario_eval(path: str = "", score: bool = False) -> str:
             history.append({"role": "assistant", "content": reply})
             replies.append({"user": str(m["user"]), "ai": reply})
         results.append({"id": sc.get("id"), "scope": scope, "replies": replies})
+    out = {"replayed": len(results), "scenarios": results}
     if not score:
-        return json.dumps({"replayed": len(results), "scenarios": results}, ensure_ascii=False, indent=2)
-    rubric = (
-        "你是对话质量评委。按 5 个维度各打 1~5 分，只输出 JSON："
-        '{"recall":n,"precision":n,"coherence":n,"consistency":n,"naturalness":n,"avg":n,"comment":"…"}。'
-        "维度：recall=是否覆盖用户需求/记忆；precision=是否答非所问/编造；coherence=多轮是否连贯；"
-        "consistency=是否前后矛盾；naturalness=是否自然像真人。"
-    )
+        return out
     scored = []
     for r in results:
         conv = "\n".join(f"用户：{x['user']}\nAI：{x['ai']}" for x in r["replies"])
         s2 = {}
         try:
-            raw = _shared.ask_deepseek(rubric + "\n对话：\n" + conv, max_tokens=200, temperature=0.2)
+            raw = _shared.ask_deepseek(SCENARIO_RUBRIC + "\n对话：\n" + conv, max_tokens=200, temperature=0.2)
             s, e = raw.find("{"), raw.rfind("}")
             if s >= 0:
                 s2 = json.loads(raw[s:e + 1])
@@ -949,7 +965,19 @@ def cmd_scenario_eval(path: str = "", score: bool = False) -> str:
     for k, v in vals.items():
         if v:
             avg[k] = round(sum(v) / len(v), 2)
-    return json.dumps({"scored": scored, "avg": avg}, ensure_ascii=False, indent=2)
+    out["scored"] = scored
+    out["avg"] = avg
+    return out
+
+
+def cmd_scenario_eval(path: str = "", score: bool = False) -> str:
+    """场景回放评分：重放多轮对话（agent.ask 逐条），--score 用 DeepSeek 五维 rubric 打分。"""
+    res = scenario_replay(path, score=score)
+    if res.get("error"):
+        return res["error"]
+    if score:
+        return json.dumps({"scored": res["scored"], "avg": res["avg"]}, ensure_ascii=False, indent=2)
+    return json.dumps({"replayed": res["replayed"], "scenarios": res["scenarios"]}, ensure_ascii=False, indent=2)
 
 
 def main() -> int:

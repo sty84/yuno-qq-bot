@@ -205,6 +205,19 @@ class TaskRequest(BaseModel):
     kind: str  # space_eval | time_eval | memory_eval | grow
 
 
+class ReplayRequest(BaseModel):
+    scenario_id: str = ""
+    score: bool = False
+
+
+class ScoreRequest(BaseModel):
+    scenario_id: str = ""
+    scope: str = ""
+    scores: dict = {}
+    comment: str = ""
+    mode: str = "manual"
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
@@ -343,6 +356,61 @@ def task(task_id: str):
     if t is None:
         raise HTTPException(404, "任务不存在")
     return t
+
+
+@app.get("/api/scenarios")
+def scenarios():
+    """场景集列表（对话回放/五维评分用）。"""
+    p = _shared.DATA_DIR / "eval" / "scenarios.json"
+    if not p.exists():
+        # 无场景集时用内置示例播种
+        seed = ROOT / "memory" / "scenarios.example.json"
+        if seed.exists():
+            try:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(seed, p)
+            except Exception:
+                pass
+    if not p.exists():
+        return {"exists": False, "path": str(p), "scenarios": []}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) or []
+    except Exception as e:
+        raise HTTPException(500, f"场景集解析失败：{e}")
+    return {
+        "exists": True,
+        "path": str(p),
+        "scenarios": [
+            {
+                "id": s.get("id"),
+                "scope": s.get("scope"),
+                "n_messages": len(s.get("messages") or []),
+                "expected": s.get("expected") or [],
+            }
+            for s in data
+        ],
+    }
+
+
+@app.post("/api/scenarios/replay")
+def replay(req: ReplayRequest):
+    """回放场景（可选 DeepSeek 五维评分）。异步任务，前端轮询。"""
+    def fn():
+        from tools import scenario_replay
+        return scenario_replay(scenario_id=req.scenario_id or None, score=req.score)
+    return {"task_id": submit("scenario_replay", fn)}
+
+
+@app.post("/api/scenarios/score")
+def save_score(req: ScoreRequest):
+    """保存一次人工五维评分。"""
+    return _db.scenario_score_add(req.scenario_id, req.scope, req.scores, req.comment, req.mode)
+
+
+@app.get("/api/scenario-scores")
+def scenario_scores(limit: int = 100):
+    """已保存的五维评分历史（人工 + LLM）。"""
+    return _db.scenario_score_rows(limit)
 
 
 @app.get("/")
