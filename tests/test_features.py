@@ -401,6 +401,15 @@ def test_all_features():
     fp_facts = space.room_facts("客厅")
     check("fp-facts", "㎡" in fp_facts and "大门" in fp_facts, fp_facts)
     check("fp-route-minutes", space.route_minutes("卧室", "客厅") >= 1)
+
+    # ---- 事实分类子串误伤修复（v2.2+）----
+    from memory import policy as policy_mod
+    check("class-work-process", policy_mod.fact_class("c2c:x", "", "今天工作很累") == "process")
+    check("class-addr-instruction", policy_mod.fact_class("c2c:x", "", "记住这个地址") == "process")
+    check("class-addr-stable", policy_mod.fact_class("c2c:x", "", "我的地址是上海市徐汇区") == "stable")
+    check("class-work-stable", policy_mod.fact_class("c2c:x", "", "我在腾讯工作") == "stable")
+    cr = policy_mod.classify_report()
+    check("class-report", cr.get("accuracy") == 1.0 and not cr.get("errors"), cr)
     w = pack_mod.world()
     check("pack-world", "layout" in w and "items" in w and w.get("role"), list(w.keys()))
     check("persona-name", persona_mod.persona_name() == "千石由乃", persona_mod.persona_name())

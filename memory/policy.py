@@ -5,6 +5,7 @@ Bayesian 置信度更新（可信度视为后验概率，用似然比随证据�
 v22：① 贝叶斯更新按事实类型加阻力（稳定事实 3x / 主观偏好 2x，玩笑与单次异常难撼动）；
 ② 遗忘曲线按用户活跃密度缩放半衰期（密集交流=近期重要，稀疏交流=琐碎记忆快淡出）。"""
 
+import re
 import time
 from datetime import datetime, timedelta
 
@@ -28,10 +29,23 @@ def _lr(kind: str) -> float:
     return table.get(kind, 1.0)
 
 
-STABLE_HINT = (
-    "生日", "血型", "星座", "身份证", "手机号", "邮箱", "地址", "住", "老家",
-    "真名", "本名", "已婚", "未婚", "离婚", "属", "父母", "爸妈", "兄弟", "姐妹",
-    "工作", "公司", "入职", "毕业", "学校", "学历", "国籍",
+# 强稳定锚点：出现即 stable（生日/血型这类几乎不可能被过程语境误伤）
+STABLE_ANCHOR = (
+    "生日", "血型", "星座", "身份证", "手机号", "邮箱", "真名", "本名",
+    "已婚", "未婚", "离婚", "国籍", "学历", "老家", "入职", "毕业", "学校",
+    "父母", "爸妈", "兄弟", "姐妹",
+)
+# 需要语境确认的稳定词：词出现 + 语境模式（正则）命中才判 stable。
+# 解决"今天工作很累（过程）"/"记住这个地址（指令）"这类子串误伤。
+STABLE_CTX = [
+    ("地址", (r"地址是", r"地址为", r"地址在", r"住址", r"我的地址", r"家在", r"家住", r"住在", r"地址[:：]")),
+    ("工作", (r"在[^，。]{0,8}工作", r"工作单位", r"工作地点", r"在哪工作", r"上班", r"公司工作")),
+    ("公司", (r"在[^，。]{0,8}公司", r"公司工作", r"入职公司", r"公司的")),
+]
+# 过程标记：命中则降级为 process（除非已命中强锚点）
+PROCESS_MARK = (
+    "很累", "好累", "太累", "累了", "累死", "累得", "加班", "很忙", "太忙",
+    "忙死", "累到", "上班很累",
 )
 PREF_HINT = (
     "喜欢", "讨厌", "最爱", "爱吃", "爱喝", "忌口", "不吃", "偏好", "口味",
@@ -41,15 +55,50 @@ PREF_HINT = (
 
 def fact_class(scope, key, fact) -> str:
     """事实类型：stable 客观稳定事实 / preference 主观偏好 / process 过程状态。
-    贝叶斯更新按类型加抗噪阻力：稳定事实不怕玩笑，偏好不因单次异常翻转。"""
+    贝叶斯更新按类型加抗噪阻力：稳定事实不怕玩笑，偏好不因单次异常翻转。
+    v2.2+：子串匹配改为"强锚点 + 语境确认 + 过程标记降级"，避免
+    "今天工作很累"（含'工作'）/ "记住这个地址"（含'住'）被误判 stable。"""
     t = str(fact or "")
     if key in ("identity", "birthday", "blood_type", "profile"):
         return "stable"
-    if any(w in t for w in STABLE_HINT):
+    if any(w in t for w in STABLE_ANCHOR):
+        return "stable"
+    if any(m in t for m in PROCESS_MARK):
+        return "process"
+    if any(re.search(p, t) for _w, patterns in STABLE_CTX for p in patterns):
         return "stable"
     if key in ("preference", "偏好", "喜好") or any(w in t for w in PREF_HINT):
         return "preference"
     return "process"
+
+
+# ===== 分类评测探针（含关键词但其实是过程/指令的句子）=====
+CLASSIFY_PROBES = [
+    ("今天工作很累", "process"),          # 含"工作"但过程
+    ("记住这个地址", "process"),          # 含"住"但是指令
+    ("我的地址是上海市徐汇区", "stable"),
+    ("我在腾讯工作", "stable"),
+    ("上周三买了只猫", "process"),
+    ("她家住在广州", "stable"),
+    ("生日是八月十二号", "stable"),
+    ("今天加班到十点", "process"),
+    ("公司组织团建", "process"),
+    ("喜欢喝冰美式", "preference"),
+]
+
+
+def classify_report() -> dict:
+    """跑一遍分类探针，返回误判清单与准确率（policy-classify 的数据源）。"""
+    errors = []
+    for text, expect in CLASSIFY_PROBES:
+        got = fact_class("c2c:probe", "", text)
+        if got != expect:
+            errors.append({"text": text, "expected": expect, "got": got})
+    return {
+        "total": len(CLASSIFY_PROBES),
+        "errors": errors,
+        "accuracy": round(1 - len(errors) / len(CLASSIFY_PROBES), 3),
+    }
 
 
 def resistance_for(cls) -> float:

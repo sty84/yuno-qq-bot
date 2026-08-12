@@ -756,6 +756,12 @@ def cmd_consistency_eval() -> str:
     return json.dumps({"pending": pending, "reconciled": done["reconciled"]}, ensure_ascii=False, indent=2)
 
 
+def cmd_policy_classify() -> str:
+    """事实分类探针：'含关键词但其实是过程' 的句子误判率（policy-classify）。"""
+    from memory import policy
+    return json.dumps(policy.classify_report(), ensure_ascii=False, indent=2)
+
+
 def cmd_persona_smoke() -> str:
     """Persona Pack 冒烟：加载校验 + 房间图连通 + 模板渲染 + 代码硬编码扫描。"""
     from agent import persona as persona_mod
@@ -1266,6 +1272,9 @@ def main() -> int:
 
     p = sub.add_parser("consistency-eval", help="双轨制一致性：失效队列长度 + 重算数")
     p.set_defaults(func=lambda a: print(cmd_consistency_eval()) or 0)
+
+    p = sub.add_parser("policy-classify", help="事实分类探针：含关键词但其实是过程/指令的句子误判率")
+    p.set_defaults(func=lambda a: print(cmd_policy_classify()) or 0)
 
     p = sub.add_parser("persona-smoke", help="Persona Pack 冒烟：加载校验 + 房间连通 + 模板渲染 + 硬编码扫描")
     p.set_defaults(func=lambda a: print(cmd_persona_smoke()) or 0)
