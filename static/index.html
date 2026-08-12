@@ -9,10 +9,15 @@
   <script src="/static/vendor/xlsx.full.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #0f172a; color: #e2e8f0; padding: 16px; }
+    body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #0f172a; color: #e2e8f0; }
+    .app { display: flex; min-height: 100vh; }
+    .sidebar { width: 188px; flex-shrink: 0; background: #0b1220; border-right: 1px solid #1e293b;
+               padding: 14px 10px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+    .brand { font-size: 15px; font-weight: 700; color: #e2e8f0; padding: 0 12px 12px; letter-spacing: 1px; }
+    .main { flex: 1; min-width: 0; padding: 16px 20px; }
     h1 { font-size: 20px; margin-bottom: 12px; }
-    .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
-    .tab { padding: 8px 16px; border-radius: 8px; background: #1e293b; cursor: pointer; user-select: none; }
+    .tabs { display: flex; flex-direction: column; gap: 2px; }
+    .tab { padding: 9px 12px; border-radius: 8px; background: #1e293b; cursor: pointer; user-select: none; font-size: 13px; }
     .tab.active { background: #3b82f6; color: #fff; }
     .page { display: none; }
     .page.active { display: block; }
@@ -42,29 +47,39 @@
              padding: 12px 14px; margin: 10px 0; }
     .tag { display: inline-block; background: #1e293b; border-radius: 6px; padding: 2px 8px;
            font-size: 12px; margin: 2px; }
-    .tabsep { display: flex; align-items: center; padding: 8px 12px; color: #64748b;
-              font-size: 12px; letter-spacing: 1px; user-select: none; }
+    .tabsep { display: block; padding: 12px 12px 4px; color: #64748b;
+              font-size: 11px; letter-spacing: 1px; user-select: none; }
     .sect-line { border-top: 1px solid #1e293b; margin: 12px 0 8px; }
+    @media (max-width: 860px) {
+      .app { flex-direction: column; }
+      .sidebar { width: auto; height: auto; position: static; border-right: 0; border-bottom: 1px solid #1e293b; }
+      .tabs { flex-direction: row; flex-wrap: wrap; }
+    }
   </style>
 </head>
 <body>
+  <div class="app">
+  <aside class="sidebar">
+    <div class="brand">Yuno Ops Web</div>
+    <div class="tabs" id="tabs">
+      <div class="tab active" data-page="dash">总览</div>
+      <div class="tabsep">评测</div>
+      <div class="tab" data-page="mem">检索评测</div>
+      <div class="tab" data-page="space">空间评测</div>
+      <div class="tab" data-page="time">时间评测</div>
+      <div class="tab" data-page="emotion">情绪评测</div>
+      <div class="tab" data-page="subjects">多主体评测</div>
+      <div class="tabsep">实验</div>
+      <div class="tab" data-page="ablation">消融实验</div>
+      <div class="tab" data-page="scenario">对话回放</div>
+      <div class="tabsep">分析</div>
+      <div class="tab" data-page="diag">数据与诊断</div>
+      <div class="tab" data-page="charts">图表分析</div>
+      <div class="tab" data-page="costs">成本</div>
+    </div>
+  </aside>
+  <main class="main">
   <h1>Yuno Ops Web · 评测管理台 <span class="muted">(v0.3)</span></h1>
-  <div class="tabs" id="tabs">
-    <div class="tab active" data-page="dash">总览</div>
-    <div class="tabsep">评测</div>
-    <div class="tab" data-page="mem">检索评测</div>
-    <div class="tab" data-page="space">空间评测</div>
-    <div class="tab" data-page="time">时间评测</div>
-    <div class="tab" data-page="emotion">情绪评测</div>
-    <div class="tab" data-page="subjects">多主体评测</div>
-    <div class="tabsep">实验</div>
-    <div class="tab" data-page="ablation">消融实验</div>
-    <div class="tab" data-page="scenario">对话回放</div>
-    <div class="tabsep">分析</div>
-    <div class="tab" data-page="diag">数据与诊断</div>
-    <div class="tab" data-page="charts">图表分析</div>
-    <div class="tab" data-page="costs">成本</div>
-  </div>
 
   <div class="page active" id="page-dash">
     <div class="cards" id="dash-cards"></div>
@@ -187,6 +202,8 @@
     <h3 class="sect">机制权衡：token 成本 × 消融效果</h3>
     <div id="cost-tradeoff"></div>
     <div class="muted">对照看：某机制在成本表里占比高、且消融矩阵里关掉它 delta≈0（不损失效果），就是该砍的；占比低但关掉明显退化（如 rerank），说明它是值钱的。</div>
+  </div>
+  </main>
   </div>
 
   <script>
