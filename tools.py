@@ -21,6 +21,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 ROOT = pathlib.Path(__file__).resolve().parent
+from plugins import _shared
 
 
 def _plugins():
@@ -311,6 +312,25 @@ def cmd_memory_clear_user(uid: str) -> str:
     return f"已清除 {scope} 的全部记忆/事件/议题/索引"
 
 
+_PROBE_SOCIAL_WORDS = (
+    "你好", "您好", "哈喽", "嗨", "在吗", "早安", "晚安", "谢谢", "多谢", "拜拜",
+    "再见", "辛苦了", "打扰", "哈哈", "嘻嘻", "好的", "收到", "嗯", "哦",
+)
+_PROBE_QUESTION_WORDS = ("？", "?", "吗", "呢", "哪", "什么", "怎么", "谁", "为什么", "啥", "几", "是不是", "有没有")
+
+
+def _is_social_probe(query) -> bool:
+    """评测集过滤（v2.3 修复 P2-2）：寒暄/短陈述句不构成检索需求，剔除。"""
+    q = str(query or "").strip()
+    if len(q) < 3:
+        return True
+    if any(w in q for w in _PROBE_SOCIAL_WORDS):
+        return True
+    if len(q) <= 6 and not any(w in q for w in _PROBE_QUESTION_WORDS):
+        return True
+    return False
+
+
 def cmd_memory_probes(limit: int, out: str) -> str:
     """把查询日志导出为评测集（弱监督：当时返回的即期望）。"""
     from plugins import _db
@@ -327,17 +347,22 @@ def cmd_memory_probes(limit: int, out: str) -> str:
 
     rows = _db.query_log_pending(limit)
     probes = []
+    seen_q = set()
     for r in rows:
+        q = str(r["query"] or "").strip()
+        if not q or q in seen_q or _is_social_probe(q):
+            continue
+        seen_q.add(q)
         hits = json.loads(r["hits"] or "[]")
         scopes = json.loads(r["scopes"] or "[]")
         if not hits:
             continue
         probes.append(
             {
-                "query": r["query"],
+                "query": q,
                 "expected": hits[:5],
                 "scope": scopes[0] if scopes else None,
-                "category": "subject" if scopes and str(scopes[0]).startswith("npc:") else _probe_category(r["query"]),
+                "category": "subject" if scopes and str(scopes[0]).startswith("npc:") else _probe_category(q),
             }
         )
     if not probes:

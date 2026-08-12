@@ -526,6 +526,49 @@ def test_all_features():
         cs,
     )
 
+    # ---- 第一批修复验证（v2.3 决策清单）----
+    # 1) 提取器只喂用户的话：bot 回复不进提取输入（P1-2）
+    from memory import extract as extract_mod
+    captured = {}
+
+    def _fake_ews(conv):
+        captured["conv"] = str(conv)
+        return []
+
+    _orig_ews = extract_mod.extract_with_structure
+    extract_mod.extract_with_structure = _fake_ews
+    try:
+        memory.ingest("c2c:guard", "", "阿拉蕾在干什么", "阿拉蕾是雪貂，借给隔壁乐队了")
+    finally:
+        extract_mod.extract_with_structure = _orig_ews
+    check(
+        "extract-user-only",
+        "机器人" not in captured.get("conv", "") and "雪貂" not in captured.get("conv", ""),
+        captured.get("conv", "")[:80],
+    )
+    # 2) 生成层记忆缺口守卫：说不记得时注入硬性约束（P0-1 生成层）
+    captured_ask = {}
+
+    def _fake_llm(*a, **k):
+        captured_ask["ctx"] = k.get("extra_context", "")
+        return "……我这边也没有相关记录。"
+
+    _orig_ask = _shared.ask_deepseek
+    _shared.ask_deepseek = _fake_llm
+    try:
+        agent.ask("我不记得了", scopes=["c2c:gap"], learn=False)
+    finally:
+        _shared.ask_deepseek = _orig_ask
+    check("memory-gap-guard", "记忆缺口" in captured_ask.get("ctx", ""), captured_ask.get("ctx", "")[:80])
+    # 3) 评测集过滤：寒暄/短陈述剔除，真问题保留（P2-2）
+    check(
+        "probe-filter",
+        tools_mod._is_social_probe("你好啊")
+        and tools_mod._is_social_probe("哈哈")
+        and not tools_mod._is_social_probe("阿拉蕾在干什么"),
+        (tools_mod._is_social_probe("你好啊"), tools_mod._is_social_probe("阿拉蕾在干什么")),
+    )
+
     # ---- lazy_label 收进 pack（去人设残留）----
     tr = living.travel_time("排练室", mode="walk", now=datetime.now())
     check("lazy-label-pack", "由乃懒得动" in (tr.get("factors") or []), tr.get("factors"))

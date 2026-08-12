@@ -400,8 +400,10 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
         )
     new_facts = facts
     if not new_facts:
+        # 提取污染防护（v2.3 修复 P1-2）：只喂用户的话，bot 的回复不进提取输入——
+        # 否则 LLM 会把 bot 编的"阿拉蕾是雪貂"当成事实固化进用户 scope
         new_facts = (
-            extract.extract_with_structure(f"用户：{(text or '')[:500]}\n机器人：{(reply or '')[:500]}")
+            extract.extract_with_structure(f"用户：{(text or '')[:500]}")
             if text
             else []
         )

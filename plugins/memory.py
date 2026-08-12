@@ -402,7 +402,7 @@ async def after_chat(ctx, text, reply):
             _last_group_extract[k1] = time.time()
             gfacts = await asyncio.to_thread(
                 memory.extract_facts,
-                f"（最近一次群聊片段）用户：{text[:300]}\n机器人：{reply[:300]}",
+                f"（最近一次群聊片段）用户：{text[:300]}",
             )
             if gfacts:
                 info = await asyncio.to_thread(
