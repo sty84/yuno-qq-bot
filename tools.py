@@ -793,6 +793,22 @@ def cmd_persona_smoke() -> str:
             issues.append("INSPECT_PROMPT 渲染未包含名字")
     except Exception as e:
         issues.append(f"模板渲染失败：{e}")
+    try:
+        from memory import floorplan as fp
+        for issue in fp.validate():
+            issues.append("floorplan: " + issue)
+    except Exception as e:
+        issues.append(f"floorplan 校验异常：{e}")
+    fp_info = {}
+    try:
+        from memory import floorplan as fp
+        fp_info = {
+            "enabled": fp.enabled(),
+            "areas": {r: fp.room_area_m2(r) for r in fp.rooms()},
+            "svg_available": bool(fp.render_svg()),
+        }
+    except Exception:
+        pass
     hardcoded = []
     for root, _dirs, files in os.walk(ROOT):
         if ".git" in root or "personas" in root:
@@ -811,6 +827,7 @@ def cmd_persona_smoke() -> str:
     return json.dumps({
         "pack": pk, "persona_name": name, "world_rooms": len(rooms),
         "issues": issues,
+        "floorplan": fp_info,
         "hardcoded_count": len(hardcoded),
         "hardcoded_code": hardcoded[:20],
     }, ensure_ascii=False, indent=2)
@@ -831,6 +848,35 @@ def cmd_persona_switch(pack_name: str) -> str:
     from agent import persona
     persona._persona_name_cache = None
     return f"已切换 persona pack → {pack_name}（重启后生效；记忆隔离需独立数据库，另见说明）"
+
+
+def cmd_floorplan_render(pack_name: str = "", out: str = "") -> str:
+    """渲染平面图 SVG 预览 + 房间几何事实表（面积/质心/离大门距离）。
+    SVG 也可作为将来 floorplan-import 的回环样本。"""
+    from plugins import _shared
+    from memory import floorplan as fp
+    name = pack_name or fp.active_pack()
+    svg = fp.render_svg(name)
+    if not svg:
+        return f"pack {name} 没有 floorplan（personas/{name}/world.json 缺 floorplan 段）"
+    dest = pathlib.Path(out) if out else _shared.DATA_DIR / "floorplans" / f"{name}.svg"
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(svg, encoding="utf-8")
+    except Exception as e:
+        return f"SVG 写入失败：{e}"
+    facts = {}
+    for r in fp.rooms(name):
+        facts[r] = {
+            "area_m2": round(fp.room_area_m2(r, name), 1),
+            "centroid": fp.room_centroid(r, name),
+            "entrance_m": fp.dist_to_entrance(r, name),
+            "facts": fp.facts_text(r, name),
+        }
+    return json.dumps(
+        {"pack": name, "svg": str(dest), "issues": fp.validate(name), "rooms": facts},
+        ensure_ascii=False, indent=2,
+    )
 
 
 def cmd_ablation() -> str:
@@ -1199,6 +1245,11 @@ def main() -> int:
     p.add_argument("--save", action="store_true", help="把结果存为 baseline")
     p.add_argument("--compare", action="store_true", help="与上次 baseline 对比")
     p.set_defaults(func=lambda a: print(cmd_space_eval(save=a.save, compare=a.compare)) or 0)
+
+    p = sub.add_parser("floorplan-render", help="渲染平面图 SVG 预览 + 房间几何事实表")
+    p.add_argument("--pack", default="", help="Persona pack 名（默认当前激活）")
+    p.add_argument("--out", default="", help="SVG 输出路径（默认 data/floorplans/<pack>.svg）")
+    p.set_defaults(func=lambda a: print(cmd_floorplan_render(a.pack, a.out)) or 0)
 
     p = sub.add_parser("time-eval", help="时间感知评测：时间段召回 / 时间线序列 / 日期精确度")
     p.add_argument("--save", action="store_true", help="把结果存为 baseline")

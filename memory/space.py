@@ -68,6 +68,14 @@ def _now_iso():
 
 # ===== 家内房间图（P1-1：邻接 / 最短路径 / 门灯）=====
 def home_edges() -> list:
+    # 平面图几何层优先：边表从 doors 推导，不再手写
+    try:
+        from memory import floorplan as fp
+        fe = fp.adjacency_edges()
+        if fe:
+            return fe
+    except Exception:
+        pass
     w = _pack_world().get("edges")
     if isinstance(w, list) and w:
         return w
@@ -108,6 +116,14 @@ def shortest_route(a, b) -> list:
 
 def route_minutes(a, b) -> int:
     """房间间移动分钟数（每边默认 1 分钟，可配 space.edge_min）。"""
+    # 有平面图几何时按实际路程算（质心→门→质心 × scale / 步行速度）
+    try:
+        from memory import floorplan as fp
+        m = fp.route_minutes(a, b)
+        if m is not None:
+            return max(1, int(round(m)))
+    except Exception:
+        pass
     route = shortest_route(a, b)
     if not route:
         return 0
@@ -606,6 +622,35 @@ def travel_between(frm, to, mode=None, now=None) -> dict:
 def room_visual(room) -> dict:
     w = _pack_world().get("visuals") or {}
     return w.get(room) or ROOM_VISUALS.get(room, {"size": "", "tone": "", "desc": ""})
+
+
+def room_area(room) -> float:
+    """房间面积（㎡），无几何返回 0。"""
+    try:
+        from memory import floorplan as fp
+        return round(fp.room_area_m2(room), 1)
+    except Exception:
+        return 0.0
+
+
+def room_centroid(room):
+    """房间质心坐标，无几何返回 None。"""
+    try:
+        from memory import floorplan as fp
+        if not fp.enabled():
+            return None
+        return fp.room_centroid(room)
+    except Exception:
+        return None
+
+
+def room_facts(room) -> str:
+    """平面图推导的房间事实文本（面积/邻居/离大门距离），无几何返回空串。"""
+    try:
+        from memory import floorplan as fp
+        return fp.facts_text(room)
+    except Exception:
+        return ""
 
 
 def can_see(room, container, now=None) -> dict:

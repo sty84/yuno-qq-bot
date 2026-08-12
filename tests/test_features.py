@@ -370,6 +370,37 @@ def test_all_features():
     from agent import persona as persona_mod
     from memory import pack as pack_mod
     check("pack-active", pack_mod.active() == "yuno", pack_mod.active())
+
+    # ---- 平面图几何层（floorplan P0）----
+    from memory import floorplan as fp_mod
+    check("fp-enabled", fp_mod.enabled(), fp_mod.data())
+    check("fp-valid", fp_mod.validate() == [], fp_mod.validate())
+    check(
+        "fp-area",
+        abs(fp_mod.room_area_m2("客厅") - 21.0) < 0.01
+        and abs(fp_mod.room_area_m2("厨房") - 7.5) < 0.01
+        and abs(fp_mod.room_area_m2("卧室") - 18.0) < 0.01,
+        {r: fp_mod.room_area_m2(r) for r in fp_mod.rooms()},
+    )
+    check(
+        "fp-centroid",
+        fp_mod.polygon_centroid(fp_mod.rooms()["客厅"]["polygon"]) == (40.0, 17.5),
+        fp_mod.polygon_centroid(fp_mod.rooms()["客厅"]["polygon"]),
+    )
+    fe = {frozenset(e) for e in fp_mod.adjacency_edges()}
+    check(
+        "fp-edges",
+        fe == {
+            frozenset(("客厅", "厨房")), frozenset(("客厅", "卧室")),
+            frozenset(("卧室", "工作室")), frozenset(("厨房", "工作室")),
+        },
+        fe,
+    )
+    fp_min = fp_mod.route_minutes("卧室", "客厅")
+    check("fp-route", fp_min is not None and fp_min > 0, fp_min)
+    fp_facts = space.room_facts("客厅")
+    check("fp-facts", "㎡" in fp_facts and "大门" in fp_facts, fp_facts)
+    check("fp-route-minutes", space.route_minutes("卧室", "客厅") >= 1)
     w = pack_mod.world()
     check("pack-world", "layout" in w and "items" in w and w.get("role"), list(w.keys()))
     check("persona-name", persona_mod.persona_name() == "千石由乃", persona_mod.persona_name())
