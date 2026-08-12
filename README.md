@@ -96,6 +96,41 @@ flowchart LR
   `repair_spatial` 扩展（数量/状态一致性、同名多容器、容量检查）。
 - **代码审计**：246 处裸 except 全部换成 `err:<模块>` 计数 + 日志，异常可观测、可消融。
 
+### v2.2+ 迭代：认知闭环与管理台（最近一轮）
+
+- **情绪 ↔ 议题打通（三维情绪真正参与记忆）**：
+  - 存储：`topic.link_fact` 在 mood 标签之外并行写 `vad` 向量与 `compound` 复合情绪参数
+    （analysis 结果里本来就带着 VAD，之前只存了标签）；旧议题可用 `tools.py topic-vad-backfill`
+    或随 `memory-grow` 自动回填近似向量。
+  - 聚合：议题情绪从"标签集合"升级为 VAD 加权质心（时间衰减 + 位置加权，`mood_centroid`），
+    带趋势（近两周转开心/低落）与复合底色。
+  - 检索：心境一致性加权（用户情绪 VAD × 议题质心距离 → `mood_boost` 乘数）；语义检索弱时
+    用情绪做二级检索键（情绪寻址复核）；快状态 × 日级慢 EMA 合成检索情绪（`blended_estimate`）。
+  - 注入：`_topic_block` 升级为"情绪底色：低落（偏无力）→ 近两周转开心；复合底色：哭笑不得"。
+  - 评测：`emotion-eval` 新增 `topic_mood` 段（写入一致性 / 质心合理性 / 复合不坍缩 / 跨表 VAD 漂移）。
+  - 统一事实源：`LABEL_VAD` 从 `analysis.EMOTION_METRICS` 派生，同名标签 VAD 不再两表打架。
+- **情绪调制遗忘（Twig）**：记忆半衰期按 arousal 缩放（`policy.arousal_half_factor`，可配
+  `policy.arousal_boost`），高唤醒记得住、低唤醒尽快忘；NPC 衰减探针同口径。
+- **双速情绪（Sentipolis）**：消息级快窗口（12h 半衰期）+ 持久化日级慢 EMA（α=0.1），
+  单条消息不把长期状态带偏；注入块区分"当前状态"与"日级底色"。
+- **平面图几何层（floorplan）**：`personas/<pack>/world.json` 可配房间多边形 + 门，
+  自动推导面积（鞋带公式）/ 质心 / 邻接边表 / 实际路程（质心→门→质心 Dijkstra）；
+  `route_minutes` 从"每边 1 分钟"变成按真实距离；`tools.py floorplan-render` 出 SVG 预览；
+  persona-smoke 校验多边形合法性、门在墙上、图连通、大门可达。
+- **事实分类误伤修复**：子串匹配改为"强锚点 + 语境确认 + 过程标记降级"
+  （"今天工作很累"不再因含'工作'被判 stable）；`tools.py policy-classify` 内置 10 例探针。
+- **revive-companion 主动消息**：泊松过程触发（事件率按天，`revive.rate_per_day`）+ 贝叶斯
+  用户状态推断（活跃/忙/睡/需要关心 = 时段先验 × 消息活跃度似然），睡眠/忙碌自动让路；
+  broadcast 随机动态接入门控；`tools.py revive-status` 只读查看。
+- **cognitive-engine bandit**：Thompson Sampling 维护"什么回应策略对当前用户有效"的后验
+  （共情/方案/玩梗/倾听/转移 5 策略），回复前采样注入【回应策略】，用户下一条消息的情绪/
+  反馈作为奖励更新；`tools.py bandit-status` 看均值收敛。
+- **Persona Pack 去人设残留**：懒系数标签等收进 pack（`lazy_label`），代码层零人设硬编码。
+- **评测管理台（webapp，FastAPI + 静态页）**：总览/检索/空间/时间/情绪/多主体六类评测基线、
+  图表分析（趋势/对比/bandit/revive）、对话回放五维评分（人工 + LLM 机器分 + 雷达图）、
+  消融实验热插拔开关（13 个机制实时开关 + 矩阵表 + 柱状图）、数据诊断（分类探针/一致性/
+  实验日志回归门禁）；本地 vendor 离线资源（ECharts/SheetJS），启动 `python webapp.py --port 8600`。
+
 ### 记忆与检索（v31）
 
 - **7 路融合检索**：词法 BM25 / FTS / 向量 / 事件图谱 / 结构化属性 / Rules / 议题，
@@ -314,6 +349,11 @@ printf '0 3 * * * cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py backup >>
 | `memory.core.interaction` | 互动调节器（场景/关系/用户状态/频率公式） |
 | `memory.core.mind` | 心智状态中枢（system1 开关与阈值、cognitive_turn、persona_weights、意图 TTL） |
 | `memory.core.analysis` / `world` / `trace` | 情绪 LLM 兜底 / 世界模型 / 记忆轨迹 |
+| `memory.core.revive` | 主动消息：泊松事件率（rate_per_day）/ 冷却 / 睡眠窗口 |
+| `memory.core.bandit` | 回应策略 Thompson 采样（enabled / alpha0 / beta0） |
+| `memory.core.mood_boost` / `emotion_address` / `mood_alpha_fast` | 心境一致性检索开关与强度 |
+| `memory.core.policy.arousal_boost` | 情绪锚定：记忆半衰期随 arousal 缩放 |
+| `personas/<pack>/world.json` 的 `floorplan` 段 | 平面图几何：房间多边形 + 门（面积/质心/路程推导） |
 | `chat_bridge` | 慢响应衔接语开关 |
 | `services` | MCP 服务注册表（管理端 / 外部 Agent 用） |
 
@@ -355,6 +395,16 @@ python tools.py memory-calibrate    # 用评测集训练置信度标定
 python tools.py data-export         # 全量数据打包
 python tools.py data-import <file>  # 导入数据
 python tools.py config-validate     # 校验 config.json（未知段/类型/取值越界）
+python tools.py floorplan-render    # 平面图 SVG 预览 + 房间几何事实表
+python tools.py policy-classify     # 事实分类探针（含关键词但实为过程/指令）
+python tools.py revive-status       # 主动消息：泊松概率 + 贝叶斯用户状态（只读）
+python tools.py bandit-status       # 回应策略后验（各策略均值 + 上次选择）
+python tools.py topic-vad-backfill  # 旧议题补近似 VAD/复合情绪（幂等）
+python tools.py scenario-eval --score  # 场景回放五维评分（LLM）
+python tools.py ablation            # 机制消融矩阵（单开关 × probes + 实验日志）
+python tools.py subjects-eval       # 多主体评测（写入/隐私/引用/可信度衰减）
+python tools.py consistency-eval    # 双轨制一致性（失效队列 + 重算）
+python tools.py experiments         # 实验日志（基线前后 + 回归标记）
 ```
 
 自动化测试：
@@ -384,20 +434,23 @@ python v29_test.py             # 专项验收：用户记忆不被 AI 自述污�
   正规表，其余待迁）。
 - **关键路径依赖 LLM**：提取/纠错调查/重排/world_delta 都调 LLM，成本和失败率不可控，
   单条消息最坏会触发两次以上 LLM 调用。
-- **管理面未完成**：管理仍靠 QQ 指令 + 日志 + 命令行，管理 App / API 尚未实现。
+- **管理面部分完成**：评测管理台（webapp）已覆盖评测/消融/回放评分/图表，但 probes 评测集
+  管理、trace 人工审核页、数据导出页尚未做；管理 App 仍是命令行 + 网页轮询。
 - **单机单用户**：SQLite + 内存态架构，无水平扩展与多租户设计。
 
 改进方向（按优先级）：
 
 1. **数据闭环**：每周导出评测集、人工五维评分、落 baseline；逐级上线权重网格搜索 →
-   置信度标定 → 提取门控 → LTR 排序 → GPU 微调 → Bandit 在线调权，并做机制消融实验。
+   置信度标定 → 提取门控 → LTR 排序 → GPU 微调；Bandit 在线调权（回应策略）与机制消融
+   矩阵已落地，下一步是把消融/评分闭环接入每日 grow 自动跑。
 2. **工程化**：回归测试与 CI 已起步，继续补状态层单测、剩余内存态落盘、
    SQLite 迁移机制、锁依赖版本。
-3. **产品化**：API Gateway + 管理 Web + 公开统计页，高危操作二次确认，完成"管理迁出 QQ"。
+3. **产品化**：管理 Web 已上线（评测管理台 MVP），继续补 probes 管理、trace 审核页、
+   API Gateway + 鉴权 + 公开统计页，高危操作二次确认，完成"管理迁出 QQ"。
 4. **成本与可靠性**：情绪/提取蒸馏成本地轻量模型，回复路径固定为单次 LLM 调用，
    所有 LLM 调用点有降级方案。
-5. **认知研究**：空间-时间检索（location 过滤）已落地；继续完善物品事件溯源、
-   遗忘曲线校准、纠错调查可靠性评测。
+5. **认知研究**：空间-时间检索（location 过滤）与平面图几何层（面积/质心/实际路程）已落地；
+   继续完善遗忘曲线校准（情绪锚定已接入）、纠错调查可靠性评测、情绪寻址复核的长期效果。
 6. **SDK 化**：把记忆内核独立成可安装、可测试、多后端的包，接入更多平台。
 
 ## License
