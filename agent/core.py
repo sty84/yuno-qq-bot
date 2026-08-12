@@ -10,7 +10,9 @@ from agent import persona
 _TIME_Q_RE = re.compile(
     r"^\s*(?:现在|目前|当前|今天)?\s*(?:是)?\s*(?:几点了?|几点钟|什么时间|几号|星期几|周几|日期|几点)\s*[？?]?\s*$"
 )
-_MEMORY_GAP_RE = re.compile(r"不记得|记不清|想不起来|没印象|忘记了|不太记得")
+_MEMORY_GAP_RE = re.compile(r"不记得|记不清|想不起来|没印象|忘记了|不太记得|什么事|怎么了|咋了|啥|嗯？|嗯\?|啊？")
+_LAST_BOT_CLAIM_RE = re.compile(r"约好|约定|答应|说好|约了")
+_APPT_TOPIC_RE = re.compile(r"约定|答应|约好|说好|约了|约的|见面|放鸽子")
 
 # 历史里任何具体钟点（"凌晨两点十四""快两点半""在想两点十四分的事"）
 # 都不能当现行时间用——但"说好晚上8点见"这类约定陈述要保留
@@ -243,13 +245,43 @@ def ask(
             "必须严格以【时间参考】里的时间逐字为准，"
             "禁止参考历史对话或记忆里的时间，禁止编造其他时间。"
         )
-    if _MEMORY_GAP_RE.search(text or ""):
-        # 记忆缺口（v2.3 修复 P0-1 生成层）：用户不记得时如实承认，禁止编造约定/细节/未来承诺
+    _t_trim = (text or "").strip()
+    _last_bot = ""
+    for _m in reversed(history or []):
+        if _m.get("role") == "assistant":
+            _last_bot = str(_m.get("content") or "")
+            break
+    _gap = bool(
+        _MEMORY_GAP_RE.search(_t_trim)
+        or (len(_t_trim) <= 6 and re.search(r"什么", _t_trim))
+    )
+    if _gap:
+        # 记忆缺口（v2.3 修复 P0-1 生成层）：用户不记得/困惑时如实承认，禁止编造约定/细节/未来承诺
         ctx_parts.append(
             "【记忆缺口·硬性要求】用户明确表示不记得/记忆缺失。如实承认不确定："
             "可以基于已有记忆温和提示，但禁止编造任何约定、具体细节、未来承诺或人物关系；"
             "查不到就明说'我也不太确定/我这边没有这个记录'，绝不把推测说成事实。"
         )
+    _confirm_words = ("好的", "好呀", "好啊", "行", "嗯好", "可以", "没问题", "当然", "OK", "ok")
+    _is_confirm = any(w in _t_trim for w in _confirm_words)
+    if _LAST_BOT_CLAIM_RE.search(_last_bot) and not _is_confirm:
+        # 上文 bot 声称过"约好/答应"：除非约定表/记忆里有对应记录，否则不得继续坚持
+        ctx_parts.append(
+            "【约定核验·硬性要求】你上一条提到了'约好/答应'之类。先核验记忆库/约定表："
+            "有对应记录才可继续提；查不到就明确收回（'我好像记岔了，这边没有这个约定'），"
+            "禁止把推测的约定说成既成事实。"
+        )
+    if _APPT_TOPIC_RE.search(_t_trim):
+        # 约定验证前置（最硬机制）：声称"约好的事"之前先检索，无记录禁止提
+        try:
+            from memory import appointment as appt_mod
+            if scopes and not appt_mod.context_block(scopes[0]):
+                ctx_parts.append(
+                    "【约定验证·硬性要求】已检索：该用户的约定表/记忆里没有任何约定记录。"
+                    "禁止声称'约好的事/你答应过/说好要…'，如实说'我这边没查到相关约定'。"
+                )
+        except Exception as e:
+            _stats_err(e)
     ctx_parts.append(_presence_text())
     scene = _scene_text(scopes)
     if scene:

@@ -638,10 +638,26 @@ def test_all_features():
     _orig_ask = _shared.ask_deepseek
     _shared.ask_deepseek = _fake_llm
     try:
-        agent.ask("我不记得了", scopes=["c2c:gap"], learn=False)
+        def _cap_ctx(text, history=None):
+            captured_ask["ctx"] = ""
+            agent.ask(text, history=history, scopes=["c2c:gap"], learn=False)
+            return captured_ask.get("ctx", "")
+
+        check("memory-gap-guard", "记忆缺口" in _cap_ctx("我不记得了"), _cap_ctx("我不记得了")[:80])
+        # 守卫触发扩展：疑问式回应（什么事 / 短"什么"）
+        check("gap-what-thing", "记忆缺口" in _cap_ctx("什么事"), _cap_ctx("什么事")[:80])
+        check("gap-short-what", "记忆缺口" in _cap_ctx("什么？"), _cap_ctx("什么？")[:80])
+        # 上文 bot 声明约定：用户困惑→核验守卫；用户确认→不触发
+        claim_hist = [
+            {"role": "user", "content": "我们聊到哪了"},
+            {"role": "assistant", "content": "对了，我们约好明天见面吧"},
+        ]
+        check("claim-guard-fired", "约定核验" in _cap_ctx("嗯？", claim_hist), _cap_ctx("嗯？", claim_hist)[:80])
+        check("claim-guard-confirm", "约定核验" not in _cap_ctx("嗯好", claim_hist), _cap_ctx("嗯好", claim_hist)[:80])
+        # 约定验证前置：无约定记录时禁止声称"约好的事"
+        check("appt-verify", "约定验证" in _cap_ctx("我们约了什么"), _cap_ctx("我们约了什么")[:80])
     finally:
         _shared.ask_deepseek = _orig_ask
-    check("memory-gap-guard", "记忆缺口" in captured_ask.get("ctx", ""), captured_ask.get("ctx", "")[:80])
     # 3) 评测集过滤：寒暄/短陈述剔除，真问题保留（P2-2）
     check(
         "probe-filter",
