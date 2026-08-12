@@ -1,4 +1,5 @@
 {
+  "lazy_label": "懒得动",
   "lazy_factor": 1.0,
   "emotion_baseline": {"v": 0.0, "a": 0.0, "d": 0.0},
   "sharing_threshold": 0.5,

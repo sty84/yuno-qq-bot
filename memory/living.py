@@ -4,7 +4,7 @@
 - 物品：存在 kv（SQLite 落盘），"装在箱子里"——上下文只注入房间和目光所及，
   箱子里有什么要查询才展开（lookup）；
 - 操作：拿/用（数量-1）、用户送（新增或累加）、移动（换容器）、查（find/lookup）；
-- 距离感：不是固定时间——基准分钟 × 交通方式系数 × 天气修正 × 由乃的懒系数 ×
+    - 距离感：不是固定时间——基准分钟 × 交通方式系数 × 天气修正 × 角色的懒系数 ×
   情绪唤醒修正 × 当日种子抖动（同一天答案稳定，不同天/天气会变）；
 - 联动：物品事件 → ai:experience 记忆 + 分享欲；梦境素材混入物品名。
 """
@@ -24,7 +24,7 @@ HOME_LAYOUT_DEFAULT = {
     "厨房": {"furniture": ["冰箱", "零食柜", "料理台"]},
 }
 
-# 场所 → 各交通方式基准分钟 + 默认方式（基准是"健康成人"时间，最后会乘由乃系数）
+# 场所 → 各交通方式基准分钟 + 默认方式（基准是"健康成人"时间，最后会乘角色懒系数）
 PLACES_DEFAULT = {
     "便利店": {"walk_min": 10, "bike_min": 5, "transit_min": 15, "drive_min": 6, "default_mode": "walk"},
     "公园": {"walk_min": 20, "bike_min": 9, "transit_min": 18, "drive_min": 12, "default_mode": "walk"},
@@ -725,7 +725,7 @@ _WORLD_PROMPT = (
     "你是{name}家里的世界状态解析器。根据用户这句话，判断世界发生了什么变化，"
     "只输出 JSON：{\"ops\":[{\"type\":\"take|give|consume|move|device\",\"item\":\"物品名\",\"qty\":1,"
     "\"room\":\"房间\",\"container\":\"容器\",\"device\":\"设备名\",\"state\":\"状态\"}]}。"
-    "type 含义：take=由乃拿取；give=用户送东西给由乃；consume=物品被消耗（用户喝/吃了）；"
+    "type 含义：take=角色拿取；give=用户送东西给角色；consume=物品被消耗（用户喝/吃了）；"
     "move=物品移动；device=设备状态变化。没有变化就输出 {\"ops\":[]}。不要输出任何其他文字。"
 )
 _WORLD_KEYWORDS = ("拿", "喝", "吃", "买", "放", "扔", "开", "关", "冰箱", "床头柜", "零食柜", "储物箱",
@@ -1066,7 +1066,7 @@ def random_flavor() -> str:
 
 # ===== 动态距离感 =====
 def travel_time(place, mode=None, now=None) -> dict:
-    """到某处的耗时：基准 × 交通方式 × 天气 × 由乃懒系数 × 情绪 × 当日种子抖动。"""
+    """到某处的耗时：基准 × 交通方式 × 天气 × 角色懒系数 × 情绪 × 当日种子抖动。"""
     now = now or datetime.now()
     pts = places()
     if place not in pts:
@@ -1096,7 +1096,8 @@ def travel_time(place, mode=None, now=None) -> dict:
     if mode in ("walk", "bike"):
         lazy = float(_pack_behavior().get("lazy_factor", _cfg("lazy_factor", 1.15)))
         mult *= lazy
-        factors.append("由乃懒得动")
+        # 因素标签收进 pack（lazy_label），换人设不显示错误名字
+        factors.append(str(_pack_behavior().get("lazy_label", _cfg("lazy_label", "懒得动"))))
         try:
             from memory import emotion as emotion_mod
             st = emotion_mod.ai_state()

@@ -5,6 +5,7 @@
 说明：openai 用 stub 替代（不联网、不依赖 LLM）；数据全部走临时目录。
 """
 
+import io
 import json
 import os
 import sys
@@ -506,6 +507,12 @@ def test_all_features():
         ab_res.get("matrix"),
     )
     check("ablation-restore", core_after == core_before)
+
+    # ---- lazy_label 收进 pack（去人设残留）----
+    tr = living.travel_time("排练室", mode="walk", now=datetime.now())
+    check("lazy-label-pack", "由乃懒得动" in (tr.get("factors") or []), tr.get("factors"))
+    _liv = io.open(os.path.join(repo, "memory", "living.py"), encoding="utf-8").read()
+    check("lazy-label-no-hardcode", "由乃" not in _liv)
 
     # ---- 议题情绪打通（topic mood ↔ VAD，v2.2+）----
     from memory import topic as topic_mod
