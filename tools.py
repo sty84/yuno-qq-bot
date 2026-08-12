@@ -769,6 +769,18 @@ def cmd_policy_classify() -> str:
     return json.dumps(policy.classify_report(), ensure_ascii=False, indent=2)
 
 
+def cmd_revive_status(scope: str = "") -> str:
+    """主动消息决策状态：泊松概率 + 贝叶斯用户状态（只读，不消费触发）。"""
+    from memory import revive
+    return json.dumps(revive.peek(scope or None), ensure_ascii=False, indent=2)
+
+
+def cmd_bandit_status(scope: str = "") -> str:
+    """回应策略 bandit 后验：各策略均值/样本数 + 上次选择。"""
+    from memory import bandit
+    return json.dumps(bandit.status(scope), ensure_ascii=False, indent=2)
+
+
 def cmd_persona_smoke() -> str:
     """Persona Pack 冒烟：加载校验 + 房间图连通 + 模板渲染 + 代码硬编码扫描。"""
     from agent import persona as persona_mod
@@ -1282,6 +1294,14 @@ def main() -> int:
 
     p = sub.add_parser("policy-classify", help="事实分类探针：含关键词但其实是过程/指令的句子误判率")
     p.set_defaults(func=lambda a: print(cmd_policy_classify()) or 0)
+
+    p = sub.add_parser("revive-status", help="主动消息决策：泊松概率 + 贝叶斯用户状态（只读）")
+    p.add_argument("--scope", default="", help="用户 scope（如 c2c:xxx / group:xxx）")
+    p.set_defaults(func=lambda a: print(cmd_revive_status(a.scope)) or 0)
+
+    p = sub.add_parser("bandit-status", help="回应策略 bandit 后验：各策略均值 + 上次选择")
+    p.add_argument("--scope", default="", help="用户 scope")
+    p.set_defaults(func=lambda a: print(cmd_bandit_status(a.scope)) or 0)
 
     p = sub.add_parser("persona-smoke", help="Persona Pack 冒烟：加载校验 + 房间连通 + 模板渲染 + 硬编码扫描")
     p.set_defaults(func=lambda a: print(cmd_persona_smoke()) or 0)

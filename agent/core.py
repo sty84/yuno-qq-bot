@@ -180,6 +180,14 @@ def ask(
     except Exception as e:
         _stats_err(e)
         pass
+    try:
+        # bandit（v2.2+）：用本次消息的情绪/反馈给"上一条回复用的策略"打奖励
+        from memory import bandit as bandit_mod
+        if scopes:
+            bandit_mod.update(scopes[0], bandit_mod.reward_from_message(text, meta["analysis"]))
+    except Exception as e:
+        _stats_err(e)
+        pass
     ctx_parts = []
     try:
         from memory import sleep as sleep_mod
@@ -348,6 +356,17 @@ def ask(
             if s := mind_mod.block(scopes[0], text):
                 ctx_parts.append(s)
             mind_mod.recompute_intention(scopes[0])
+        except Exception as e:
+            _stats_err(e)
+            pass
+    if scopes:
+        try:
+            # bandit（v2.2+）：Thompson 采样选回应策略，注入提示
+            from memory import bandit as bandit_mod
+            if bandit_mod._cfg("enabled", True):
+                st = bandit_mod.select(scopes[0])
+                meta["bandit"] = {"id": st["id"], "label": st["label"], "mean": st.get("mean")}
+                ctx_parts.append(f"【回应策略】{st['label']}：{st['hint']}")
         except Exception as e:
             _stats_err(e)
             pass

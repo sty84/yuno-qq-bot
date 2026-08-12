@@ -66,6 +66,15 @@ async def random_event_loop(make_ctx):
         ctx = make_ctx()
         if not target or ctx.api is None:
             continue
+        # revive-companion（v2.2+）：泊松触发 + 贝叶斯状态门控，决定"现在该不该发"
+        try:
+            from memory import revive as revive_mod
+            decision = revive_mod.decide(scope="group:" + target)
+        except Exception as e:
+            _stats_err(e)
+            decision = {"fire": True}
+        if not decision.get("fire"):
+            continue  # 冷却/睡眠/忙碌/泊松未命中 → 本轮不发，等下一轮探测
         try:
             prompt = (
                 f"你现在是{_persona_name()}，当前心情「{_shared.state.get('mood', '慵懒')}」。"

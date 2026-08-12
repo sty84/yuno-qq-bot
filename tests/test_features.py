@@ -441,6 +441,56 @@ def test_all_features():
     ea_hits = reasoning.retrieve("zzzzqwerty不存在的词", ["c2c:ea"], min_score=0.0)
     check("emotion-address", any("阳台哭" in f for f, _s, _sc in ea_hits), ea_hits[:2])
 
+    # ---- revive-companion：泊松触发 + 贝叶斯用户状态（v2.2+）----
+    from memory import revive as revive_mod
+    post_r = revive_mod.state_posterior()
+    check(
+        "revive-posterior",
+        abs(sum(post_r.values()) - 1.0) < 0.05
+        and set(post_r) == {"active", "busy", "asleep", "need_care"},
+        post_r,
+    )
+    now_ts = datetime.now().timestamp()
+    check(
+        "revive-poisson",
+        revive_mod.poisson_p(now_ts, 2.0) < 0.01
+        and revive_mod.poisson_p(now_ts - 86400, 2.0) > 0.8,
+        (revive_mod.poisson_p(now_ts, 2.0), revive_mod.poisson_p(now_ts - 86400, 2.0)),
+    )
+    dr1 = revive_mod.decide(force=True)
+    dr2 = revive_mod.decide(force=True)
+    check(
+        "revive-cooldown",
+        dr1.get("fire") is True and dr2.get("fire") is False and dr2.get("reason") == "冷却中",
+        (dr1, dr2),
+    )
+    rp = revive_mod.peek()
+    check("revive-peek", "would_fire" in rp and "state_zh" in rp, rp)
+
+    # ---- cognitive-engine bandit：Thompson 采样 + 奖励更新（v2.2+）----
+    from memory import bandit as bandit_mod
+    st_b = bandit_mod.select("c2c:b")
+    check(
+        "bandit-select",
+        st_b["id"] in {s["id"] for s in bandit_mod.STRATEGIES} and "hint" in st_b,
+        st_b,
+    )
+    up_b = bandit_mod.update("c2c:b", 1.0)
+    check(
+        "bandit-update",
+        up_b.get("updated") is True and up_b.get("strategy") == st_b["id"] and up_b.get("reward") == 1.0,
+        up_b,
+    )
+    post_b = bandit_mod._posterior("c2c:b")
+    check("bandit-alpha", post_b[st_b["id"]]["alpha"] > post_b[st_b["id"]]["beta"], post_b[st_b["id"]])
+    check(
+        "bandit-reward",
+        bandit_mod.reward_from_message("谢谢帮大忙了") == 1.0
+        and bandit_mod.reward_from_message("别烦我") == 0.0,
+    )
+    bs = bandit_mod.status("c2c:b")
+    check("bandit-status", bs.get("last") == st_b["id"] and len(bs.get("strategies")) == 5, bs)
+
     # ---- 议题情绪打通（topic mood ↔ VAD，v2.2+）----
     from memory import topic as topic_mod
     tid1 = topic_mod.link_fact(
