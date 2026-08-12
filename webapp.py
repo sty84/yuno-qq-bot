@@ -465,6 +465,22 @@ def revive_status(scope: str = ""):
     return revive.peek(scope or None)
 
 
+@app.get("/api/policy-classify")
+def policy_classify():
+    """事实分类探针：含关键词但其实是过程/指令的句子误判率。"""
+    from memory import policy
+    return policy.classify_report()
+
+
+@app.get("/api/consistency")
+def consistency():
+    """双轨制一致性：失效队列长度 + 本次重算数（与 CLI 同口径，幂等）。"""
+    pending = len(_db.invalidation_rows(100))
+    from memory import controller
+    done = controller.reconcile_pending()
+    return {"pending": pending, "reconciled": done.get("reconciled", 0)}
+
+
 @app.get("/")
 def index():
     return FileResponse(STATIC_DIR / "index.html")

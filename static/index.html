@@ -42,20 +42,27 @@
              padding: 12px 14px; margin: 10px 0; }
     .tag { display: inline-block; background: #1e293b; border-radius: 6px; padding: 2px 8px;
            font-size: 12px; margin: 2px; }
+    .tabsep { display: flex; align-items: center; padding: 8px 12px; color: #64748b;
+              font-size: 12px; letter-spacing: 1px; user-select: none; }
+    .sect-line { border-top: 1px solid #1e293b; margin: 12px 0 8px; }
   </style>
 </head>
 <body>
   <h1>Yuno Ops Web · 评测管理台 <span class="muted">(v0.2 MVP)</span></h1>
   <div class="tabs" id="tabs">
     <div class="tab active" data-page="dash">总览</div>
+    <div class="tabsep">评测</div>
     <div class="tab" data-page="mem">检索评测</div>
     <div class="tab" data-page="space">空间评测</div>
     <div class="tab" data-page="time">时间评测</div>
     <div class="tab" data-page="emotion">情绪评测</div>
+    <div class="tab" data-page="subjects">多主体评测</div>
+    <div class="tabsep">实验</div>
+    <div class="tab" data-page="ablation">消融实验</div>
+    <div class="tab" data-page="scenario">对话回放</div>
+    <div class="tabsep">分析</div>
     <div class="tab" data-page="diag">数据与诊断</div>
     <div class="tab" data-page="charts">图表分析</div>
-    <div class="tab" data-page="scenario">对话回放</div>
-    <div class="tab" data-page="ablation">消融实验</div>
   </div>
 
   <div class="page active" id="page-dash">
@@ -92,14 +99,28 @@
   <div class="page" id="page-emotion">
     <button onclick="runTask('emotion_eval','情绪评测')">运行情绪评测</button>
     <div class="cards" id="emotion-cards"></div>
+    <div class="cards" id="emotion-topic"></div>
+    <div id="emotion-drift" style="margin: 8px 0;"></div>
     <div class="chart" id="emotion-chart"></div>
     <pre id="emotion-raw" style="display:none"></pre>
+  </div>
+
+  <div class="page" id="page-subjects">
+    <button onclick="runTask('subjects_eval','多主体评测')">运行多主体评测</button>
+    <div class="cards" id="subjects-cards"></div>
+    <div class="cards" id="subjects-decay"></div>
+    <pre id="subjects-raw" style="display:none"></pre>
   </div>
 
   <div class="page" id="page-diag">
     <div class="cards" id="diag-counts"></div>
     <div class="cards" id="diag-review"></div>
     <div class="cards" id="diag-proc"></div>
+    <div class="sect-line"></div>
+    <h3 class="sect">事实分类探针</h3>
+    <div class="cards" id="diag-classify"></div>
+    <h3 class="sect">双轨制一致性</h3>
+    <div class="cards" id="diag-consistency"></div>
     <div class="chart" id="diag-route"></div>
     <pre id="diag-cal" style="display:none"></pre>
     <h2 style="margin-top:14px;font-size:15px">实验日志（回归门禁）</h2>
@@ -163,6 +184,7 @@
       if (t.dataset.page === 'charts') renderCharts();
       if (t.dataset.page === 'scenario') loadScenarios();
       if (t.dataset.page === 'ablation') loadAblation();
+      if (t.dataset.page === 'subjects') renderSubjects();
     });
 
     async function api(path, opts) {
@@ -271,6 +293,14 @@
         + card('样本数', b.n)
         + card('复合情绪准确率', b.compound_accuracy, '样本 ' + fmt(b.compound_n))
         + card('情绪日志(7天)', d.emotion_log_count);
+      const tm = b.topic_mood || {};
+      $('emotion-topic').innerHTML = card('议题 mood 一致性', tm.write_consistency, '写入 ' + fmt(tm.write_n))
+        + card('质心合理性', tm.centroid_consistency, '议题 ' + fmt(tm.centroid_n))
+        + card('复合情绪议题', tm.compound_topics, '不坍缩');
+      const drift = tm.vad_table_drift || {};
+      $('emotion-drift').innerHTML = Object.keys(drift).length
+        ? '<div class="red">⚠ 跨表 VAD 漂移：' + Object.keys(drift).join('、') + '（analysis.EMOTION_METRICS vs emotion.LABEL_VAD）</div>'
+        : '<div class="muted">跨表 VAD 漂移：无（单一事实源）</div>';
       $('emotion-raw').style.display = 'block';
       $('emotion-raw').textContent = JSON.stringify(b, null, 2);
       const cats = b.by_category || {};
@@ -282,6 +312,21 @@
         yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
         series: [{ type: 'bar', data: Object.values(cats).map(x => x.accuracy), itemStyle: { color: '#a78bfa' } }],
       });
+    }
+
+    async function renderSubjects() {
+      const b = ((await api('/api/dashboard')).baselines || {}).subjects_eval || {};
+      $('subjects-cards').innerHTML = card('主体数', b.subjects)
+        + card('写入率', b.write_rate, '写入 ' + fmt(b.write_ok))
+        + card('隐私率', b.privacy_rate, '泄漏 ' + fmt(b.privacy_leak))
+        + card('NPC 记忆', b.npc_memories)
+        + card('对话引用', b.reference_ok);
+      const d = b.decay || {};
+      $('subjects-decay').innerHTML = card('cap 合规率', d.cap_rate, 'n ' + fmt(d.n))
+        + card('来源上限率', d.source_ceiling_rate)
+        + card('衰减合规率', d.decay_rate, '样本 ' + fmt(d.decay_eligible));
+      $('subjects-raw').style.display = 'block';
+      $('subjects-raw').textContent = JSON.stringify(b, null, 2);
     }
 
     async function renderDiag() {
@@ -298,6 +343,19 @@
       const pr = d.procedures || {};
       $('diag-proc').innerHTML = card('程序记忆', pr.count) + card('System1 就绪', pr.system1_ready)
         + card('平均成功率', pr.avg_success);
+      try {
+        const cl = await api('/api/policy-classify');
+        $('diag-classify').innerHTML = card('分类准确率', cl.accuracy, '样本 ' + fmt(cl.total))
+          + card('误判数', (cl.errors || []).length);
+        $('diag-classify').innerHTML += (cl.errors && cl.errors.length)
+          ? '<div class="red">误判：' + cl.errors.map(e => escapeHtml(e.text) + '(' + e.got + ')').join(' / ') + '</div>'
+          : '<div class="muted">含关键词但实为过程/指令的句子探针全部正确</div>';
+      } catch (e) { $('diag-classify').innerHTML = '<div class="muted">分类探针加载失败：' + escapeHtml(e.message) + '</div>'; }
+      try {
+        const cs = await api('/api/consistency');
+        $('diag-consistency').innerHTML = card('待处理冲突', cs.pending)
+          + card('本次重算', cs.reconciled);
+      } catch (e) { $('diag-consistency').innerHTML = '<div class="muted">一致性加载失败：' + escapeHtml(e.message) + '</div>'; }
       const rs = d.route_stats || {};
       const algos = Object.keys(rs).filter(k => rs[k].trials > 0);
       const chart = echarts.init($('diag-route'));
