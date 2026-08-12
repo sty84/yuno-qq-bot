@@ -57,8 +57,6 @@ def _load_persona() -> str:
     return DEFAULT_SYSTEM_PROMPT
 
 
-BASE_SYSTEM_PROMPT = _load_persona()
-
 # ===== 配置 =====
 CONFIG_PATH = os.getenv(
     "CONFIG_PATH",
@@ -76,6 +74,7 @@ def load_config():
 
 
 CONFIG = load_config()
+BASE_SYSTEM_PROMPT = _load_persona()  # 必须在 CONFIG 定义之后（读取 persona_pack 需要 CONFIG）
 try:
     _config_mtime = os.path.getmtime(CONFIG_PATH)
 except OSError:
@@ -96,8 +95,9 @@ def save_config():
 
 def reload_config():
     """配置被 root 脚本修改后，重新加载到内存。"""
-    global CONFIG
+    global CONFIG, BASE_SYSTEM_PROMPT
     CONFIG = load_config()
+    BASE_SYSTEM_PROMPT = _load_persona()  # 切 pack 后刷新人设（bot 后台循环 reload 生效）
     _sync_config_deps()
     try:
         from memory import pack

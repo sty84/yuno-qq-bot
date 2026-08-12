@@ -204,9 +204,16 @@ def parse_persona(text):
 
 
 def sync_identity() -> str:
-    """把 persona.md（单一来源）拆成结构化字段同步进统一记忆库（scope='ai'）。
+    """把 Persona Pack 的 persona.md（单一来源）拆成结构化字段同步进统一记忆库（scope='ai'）。
     每条字段向量化 + 事件图 + 议题化；不清除对话沉淀的 experience / belief。"""
-    text = (_shared.BASE_SYSTEM_PROMPT or "").strip()
+    text = ""
+    try:
+        from memory import pack
+        text = (pack.persona_text() or "").strip()
+    except Exception:
+        pass
+    if not text:
+        text = (_shared.BASE_SYSTEM_PROMPT or "").strip()
     if not text:
         return ""
     fields = parse_persona(text)
