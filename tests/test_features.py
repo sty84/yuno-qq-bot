@@ -491,6 +491,22 @@ def test_all_features():
     bs = bandit_mod.status("c2c:b")
     check("bandit-status", bs.get("last") == st_b["id"] and len(bs.get("strategies")) == 5, bs)
 
+    # ---- 消融矩阵：独立基线 + config 恢复（v2.2+）----
+    import tools as tools_mod
+    ab_probes = [
+        {"query": "上周三买了只猫", "expected": ["上周三买了只猫"], "scope": "c2c:ab"},
+        {"query": "白巧克力", "expected": ["白巧克力"], "scope": "c2c:t"},
+    ]
+    core_before = json.dumps(_shared.CONFIG["memory"]["core"], ensure_ascii=False, sort_keys=True)
+    ab_res = tools_mod.run_ablation(ab_probes, names=["off_lexical", "off_graph"])
+    core_after = json.dumps(_shared.CONFIG["memory"]["core"], ensure_ascii=False, sort_keys=True)
+    check(
+        "ablation-matrix",
+        len(ab_res.get("matrix") or []) == 3 and "delta" in ab_res["matrix"][1],
+        ab_res.get("matrix"),
+    )
+    check("ablation-restore", core_after == core_before)
+
     # ---- 议题情绪打通（topic mood ↔ VAD，v2.2+）----
     from memory import topic as topic_mod
     tid1 = topic_mod.link_fact(

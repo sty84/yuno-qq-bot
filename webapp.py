@@ -174,6 +174,11 @@ def _task_fn(kind):
             import memory
             probes = _emotion_probes()
             res = memory.emotion_eval(probes)
+            try:
+                from memory import topic as topic_mod
+                res["topic_mood"] = topic_mod.mood_eval()
+            except Exception:
+                pass
             _db.kv_set("memory", "emotion_baseline", res)
             return res
     elif kind == "subjects_eval":
@@ -216,6 +221,15 @@ class ScoreRequest(BaseModel):
     scores: dict = {}
     comment: str = ""
     mode: str = "manual"
+
+
+class AblationToggle(BaseModel):
+    switch: str
+    value: bool = True
+
+
+class AblationRun(BaseModel):
+    switches: list = []
 
 
 @app.get("/api/health")
@@ -411,6 +425,44 @@ def save_score(req: ScoreRequest):
 def scenario_scores(limit: int = 100):
     """已保存的五维评分历史（人工 + LLM）。"""
     return _db.scenario_score_rows(limit)
+
+
+@app.get("/api/ablation/state")
+def ablation_state():
+    """消融开关当前状态（热插拔面板）。"""
+    from tools import ablation_state as _state
+    return _state()
+
+
+@app.post("/api/ablation/toggle")
+def ablation_toggle(req: AblationToggle):
+    """热插拔开关：改 config 并落盘（bot 进程 reload_if_changed 生效）。"""
+    from tools import apply_switch
+    return apply_switch(req.switch, req.value)
+
+
+@app.post("/api/ablation/run")
+def ablation_run(req: AblationRun):
+    """按选定开关跑消融矩阵（异步任务）。"""
+    def fn():
+        from tools import run_ablation
+        probes = _load_probes()
+        return run_ablation(probes, names=req.switches or None)
+    return {"task_id": submit("ablation", fn)}
+
+
+@app.get("/api/bandit")
+def bandit_status(scope: str = ""):
+    """回应策略 bandit 后验。"""
+    from memory import bandit
+    return bandit.status(scope)
+
+
+@app.get("/api/revive")
+def revive_status(scope: str = ""):
+    """主动消息决策状态（泊松 + 贝叶斯，只读）。"""
+    from memory import revive
+    return revive.peek(scope or None)
 
 
 @app.get("/")

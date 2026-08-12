@@ -31,6 +31,17 @@
     th { background: #1e293b; }
     .chart { width: 100%; height: 300px; margin-top: 10px; }
     .muted { color: #64748b; font-size: 12px; }
+    .sw { display: inline-flex; align-items: center; gap: 6px; background: #1e293b;
+          border: 1px solid #334155; border-radius: 8px; padding: 6px 12px; margin: 4px;
+          cursor: pointer; user-select: none; font-size: 13px; }
+    .sw input { accent-color: #3b82f6; width: 16px; height: 16px; cursor: pointer; }
+    .sw.off { opacity: 0.55; }
+    h3.sect { margin: 14px 0 6px; font-size: 15px; color: #e2e8f0; }
+    table tr:nth-child(even) { background: #16213a; }
+    .panel { background: #111c33; border: 1px solid #1e293b; border-radius: 10px;
+             padding: 12px 14px; margin: 10px 0; }
+    .tag { display: inline-block; background: #1e293b; border-radius: 6px; padding: 2px 8px;
+           font-size: 12px; margin: 2px; }
   </style>
 </head>
 <body>
@@ -44,6 +55,7 @@
     <div class="tab" data-page="diag">数据与诊断</div>
     <div class="tab" data-page="charts">图表分析</div>
     <div class="tab" data-page="scenario">对话回放</div>
+    <div class="tab" data-page="ablation">消融实验</div>
   </div>
 
   <div class="page active" id="page-dash">
@@ -101,6 +113,12 @@
     <div class="muted">图 1 基线趋势：每次跑评测自动记录一点，横轴是时间，纵轴是各指标值（recall@5 / where_acc / window_recall / 情绪 accuracy），断点表示该指标当时没跑。</div>
     <div class="chart" id="compare-chart"></div>
     <div class="muted">图 2 最新 vs 历史平均：看当前基线是高于还是低于自己过去的表现，红色差距大的地方就是需要重点观察的指标。</div>
+    <h3 class="sect">回应策略 bandit 后验</h3>
+    <div class="chart" id="bandit-chart"></div>
+    <div class="muted">图 3 每个回应策略（共情/方案/玩梗/倾听/转移）当前的 Beta 均值——bandit 在用它学"哪种哄法对当前用户有效"，均值越高越常被选中。</div>
+    <h3 class="sect">主动消息决策状态</h3>
+    <div class="chart" id="revive-chart"></div>
+    <div class="muted">图 4 贝叶斯推断的用户状态后验（活跃/忙/睡/需要关心）+ 泊松触发概率；睡眠/忙碌时不会主动发消息。</div>
   </div>
 
   <div class="page" id="page-scenario">
@@ -120,6 +138,18 @@
     </div>
     <h3 style="margin-top: 18px;">评分历史</h3>
     <div id="scenario-scores"></div>
+    <h3 class="sect">五维评分对比（人工 vs 机器分）</h3>
+    <div class="chart" id="scenario-radar" style="height:280px"></div>
+  </div>
+
+  <div class="page" id="page-ablation">
+    <h3 class="sect">消融实验 · 热插拔开关</h3>
+    <div class="muted">开关实时修改 config 并落盘：立即影响本管理台的评测；bot 进程通过后台循环的 reload_if_changed 自动生效（无需重启）。"运行消融"用同一套 probes 逐个关掉机制，看每个机制的贡献。</div>
+    <div class="panel" id="ablation-switches"></div>
+    <button id="btn-ablation" onclick="runAblation()">运行消融（全部开关 × probes）</button>
+    <div class="cards" id="ablation-cards"></div>
+    <div id="ablation-table"></div>
+    <div class="chart" id="ablation-chart"></div>
   </div>
 
   <script>
@@ -132,6 +162,7 @@
       if (t.dataset.page === 'diag') renderDiag();
       if (t.dataset.page === 'charts') renderCharts();
       if (t.dataset.page === 'scenario') loadScenarios();
+      if (t.dataset.page === 'ablation') loadAblation();
     });
 
     async function api(path, opts) {
@@ -338,6 +369,28 @@
           { name: '历史平均', type: 'bar', data: keys.map(k => avg[k] != null ? avg[k] : null), itemStyle: { color: '#64748b' } },
         ],
       });
+      try {
+        const b = await api('/api/bandit');
+        const bchart = echarts.init($('bandit-chart'));
+        bchart.setOption({
+          tooltip: {}, grid: { left: 45, right: 20, bottom: 70 },
+          xAxis: { type: 'category', data: (b.strategies || []).map(s => s.label), axisLabel: { color: '#94a3b8', interval: 0, rotate: 20, fontSize: 10 } },
+          yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+          series: [{ type: 'bar', data: (b.strategies || []).map(s => s.mean), itemStyle: { color: '#a78bfa' },
+                     label: { show: true, position: 'top', color: '#e2e8f0' } }],
+        });
+      } catch (e) { $('bandit-chart').innerHTML = '<div class="muted">bandit 数据加载失败：' + escapeHtml(e.message) + '</div>'; }
+      try {
+        const r = await api('/api/revive');
+        const rchart = echarts.init($('revive-chart'));
+        rchart.setOption({
+          tooltip: {}, grid: { left: 45, right: 20, bottom: 40 },
+          xAxis: { type: 'category', data: Object.keys(r.posterior || {}), axisLabel: { color: '#94a3b8' } },
+          yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+          series: [{ type: 'bar', data: Object.values(r.posterior || {}), itemStyle: { color: '#f59e0b' },
+                     label: { show: true, position: 'top', color: '#e2e8f0' } }],
+        });
+      } catch (e) { $('revive-chart').innerHTML = '<div class="muted">revive 数据加载失败：' + escapeHtml(e.message) + '</div>'; }
     }
 
     async function downloadExcel() {
@@ -412,6 +465,7 @@
         + card('LLM 机器分次数', llm.length, 'avg ' + fmt(avgOf(llm.map(r => r.avg))))
         + card('校准建议', manual.length ? '人工抽检比例 ' + (manual.length / Math.max(1, manual.length + llm.length) * 100).toFixed(0) + '%' : '多打几次人工分用于校准机器分');
       renderScenarioScores(rows);
+      renderScenarioRadar(rows);
     }
 
     async function replayScenario() {
@@ -506,6 +560,109 @@
       });
       html += '</table>';
       $('scenario-scores').innerHTML = html;
+    }
+
+    function renderScenarioRadar(rows) {
+      const dims = SCORE_DIMS.map(d => d[0]);
+      const labels = SCORE_DIMS.map(d => d[1].split(' ')[0]);
+      const avgOf = (arr, k) => arr.length ? arr.reduce((a, b) => a + (b.scores && b.scores[k] != null ? b.scores[k] : 0), 0) / arr.length : null;
+      const manual = (rows || []).filter(r => r.mode !== 'llm');
+      const llm = (rows || []).filter(r => r.mode === 'llm');
+      if (!manual.length && !llm.length) { $('scenario-radar').style.display = 'none'; return; }
+      $('scenario-radar').style.display = 'block';
+      const chart = echarts.init($('scenario-radar'));
+      chart.setOption({
+        tooltip: {},
+        legend: { data: ['人工', '机器分'], textStyle: { color: '#94a3b8' } },
+        radar: {
+          indicator: dims.map((d, i) => ({ name: labels[i], max: 5 })),
+          radius: '62%',
+          axisName: { color: '#94a3b8' },
+          splitLine: { lineStyle: { color: '#334155' } },
+          axisLine: { lineStyle: { color: '#334155' } },
+        },
+        series: [{
+          type: 'radar',
+          data: [
+            { value: dims.map(k => avgOf(manual, k)), name: '人工' },
+            { value: dims.map(k => avgOf(llm, k)), name: '机器分' },
+          ],
+        }],
+      });
+    }
+
+    // ===== 消融实验 · 热插拔开关 =====
+    const ABLATION_DEFS = [
+      ['vector', '向量检索'], ['graph', '图谱'], ['lexical', '词法'], ['time_window', '时间窗口'],
+      ['emotion', '情绪'], ['sharing', '分享'], ['space', '空间'], ['system1', 'System1'],
+      ['cognitive_turn', '认知循环'], ['mood_boost', '心境一致加权'], ['emotion_address', '情绪寻址复核'],
+      ['bandit', '回应策略 bandit'], ['revive', '泊松主动触发'],
+    ];
+
+    async function loadAblation() {
+      const st = await api('/api/ablation/state');
+      $('ablation-switches').innerHTML = ABLATION_DEFS.map(([k, label]) => {
+        const on = st[k] !== undefined ? !!st[k] : false;
+        return `<label class="sw ${on ? '' : 'off'}" title="当前：${on ? '开' : '关'}">
+          <input type="checkbox" data-sw="${k}" ${on ? 'checked' : ''} onchange="toggleSwitch('${k}', this.checked, this)">
+          <span>${label}</span></label>`;
+      }).join('');
+    }
+
+    async function toggleSwitch(k, v, el) {
+      try {
+        const r = await api('/api/ablation/toggle', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ switch: k, value: v }),
+        });
+        if (r.error) { alert(r.error); el.checked = !v; }
+        el.parentElement.classList.toggle('off', !v);
+      } catch (e) { alert('切换失败：' + e.message); el.checked = !v; }
+    }
+
+    async function runAblation() {
+      const btn = $('btn-ablation');
+      btn.disabled = true;
+      try {
+        const { task_id } = await api('/api/ablation/run', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ switches: [] }),
+        });
+        $('ablation-table').innerHTML = '<div class="muted">消融运行中…（每个开关跑一遍评测，需要几分钟）</div>';
+        await poll(task_id, renderAblation);
+      } catch (e) { alert('消融失败：' + e.message); }
+      btn.disabled = false;
+    }
+
+    function renderAblation(res) {
+      if (!res) return;
+      $('ablation-cards').innerHTML = card('基线 recall@5', res.baseline && res.baseline.recall)
+        + card('基线 MRR', res.baseline && res.baseline.mrr)
+        + card('基线 NDCG', res.baseline && res.baseline.ndcg)
+        + card('开关数', (res.matrix || []).length - 1, '每个 = 关掉该机制后的表现');
+      const rows = res.matrix || [];
+      let html = '<table><tr><th>开关</th><th>recall</th><th>MRR</th><th>NDCG</th><th>delta</th><th>回归</th></tr>';
+      rows.forEach(r => {
+        const dlt = r.delta ? Object.entries(r.delta).map(([k, v]) => k + '=' + fmt(v)).join(' ') : '—';
+        html += `<tr><td>${escapeHtml(r.switch)}${r.label ? '<br><span class="muted">' + escapeHtml(r.label) + '</span>' : ''}</td>
+          <td>${fmt(r.recall)}</td><td>${fmt(r.mrr)}</td><td>${fmt(r.ndcg)}</td>
+          <td>${dlt}</td><td class="${r.regression ? 'red' : ''}">${r.regression ? '⚠ 退化' : '正常'}</td></tr>`;
+      });
+      html += '</table>';
+      $('ablation-table').innerHTML = html;
+      const keys = ['recall', 'mrr', 'ndcg'];
+      const chart = echarts.init($('ablation-chart'));
+      chart.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { data: keys, textStyle: { color: '#94a3b8' } },
+        grid: { left: 45, right: 20, top: 40, bottom: 90 },
+        xAxis: { type: 'category', data: rows.map(r => r.switch), axisLabel: { color: '#94a3b8', rotate: 35, interval: 0, fontSize: 10 } },
+        yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+        series: keys.map((k, i) => ({
+          name: k, type: 'bar', data: rows.map(r => r[k]),
+          itemStyle: { color: ['#3b82f6', '#10b981', '#f59e0b'][i] },
+        })),
+      });
     }
 
     loadDash().catch(e => $('dash-cards').innerHTML = '<div class="red">加载失败：' + e.message + '</div>');

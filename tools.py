@@ -904,40 +904,107 @@ def cmd_floorplan_render(pack_name: str = "", out: str = "") -> str:
     )
 
 
-def cmd_ablation() -> str:
-    """机制消融：临时覆盖 config 单开关，同一套 probes 各跑一遍，输出贡献表 + 实验日志。"""
+def ablation_switches(core) -> dict:
+    """消融开关定义：name → (label, apply_fn)。apply_fn 作用于 memory.core。
+    每个开关独立作用于干净基线（run_ablation 逐个恢复），不再是累积式。"""
+    return {
+        "off_vector": ("关向量检索", lambda: core.setdefault("weights", {}).update({"vector": 0})),
+        "off_graph": ("关图谱", lambda: core.setdefault("weights", {}).update({"graph": 0})),
+        "off_lexical": ("关词法", lambda: core.setdefault("weights", {}).update({"lexical": 0})),
+        "off_time_window": ("关时间窗口", lambda: core.update({"ablation_disable_time": True})),
+        "off_emotion": ("关情绪", lambda: core.update({"emotion": {"enabled": False}})),
+        "off_sharing": ("关分享", lambda: core.update({"sharing": {"enabled": False}})),
+        "off_space": ("关空间", lambda: core.update({"space": {"enabled": False}})),
+        "off_system1": ("关 System1", lambda: core.setdefault("mind", {}).update({"system1": False})),
+        "on_cognitive": ("开认知循环", lambda: core.setdefault("mind", {}).update({"cognitive_turn": True})),
+        "off_mood_boost": ("关心境一致加权", lambda: core.update({"mood_boost": 0.0})),
+        "off_emotion_address": ("关情绪寻址复核", lambda: core.update({"emotion_address": False})),
+        "off_bandit": ("关回应策略 bandit", lambda: core.setdefault("bandit", {}).update({"enabled": False})),
+        "off_revive": ("关泊松主动触发", lambda: core.setdefault("revive", {}).update({"rate_per_day": 0})),
+    }
+
+
+def ablation_state() -> dict:
+    """当前开关状态（热插拔面板数据源）。"""
+    from plugins import _shared
+    core = (_shared.CONFIG.get("memory", {}).get("core", {}) or {})
+    w = core.get("weights") or {}
+    m = core.get("mind") or {}
+    return {
+        "vector": float(w.get("vector", 0.7)) > 0,
+        "graph": float(w.get("graph", 0.4)) > 0,
+        "lexical": float(w.get("lexical", 0.6)) > 0,
+        "time_window": not bool(core.get("ablation_disable_time", False)),
+        "emotion": bool((core.get("emotion") or {}).get("enabled", True)),
+        "sharing": bool((core.get("sharing") or {}).get("enabled", True)),
+        "space": bool((core.get("space") or {}).get("enabled", True)),
+        "system1": bool(m.get("system1", True)),
+        "cognitive_turn": bool(m.get("cognitive_turn", False)),
+        "mood_boost": float(core.get("mood_boost", 0.12)) > 0,
+        "emotion_address": bool(core.get("emotion_address", True)),
+        "bandit": bool((core.get("bandit") or {}).get("enabled", True)),
+        "revive": float((core.get("revive") or {}).get("rate_per_day", 2.0)) > 0,
+    }
+
+
+def apply_switch(name, value) -> dict:
+    """热插拔：改 config（内存 + 落盘），bot 进程由 reload_if_changed 生效。"""
+    from plugins import _shared
+    core = _shared.CONFIG.setdefault("memory", {}).setdefault("core", {})
+    v = bool(value)
+    setters = {
+        "vector": lambda: core.setdefault("weights", {}).update({"vector": 0.7 if v else 0}),
+        "graph": lambda: core.setdefault("weights", {}).update({"graph": 0.4 if v else 0}),
+        "lexical": lambda: core.setdefault("weights", {}).update({"lexical": 0.6 if v else 0}),
+        "time_window": lambda: core.update({"ablation_disable_time": not v}),
+        "emotion": lambda: core.update({"emotion": {"enabled": v}}),
+        "sharing": lambda: core.update({"sharing": {"enabled": v}}),
+        "space": lambda: core.update({"space": {"enabled": v}}),
+        "system1": lambda: core.setdefault("mind", {}).update({"system1": v}),
+        "cognitive_turn": lambda: core.setdefault("mind", {}).update({"cognitive_turn": v}),
+        "mood_boost": lambda: core.update({"mood_boost": 0.12 if v else 0.0}),
+        "emotion_address": lambda: core.update({"emotion_address": v}),
+        "bandit": lambda: core.setdefault("bandit", {}).update({"enabled": v}),
+        "revive": lambda: core.setdefault("revive", {}).update({"rate_per_day": 2.0 if v else 0}),
+    }
+    if name not in setters:
+        return {"error": f"未知开关：{name}"}
+    setters[name]()
+    try:
+        _shared.save_config()
+    except Exception as e:
+        return {"error": f"保存 config 失败：{e}"}
+    return {"switch": name, "value": v, "state": ablation_state()}
+
+
+def run_ablation(probes, names=None) -> dict:
+    """机制消融：每个开关独立作用于干净基线（逐个恢复），清空检索缓存防串数据。
+    返回 {"baseline", "matrix"}；与 webapp 共用，写实验日志。"""
     import copy
     import memory
-    _capability, _db, _shared = _plugins()
-    probes_path = _shared.DATA_DIR / "probes.json"
-    if not probes_path.exists():
-        return "评测集不存在（先 tools.py memory-probes 生成）"
-    probes = json.loads(probes_path.read_text(encoding="utf-8"))
+    from plugins import _db, _shared
     core = _shared.CONFIG.setdefault("memory", {}).setdefault("core", {})
-    saved_core = copy.deepcopy(core)
+    base = copy.deepcopy(core)
+    switches = ablation_switches(core)
+    names = [n for n in (names or list(switches.keys())) if n in switches]
 
     def _run():
         try:
+            # 关键：清空检索/时间缓存，避免不同开关状态拿到相同缓存结果
+            from memory import reasoning as reasoning_mod
+            reasoning_mod._result_cache.update({"ts": 0.0, "key": None, "hits": None})
+            reasoning_mod._event_time_cache.update({"ts": 0.0, "key": None, "map": {}})
             res = memory.run_eval(probes, k=5)
             return {"recall": res.get("recall_at_k"), "mrr": res.get("mrr"), "ndcg": res.get("ndcg")}
         except Exception as e:
             return {"error": str(e)}
 
-    switches = {
-        "all_on": lambda: None,
-        "off_vector": lambda: core.setdefault("weights", {}).update({"vector": 0}),
-        "off_graph": lambda: core.setdefault("weights", {}).update({"graph": 0}),
-        "off_lexical": lambda: core.setdefault("weights", {}).update({"lexical": 0}),
-        "off_time_window": lambda: core.update({"ablation_disable_time": True}),
-        "off_emotion": lambda: core.update({"emotion": {"enabled": False}}),
-        "off_sharing": lambda: core.update({"sharing": {"enabled": False}}),
-        "off_space": lambda: core.update({"space": {"enabled": False}}),
-        "off_system1": lambda: core.setdefault("mind", {}).update({"system1": False}),
-        "on_cognitive": lambda: core.setdefault("mind", {}).update({"cognitive_turn": True}),
-    }
     base_res = _run()
-    rows = [{"switch": "all_on", **base_res}]
-    for name, apply in list(switches.items())[1:]:
+    rows = [{"switch": "all_on", "label": "全部开启", **base_res}]
+    for name in names:
+        label, apply = switches[name]
+        core.clear()
+        core.update(copy.deepcopy(base))
         apply()
         r = _run()
         delta = {
@@ -947,10 +1014,20 @@ def cmd_ablation() -> str:
         }
         regression = any(v < -0.03 for v in delta.values())
         _db.exp_log_add("ablation", detail=name, before=base_res, after=r, delta=delta, regression=regression)
-        rows.append({"switch": name, **r, "delta": delta, "regression": regression})
+        rows.append({"switch": name, "label": label, **r, "delta": delta, "regression": regression})
     core.clear()
-    core.update(saved_core)
-    return json.dumps({"baseline": base_res, "matrix": rows}, ensure_ascii=False, indent=2)
+    core.update(base)
+    return {"baseline": base_res, "matrix": rows}
+
+
+def cmd_ablation() -> str:
+    """机制消融：临时覆盖 config 单开关，同一套 probes 各跑一遍，输出贡献表 + 实验日志。"""
+    _capability, _db, _shared = _plugins()
+    probes_path = _shared.DATA_DIR / "probes.json"
+    if not probes_path.exists():
+        return "评测集不存在（先 tools.py memory-probes 生成）"
+    probes = json.loads(probes_path.read_text(encoding="utf-8"))
+    return json.dumps(run_ablation(probes), ensure_ascii=False, indent=2)
 
 
 def cmd_experiments(limit=50) -> str:
