@@ -1,0 +1,60 @@
+"""证据门控 v2：生成后验证（代码级拦截，不依赖 LLM 自觉）。
+
+core.ask 拿到 reply 之后调用 contains_unsupported_claim：
+- 黑名单词拦截：输出含已确认虚构词（pack 的 banned_claims）→ 重写；
+- 断言-证据核对：输出含"约好了/说好了/答应过"等断言模式 → 证据集（检索命中的 fact + 约定表）
+  里没有对应内容 → 重写。
+
+人格无关：只检查"输出里的断言有没有证据"，不关心"阿拉蕾还是老王"。
+"""
+
+import re
+
+from memory.extract import fact_keywords
+
+# 断言模式：只取"陈述已有承诺"的高精度形式，避免误伤正常提议/告别
+# （"去看电影吧"是提议、"明天见"是告别，都不拦；"我们约好了明天见"才是无据断言）
+CLAIM_PATTERNS = (
+    r"约好了", r"说好了", r"答应过", r"答应你", r"答应我了", r"约过", r"约的", r"不是约好", r"约好过",
+)
+# 用户"提议型"约定句式：bot 是在回应刚提出的约定（会话内即证据），不拦
+USER_PROPOSAL_RE = re.compile(
+    r"明天.*(?:见|去)|下午.*(?:见|去)|一起去|去看|到时候见|见个面|约.*吧|什么时候.*见"
+)
+
+
+def _evidence_set(evidence) -> set:
+    """归一证据集：检索命中的 fact / 约定表条目文本。"""
+    out = set()
+    for f in (evidence or []):
+        if isinstance(f, str):
+            out.add(f)
+        elif isinstance(f, dict):
+            for k in ("fact", "text", "content"):
+                if f.get(k):
+                    out.add(str(f[k]))
+    return out
+
+
+def contains_unsupported_claim(reply, evidence=None, banned=None, user_text=""):
+    """返回命中原因（str）；None = 通过。user_text=本轮用户消息（提议型约定视为会话内证据）。"""
+    t = str(reply or "").strip()
+    if not t:
+        return None
+    for w in (banned or []):
+        if w and w in t:
+            return f"黑名单:{w}"
+    if USER_PROPOSAL_RE.search(str(user_text or "")):
+        return None  # 用户在提议约定，bot 的确认有会话内依据
+    ev = _evidence_set(evidence)
+    for pat in CLAIM_PATTERNS:
+        m = re.search(pat, t)
+        if not m:
+            continue
+        seg = t[max(0, m.start() - 15): m.end() + 35]
+        seg_tok = fact_keywords(seg)
+        # 去掉断言模式自身的词元（约好/说好/答应…），只核对"具体内容"是否在证据里
+        content_tok = seg_tok - fact_keywords(m.group(0))
+        if not content_tok or not ev or not any(content_tok & fact_keywords(e) for e in ev):
+            return f"无证据断言:{pat}"
+    return None

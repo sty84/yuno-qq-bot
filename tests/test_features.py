@@ -648,6 +648,49 @@ def test_all_features():
         _shared.ask_deepseek = _orig_ask2
     check("evidence-rule", "证据规则" in captured_ask2.get("ctx", ""), captured_ask2.get("ctx", "")[:120])
 
+    # ---- 证据门控 v2：生成后验证（代码级拦截）----
+    from agent import evidence_gate
+    check(
+        "gate-blacklist",
+        evidence_gate.contains_unsupported_claim("阿拉蕾是雪貂", [], ["雪貂", "隔壁乐队"]) == "黑名单:雪貂",
+    )
+    check(
+        "gate-claim-no-evidence",
+        evidence_gate.contains_unsupported_claim("我们约好了明天见面", [], []) is not None,
+    )
+    check("gate-farewell-pass", evidence_gate.contains_unsupported_claim("那明天见，晚安", [], []) is None)
+    check(
+        "gate-grounded-pass",
+        evidence_gate.contains_unsupported_claim("对，我们约好了明天下午见面", ["约好明天下午见面"], []) is None,
+    )
+    check(
+        "gate-unrelated-block",
+        evidence_gate.contains_unsupported_claim("我们约好了去海边", ["约好明天下午见面"], []) is not None,
+    )
+    # 用户刚提议约定 → bot 确认放行；用户只是问 → 编造仍拦
+    check(
+        "gate-user-proposal-pass",
+        evidence_gate.contains_unsupported_claim("好，约好了", [], [], user_text="我们明天下午三点见吧") is None,
+    )
+    check(
+        "gate-user-ask-block",
+        evidence_gate.contains_unsupported_claim("我们约好了明天见面", [], [], user_text="我们约了什么") is not None,
+    )
+    # core.ask 集成：LLM 编"约好了"但证据只有"上周买了只猫" → 重写
+    captured_ask3 = {}
+
+    def _fake_llm3(*a, **k):
+        captured_ask3["ctx"] = k.get("extra_context", "")
+        return "对了，我们约好了明天见面吧。"
+
+    _orig_ask3 = _shared.ask_deepseek
+    _shared.ask_deepseek = _fake_llm3
+    try:
+        rep3, meta3 = agent.ask("上周买了猫", scopes=["c2c:ev"], learn=False)
+    finally:
+        _shared.ask_deepseek = _orig_ask3
+    check("gate-rewrite", "记不太清" in rep3 and meta3.get("evidence_gate"), (rep3, meta3))
+
     # ---- LLM token / 成本观测（v2.3）----
     _db.llm_cost_add("2026-08-12T10:00:00", "chat", "", 1000, 200)
     _db.llm_cost_add("2026-08-12T10:01:00", "rerank", "lexical,vector", 500, 100)

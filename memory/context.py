@@ -3,6 +3,9 @@
 from plugins import _db, _shared
 from memory import extract, graph, reasoning, topic
 
+# 证据门控 v2：最近一次检索命中的 fact（供 core.ask 生成后验证用）
+_last_evidence = []
+
 
 def related_events(query, scopes, top_n=3) -> list[str]:
     """返回与查询相关的事件及其邻居（供 LLM 理解“为什么相关”）。"""
@@ -41,6 +44,7 @@ def ai_memory_block(limit=4) -> str:
 
 
 def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, recent) -> str:
+    global _last_evidence
     hits = reasoning.retrieve(
         query,
         scopes,
@@ -50,6 +54,7 @@ def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, r
         expand_query=expand_query,
         recent=recent,
     )
+    _last_evidence = [f for f, _s, _sc in hits]
     if hits:
         conf_map = {}
         src_map = {}

@@ -1,6 +1,7 @@
 {
   "lazy_label": "由乃懒得动",
   "lazy_factor": 1.15,
+  "banned_claims": ["雪貂", "隔壁乐队", "搜走能量饮料", "借给隔壁"],
   "emotion_baseline": {"v": 0.15, "a": -0.55, "d": 0.5},
   "sharing_threshold": 0.6,
   "sleep_deep_window": [2, 5],

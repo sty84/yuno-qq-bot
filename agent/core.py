@@ -527,6 +527,31 @@ def ask(
     except Exception as e:
         _stats_err(e)
         pass
+    # 证据门控 v2（生成后验证，代码级拦截）：输出含无证据断言/黑名单词 → 重写
+    try:
+        from agent import evidence_gate
+        from memory import context as ctx_mod, pack as pack_mod
+        evidence = list(getattr(ctx_mod, "_last_evidence", None) or [])
+        if scopes:
+            try:
+                from memory import appointment as appt_mod
+                ab = appt_mod.context_block(scopes[0])
+                if ab:
+                    evidence.append(ab)
+            except Exception:
+                pass
+        banned = pack_mod.behavior().get("banned_claims") or []
+        reason = evidence_gate.contains_unsupported_claim(reply, evidence, banned=banned, user_text=text)
+        if reason:
+            try:
+                import memory.stats as _st
+                _st.bump("evidence_gate_block")
+            except Exception:
+                pass
+            meta["evidence_gate"] = reason
+            reply = "……这个我记不太清了，我这边好像没有这个记录。"
+    except Exception:
+        pass
     meta["reply"] = reply
     if learn and learn_scope:
         meta["learn"] = ingest(learn_scope, learn_key, text, reply, facts=facts)
