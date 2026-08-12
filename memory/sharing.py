@@ -58,9 +58,7 @@ def _cfg(key, default):
 
 
 def _threshold() -> float:
-    v = _cfg("threshold", None)
-    if v is not None:
-        return float(v)
+    """分享阈值：Persona Pack 优先（sharing_threshold），config 兜底，最后默认 0.6。"""
     try:
         from memory import pack
         b = pack.behavior()
@@ -68,6 +66,9 @@ def _threshold() -> float:
             return float(b["sharing_threshold"])
     except Exception:
         pass
+    v = _cfg("threshold", None)
+    if v is not None:
+        return float(v)
     return float(_cfg("threshold", 0.6))
 
 

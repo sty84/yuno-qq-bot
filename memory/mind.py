@@ -26,9 +26,7 @@ def _cfg(key, default):
 
 
 def persona_weights() -> dict:
-    w = _cfg("persona_weights", None)
-    if isinstance(w, dict) and w:
-        return w
+    """人设价值权重：Persona Pack 优先（persona_weights），config 兜底，最后默认。"""
     try:
         from memory import pack
         w = pack.behavior().get("persona_weights")
@@ -36,6 +34,9 @@ def persona_weights() -> dict:
             return w
     except Exception:
         pass
+    w = _cfg("persona_weights", None)
+    if isinstance(w, dict) and w:
+        return w
     return PERSONA_WEIGHTS_DEFAULT
 
 

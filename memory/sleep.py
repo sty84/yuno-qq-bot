@@ -105,16 +105,16 @@ def is_urgent(text="", an=None) -> bool:
 
 
 def _deep_window() -> tuple:
-    w = _cfg_sleep("deep_window", None)
-    if w:
-        pass
-    else:
-        try:
-            from memory import pack
-            w = pack.behavior().get("sleep_deep_window")
-        except Exception:
-            w = None
-        w = w or [2, 5]
+    """深睡窗口：Persona Pack 优先（sleep_deep_window），config 兜底，最后代码默认。"""
+    w = None
+    try:
+        from memory import pack
+        w = pack.behavior().get("sleep_deep_window")
+    except Exception:
+        w = None
+    if not w:
+        w = _cfg_sleep("deep_window", None)
+    w = w or [2, 5]
     try:
         return (int(w[0]), int(w[1]))
     except Exception as e:

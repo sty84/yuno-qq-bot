@@ -626,6 +626,8 @@ def test_all_features():
     )
 
     # 白天可正常发（回归）
+    # v2.3：persona 参数 pack 优先——config 的 sharing.threshold=0.15 不应覆盖 yuno pack 的 0.6
+    check("share-threshold-pack", abs(sharing._threshold() - 0.6) < 0.01, sharing._threshold())
     _db.kv_set(
         "memory", "sharing_state",
         {"S": 0.9, "ts": datetime.now().isoformat(timespec="seconds"),
@@ -633,7 +635,12 @@ def test_all_features():
          "reasons": ["rehearsal"]},
     )
     _shared.ask_deepseek = lambda *a, **k: "……傍晚排练完回来，懒得动。"
-    dr = sharing.drive("c2c:share", datetime(2026, 8, 11, 15, 0))
+    _orig_th = sharing._threshold
+    sharing._threshold = lambda: 0.15  # 机制测试：压低阈值，验证白天分享路径可发
+    try:
+        dr = sharing.drive("c2c:share", datetime(2026, 8, 11, 15, 0))
+    finally:
+        sharing._threshold = _orig_th
     check("share-day-send", dr.get("sent") is True, dr)
 
     # ---- 复合情绪（v2.2）----

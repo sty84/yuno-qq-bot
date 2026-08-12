@@ -1226,7 +1226,10 @@ def schedule_inspection(scope, container, now=None, kind="container"):
         _stats_err(e)
         pass
     if delay is None:
-        delay = max(10, int(_cfg("inspect_delay_s", 30)) + random.randint(-8, 8))
+        delay = max(
+            10,
+            int(_pack_behavior().get("inspect_delay_s", _cfg("inspect_delay_s", 30))) + random.randint(-8, 8),
+        )
     delay = max(3.0, float(delay))
     data = _db.kv_get("memory", "inspect_pending") or {}
     data[str(scope)] = {
@@ -1413,7 +1416,7 @@ def home_block(scope="", text="", now=None) -> str:
 # ===== AI 生日与年龄（v31.3）=====
 def ai_birthday():
     """AI 生日 (月, 日)，config → memory.core.living.birthday，格式 MM-DD。"""
-    b = str(_cfg("birthday", _pack_behavior().get("birthday", "")) or "").strip()
+    b = str(_pack_behavior().get("birthday", _cfg("birthday", "")) or "").strip()
     if not b:
         return None
     try:
@@ -1427,7 +1430,7 @@ def ai_birthday():
 def ai_age(now=None):
     """AI 年龄 = 当前年 - birth_year（config）。"""
     now = now or datetime.now()
-    by = _cfg("birth_year", _pack_behavior().get("birth_year", None))
+    by = _pack_behavior().get("birth_year", _cfg("birth_year", None))
     if not by:
         return None
     try:
@@ -1455,12 +1458,12 @@ def birthday_hint_block(scope="", text="", now=None) -> str:
     """生日临近暗示（内部参考）：关系达到门槛才注入——她不好意思直说，但渴望你在意。"""
     now = now or datetime.now()
     d = days_to_birthday(now)
-    if d <= 0 or d > int(_cfg("birthday_hint_days", _pack_behavior().get("birthday_hint_days", 7))):
+    if d <= 0 or d > int(_pack_behavior().get("birthday_hint_days", _cfg("birthday_hint_days", 7))):
         return ""
     try:
         from memory import interaction as interaction_mod
         if interaction_mod.familiarity_effective(scope) < float(
-            _cfg("birthday_threshold", _pack_behavior().get("birthday_threshold", 0.4))
+            _pack_behavior().get("birthday_threshold", _cfg("birthday_threshold", 0.4))
         ):
             return ""
     except Exception as e:

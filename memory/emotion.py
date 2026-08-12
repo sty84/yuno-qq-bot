@@ -196,10 +196,7 @@ def _cfg(key, default):
 
 # ===== AI 情绪状态机 =====
 def ai_baseline():
-    """人设情绪基线（平静慵懒——低唤醒、中等支配、略正效价）。可在 config / Persona Pack 覆盖。"""
-    b = _cfg("baseline", None)
-    if isinstance(b, dict) and "v" in b:
-        return _v(b)
+    """人设情绪基线。Persona Pack 优先（emotion_baseline），config 兜底，最后代码默认。"""
     try:
         from memory import pack
         b = pack.behavior().get("emotion_baseline")
@@ -207,6 +204,9 @@ def ai_baseline():
             return _v(b)
     except Exception:
         pass
+    b = _cfg("baseline", None)
+    if isinstance(b, dict) and "v" in b:
+        return _v(b)
     return _v({"v": 0.15, "a": -0.55, "d": 0.5})
 
 

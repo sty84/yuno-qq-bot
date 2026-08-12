@@ -840,6 +840,27 @@ def cmd_persona_smoke() -> str:
         }
     except Exception:
         pass
+    config_leaks = []
+    try:
+        from plugins import _shared as _sh
+        cfg = _sh.CONFIG.get("memory", {}).get("core", {}) or {}
+        owned = {
+            "emotion": ["baseline"],
+            "sleep": ["deep_window"],
+            "sharing": ["threshold"],
+            "living": ["lazy_factor", "lazy_label", "birthday", "birth_year",
+                       "birthday_hint_days", "birthday_threshold", "inspect_delay_s"],
+            "mind": ["persona_weights"],
+        }
+        for block, keys in owned.items():
+            seg = cfg.get(block) or {}
+            for k in keys:
+                if k in seg:
+                    config_leaks.append(f"{block}.{k}={seg[k]}")
+    except Exception:
+        pass
+    if config_leaks:
+        issues.append("config 残留人设参数（读取已 pack 优先、不生效，但建议清理）：" + "、".join(config_leaks))
     hardcoded = []
     for root, _dirs, files in os.walk(ROOT):
         if ".git" in root or "personas" in root:
@@ -859,6 +880,7 @@ def cmd_persona_smoke() -> str:
         "pack": pk, "persona_name": name, "world_rooms": len(rooms),
         "issues": issues,
         "floorplan": fp_info,
+        "config_leaks": config_leaks,
         "hardcoded_count": len(hardcoded),
         "hardcoded_code": hardcoded[:20],
     }, ensure_ascii=False, indent=2)
@@ -873,6 +895,22 @@ def cmd_persona_switch(pack_name: str) -> str:
     _capability, _db, _shared = _plugins()
     core = _shared.CONFIG.setdefault("memory", {}).setdefault("core", {})
     core.setdefault("persona_pack", {})["pack"] = pack_name
+    # 清理 config 里残留的旧人设专属参数（读取已 pack 优先，双保险：不残留、不混淆）
+    persona_owned = {
+        "emotion": ["baseline"],
+        "sleep": ["deep_window"],
+        "sharing": ["threshold"],
+        "living": ["lazy_factor", "lazy_label", "birthday", "birth_year",
+                   "birthday_hint_days", "birthday_threshold", "inspect_delay_s"],
+        "mind": ["persona_weights"],
+    }
+    for block, keys in persona_owned.items():
+        seg = core.get(block)
+        if isinstance(seg, dict):
+            for k in keys:
+                seg.pop(k, None)
+            if not seg:
+                core.pop(block, None)
     _shared.save_config()
     from memory import pack
     pack.invalidate()
