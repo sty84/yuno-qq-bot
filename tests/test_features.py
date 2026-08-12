@@ -514,6 +514,32 @@ def test_all_features():
     )
     check("ablation-restore", core_after == core_before)
 
+    # 消融隔离回归（v2.3）：与检索无关的开关 delta 必须全为 0，不得串出相同假值
+    _db.memory_add(
+        "c2c:abl2", "", "上个月去了趟北京出差",
+        datetime.now().isoformat(timespec="seconds"), None, 0.7, "test",
+    )
+    lexical.bm25_upsert("c2c:abl2", "", ["上个月去了趟北京出差"])
+    _db.lexicon_sync("c2c:abl2", "")
+    iso_probes = [{"query": "北京出差", "expected": ["上个月去了趟北京出差"], "scope": "c2c:abl2"}]
+    iso = tools_mod.run_ablation(
+        iso_probes,
+        names=["off_system1", "on_cognitive", "off_mood_boost",
+               "off_emotion_address", "off_bandit", "off_revive"],
+    )
+    base_recall = (iso.get("baseline") or {}).get("recall")
+    all_zero = all(
+        (r.get("delta") or {}).get("recall", 0) == 0
+        and (r.get("delta") or {}).get("mrr", 0) == 0
+        and (r.get("delta") or {}).get("ndcg", 0) == 0
+        for r in (iso.get("matrix") or [])[1:]
+    )
+    check(
+        "ablation-isolation",
+        base_recall is not None and base_recall > 0 and all_zero,
+        {"baseline": iso.get("baseline"), "matrix": iso.get("matrix")},
+    )
+
     # ---- LLM token / 成本观测（v2.3）----
     _db.llm_cost_add("2026-08-12T10:00:00", "chat", "", 1000, 200)
     _db.llm_cost_add("2026-08-12T10:01:00", "rerank", "lexical,vector", 500, 100)

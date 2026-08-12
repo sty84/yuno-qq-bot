@@ -1059,10 +1059,16 @@ def run_ablation(probes, names=None) -> dict:
 
     def _run():
         try:
-            # 关键：清空检索/时间缓存，避免不同开关状态拿到相同缓存结果
+            # 消融隔离：每轮从同一状态出发——
+            # 检索/时间缓存 + 路由自适应（route_stats 在 _route_cache 里跨轮累积，
+            # 会让"基线跑（无历史）"和"所有开关跑（有历史）"系统性不同，出现
+            # 不相关开关 delta 完全一致的假象）+ 查询向量缓存
             from memory import reasoning as reasoning_mod
             reasoning_mod._result_cache.update({"ts": 0.0, "key": None, "hits": None})
             reasoning_mod._event_time_cache.update({"ts": 0.0, "key": None, "map": {}})
+            reasoning_mod._route_cache = {}
+            reasoning_mod._route_flush_ts = {"ts": 1e18}  # 消融期间不把假统计写回 kv
+            reasoning_mod._query_cache = {"ts": 0.0, "text": "", "vec": None}
             res = memory.run_eval(probes, k=5)
             return {"recall": res.get("recall_at_k"), "mrr": res.get("mrr"), "ndcg": res.get("ndcg")}
         except Exception as e:
@@ -1086,6 +1092,13 @@ def run_ablation(probes, names=None) -> dict:
         rows.append({"switch": name, "label": label, **r, "delta": delta, "regression": regression})
     core.clear()
     core.update(base)
+    try:
+        # 恢复：消融结束后路由统计回 kv（消融期间禁用了 flush），下次真实调用重新加载
+        from memory import reasoning as reasoning_mod
+        reasoning_mod._route_cache = None
+        reasoning_mod._route_flush_ts = {"ts": 0.0}
+    except Exception:
+        pass
     return {"baseline": base_res, "matrix": rows}
 
 
