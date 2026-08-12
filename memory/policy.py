@@ -252,6 +252,16 @@ def decay_days() -> float:
     return float(_cfg("decay_days", 90))
 
 
+def arousal_half_factor(arousal) -> float:
+    """情绪锚定系数（Twig）：高唤醒记忆半衰期更长（忘得慢），低唤醒更快淡出。
+    可配 policy.arousal_boost（默认 1.0）。已接入 stats_for / memory_strength / forget。"""
+    try:
+        a = float(arousal or 0.0)
+    except (TypeError, ValueError):
+        a = 0.0
+    return max(0.25, 1.0 + a * _cfg("arousal_boost", 1.0))
+
+
 def prune_importance() -> float:
     return float(_cfg("prune_importance", 0.15))
 
@@ -368,7 +378,7 @@ def stats_for(scope, key, facts) -> dict:
             if half is None:
                 rec = 1.0  # 人格/核心记忆不随时间衰减（v31）
             else:
-                half = half * (1.0 + float(mrow.get("arousal", 0.0)))  # 情绪锚定
+                half = half * arousal_half_factor(mrow.get("arousal", 0.0))  # 情绪锚定
                 rec = recency_factor(row["last_access"], half_life=half, scope=scope)
             out[f] = {
                 "access_count": row["access_count"],
@@ -388,7 +398,7 @@ def memory_strength(row, meta_row) -> float:
     )
     rec = 1.0 if half is None else recency_factor(
         meta_row["last_access"],
-        half_life=half * (1.0 + float(row.get("arousal", 0.0))),
+        half_life=half * arousal_half_factor(row.get("arousal", 0.0)),
         scope=row.get("scope") or "",
     )
     return (

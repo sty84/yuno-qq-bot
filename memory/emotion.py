@@ -532,6 +532,25 @@ def user_observe(scope, an, text=""):
     )
     max_n = max(1, int(_cfg("user_window", 5)))
     _db.kv_set("memory", key, {"rows": rows[-max_n:]})
+    # 慢速通道（Sentipolis 双速）：持久化 EMA，单条消息不把长期状态带偏
+    try:
+        ema_key = f"user_mood_ema:{scope}"
+        ema = _db.kv_get("memory", ema_key) or {}
+        if not ema.get("vad"):
+            ema["vad"] = {"v": s["v"], "a": s["a"], "d": s["d"]}
+            ema["days"] = 1
+        else:
+            alpha = float(_cfg("slow_ema_alpha", 0.1))
+            ema["vad"] = {
+                "v": _norm(alpha * s["v"] + (1 - alpha) * float(ema["vad"].get("v", 0.0))),
+                "a": _norm(alpha * s["a"] + (1 - alpha) * float(ema["vad"].get("a", 0.0))),
+                "d": _norm(alpha * s["d"] + (1 - alpha) * float(ema["vad"].get("d", 0.0))),
+            }
+            ema["days"] = int(ema.get("days", 0)) + 1
+        ema["ts"] = time.time()
+        _db.kv_set("memory", ema_key, ema)
+    except Exception as e:
+        _stats_err(e)
     log_judgment(scope, text, j)
 
 
@@ -578,6 +597,21 @@ def user_estimate(scope):
     }
 
 
+def user_mood_slow(scope):
+    """慢速通道（Sentipolis 双速）：日级心境 EMA（α=slow_ema_alpha，默认 0.1）。
+    反映长期底色，对单条消息不敏感；无观测返回 None。"""
+    ema = _db.kv_get("memory", f"user_mood_ema:{scope}") or {}
+    vad = ema.get("vad")
+    if not vad:
+        return None
+    return {
+        "vad": vad,
+        "label": user_label(vad),
+        "days": int(ema.get("days", 0)),
+        "ts": ema.get("ts"),
+    }
+
+
 def _age_hours(r) -> float:
     try:
         return max(0.0, (time.time() - float(r.get("ts", time.time()))) / 3600.0)
@@ -595,6 +629,9 @@ def user_block(scope):
     parts = [f"{head}{est['label']}】"]
     if est["trend"] != "平稳":
         parts[0] += f"（趋势：{est['trend']}）"
+    slow = user_mood_slow(scope)
+    if slow and slow.get("label") not in ("平静", est["label"]):
+        parts.append(f"（日级底色：{slow['label']}——长期状态，别被单条消息带偏）")
     if est["label"] in ("忧郁", "悲伤", "低落", "不安", "恐惧", "焦虑"):
         parts.append("内部提示：用户心情不好，回复放轻、少开玩笑、多耐心。")
     elif est["label"] in ("恼怒", "愤怒", "憎恶", "厌恶"):

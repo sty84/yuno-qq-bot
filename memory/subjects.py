@@ -96,6 +96,9 @@ def _decay_probe() -> dict:
             hl = policy.half_life_for(
                 str(r.get("scope") or ""), str(r.get("key") or ""), str(r.get("fact") or "")
             )
+            if hl is not None:
+                # 与 policy.stats_for/memory_strength 同口径：情绪锚定调制半衰期
+                hl = hl * policy.arousal_half_factor(r.get("arousal", 0.0))
             valid_from = str(r.get("valid_from") or r.get("updated_at") or "")
             if hl and valid_from:
                 age_days = (now - datetime.fromisoformat(valid_from[:19])).total_seconds() / 86400

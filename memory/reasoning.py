@@ -505,6 +505,38 @@ def retrieve(
     mmr_cfg = _cfg("mmr", {}) or {}
     if mmr_cfg.get("enabled", True) and len(hits) > 1:
         hits = mmr(query_text, hits, top_k, lam=float(mmr_cfg.get("lambda", 0.7)))
+    # 情绪寻址复核（v2.2+）：语义检索结果弱/空时，用当前用户情绪 VAD 做二级检索键，
+    # 纠正语义寻址抓错对象的情况（affective-episodic-memory 的复核机制）
+    if (
+        _cfg("emotion_address", True)
+        and (not hits or hits[0][1] < float(_cfg("emotion_address_threshold", 0.35)))
+    ):
+        try:
+            from memory import emotion as emotion_mod
+            est = emotion_mod.user_estimate(scopes[0] if scopes else "")
+            if est and est.get("vad"):
+                u = est["vad"]
+                cands = []
+                for scope in list(scopes) + list(extra_scopes or []):
+                    for r in _db.memory_rows(scope, exclude_status=("superseded",)):
+                        v = float(r.get("valence", 0.0) or 0.0)
+                        a = float(r.get("arousal", 0.0) or 0.0)
+                        d = float(r.get("dominance", 0.0) or 0.0)
+                        if abs(v) < 0.05 and abs(a) < 0.05 and abs(d) < 0.05:
+                            continue
+                        cands.append(
+                            (emotion_mod.dist(u, {"v": v, "a": a, "d": d}), r["fact"], r["scope"])
+                        )
+                cands.sort(key=lambda x: x[0])
+                existing = {f for f, _s, _sc in hits}
+                top_n = max(1, int(_cfg("emotion_address_top_k", 2)))
+                for d, f, sc in cands[:top_n]:
+                    if f in existing:
+                        continue
+                    hits.append((f, round(max(0.3, 1.0 - d / 2.0), 3), sc))
+                hits = hits[:top_k]
+        except Exception as e:
+            _stats_err(e)
     if min_score >= 0.05 and (_cfg("telemetry", {}) or {}).get("query_log", True):
         _db.query_log_add(query_text, scopes, top_k, [f for f, _s, _sc in hits])
     # 隐式反馈：只对真正返回的记忆计一次调用

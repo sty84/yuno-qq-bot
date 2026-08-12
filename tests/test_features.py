@@ -410,6 +410,36 @@ def test_all_features():
     check("class-work-stable", policy_mod.fact_class("c2c:x", "", "我在腾讯工作") == "stable")
     cr = policy_mod.classify_report()
     check("class-report", cr.get("accuracy") == 1.0 and not cr.get("errors"), cr)
+    check(
+        "arousal-factor",
+        policy_mod.arousal_half_factor(0.8) > 1.0
+        and policy_mod.arousal_half_factor(-0.5) < 1.0
+        and policy_mod.arousal_half_factor(0) == 1.0,
+        (policy_mod.arousal_half_factor(0.8), policy_mod.arousal_half_factor(-0.5)),
+    )
+
+    # ---- 双速情绪（Sentipolis）：快窗口 + 持久化慢 EMA ----
+    from memory import emotion as emotion_mod
+    emotion_mod.user_observe("c2c:slow", {"emotion": "开心", "valence": 0.8, "arousal": 0.5, "dominance": 0.5, "playful": False})
+    emotion_mod.user_observe("c2c:slow", {"emotion": "低落", "valence": -0.7, "arousal": 0.6, "dominance": -0.5, "playful": False})
+    emotion_mod.user_observe("c2c:slow", {"emotion": "低落", "valence": -0.7, "arousal": 0.6, "dominance": -0.5, "playful": False})
+    fast2 = emotion_mod.user_estimate("c2c:slow")
+    slow2 = emotion_mod.user_mood_slow("c2c:slow")
+    check(
+        "two-speed-emotion",
+        fast2 and slow2 and slow2["vad"]["v"] > fast2["vad"]["v"],
+        {"fast": fast2 and fast2["vad"], "slow": slow2 and slow2["vad"]},
+    )
+
+    # ---- 情绪寻址复核（affective-episodic）：语义弱时按情绪 VAD 二级检索 ----
+    emotion_mod.user_observe("c2c:ea", {"emotion": "低落", "valence": -0.7, "arousal": 0.6, "dominance": -0.5, "playful": False})
+    _db.memory_add(
+        "c2c:ea", "", "那天在阳台哭得很凶",
+        datetime.now().isoformat(timespec="seconds"), None, 0.7, "test",
+        valence=-0.8, arousal=0.8,
+    )
+    ea_hits = reasoning.retrieve("zzzzqwerty不存在的词", ["c2c:ea"], min_score=0.0)
+    check("emotion-address", any("阳台哭" in f for f, _s, _sc in ea_hits), ea_hits[:2])
 
     # ---- 议题情绪打通（topic mood ↔ VAD，v2.2+）----
     from memory import topic as topic_mod
