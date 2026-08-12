@@ -596,6 +596,23 @@ def test_all_features():
         _shared.deepseek = _orig_deepseek
     check("rewrite-llm", rw1 == "仲町阿拉蕾 最近 行踪" and rw2 == rw1, (rw1, rw2))
 
+    # ---- persona.md 分区规范（v2.3）：示例区无约定词、雪貂种子已弱化 ----
+    _pt = pack_mod.persona_text()
+    _idx = _pt.find("# 说话示例")
+    _sec = ""
+    if _idx >= 0:
+        _tail = _pt[_idx:]
+        _end = _tail.find("\n# ", 1)
+        _sec = _tail[:_end if _end > 0 else len(_tail)]
+    check(
+        "persona-examples-clean",
+        not any(w in _sec for w in ("约定", "承诺", "明天见", "答应", "约好", "说好", "见面", "放鸽子", "约了", "约过")),
+        _sec[:200],
+    )
+    # 黑名单里允许出现"雪貂"（禁令模式），但身份段不得有雪貂联想种子
+    _id_sec = _pt.split("# 性格", 1)[0]
+    check("persona-no-snowferret-seed", "雪貂" not in _id_sec, "身份段仍含雪貂")
+
     # ---- LLM token / 成本观测（v2.3）----
     _db.llm_cost_add("2026-08-12T10:00:00", "chat", "", 1000, 200)
     _db.llm_cost_add("2026-08-12T10:01:00", "rerank", "lexical,vector", 500, 100)

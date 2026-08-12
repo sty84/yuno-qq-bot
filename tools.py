@@ -886,6 +886,23 @@ def cmd_persona_smoke() -> str:
         pass
     if config_leaks:
         issues.append("config 残留人设参数（读取已 pack 优先、不生效，但建议清理）：" + "、".join(config_leaks))
+    example_issues = []
+    try:
+        # 示例区规范（v2.3）：禁约定/承诺/未来计划——示例会被 LLM 实例化成真实事件
+        from memory import pack as pack_mod
+        _pt = pack_mod.persona_text() or ""
+        _idx = _pt.find("# 说话示例")
+        if _idx >= 0:
+            _tail = _pt[_idx:]
+            _end = _tail.find("\n# ", 1)
+            _sec = _tail[:_end if _end > 0 else len(_tail)]
+            for _bad in ("约定", "承诺", "明天见", "答应", "约好", "说好", "见面", "放鸽子", "约了", "约过"):
+                if _bad in _sec:
+                    example_issues.append(_bad)
+    except Exception:
+        pass
+    if example_issues:
+        issues.append("示例区出现约定/承诺词（会被实例化成假事件）：" + "、".join(example_issues))
     hardcoded = []
     for root, _dirs, files in os.walk(ROOT):
         if ".git" in root or "personas" in root:
@@ -906,6 +923,7 @@ def cmd_persona_smoke() -> str:
         "issues": issues,
         "floorplan": fp_info,
         "config_leaks": config_leaks,
+        "example_issues": example_issues,
         "hardcoded_count": len(hardcoded),
         "hardcoded_code": hardcoded[:20],
     }, ensure_ascii=False, indent=2)
