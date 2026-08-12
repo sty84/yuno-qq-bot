@@ -159,14 +159,15 @@ def _consult_memory_context(scope, topic):
 
 def _consult_llm(system, prompt) -> str:
     try:
-        resp = _shared.deepseek.chat.completions.create(
-            model=_shared.DEEPSEEK_MODEL,
+        resp = _shared.deepseek_chat(
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
             max_tokens=600,
             temperature=0.6,
+            module="advisor",
+            detail="advice",
         )
         return (resp.choices[0].message.content or "").strip()
     except Exception as e:
@@ -237,14 +238,15 @@ def daily_reflect(limit=20) -> int:
         f"近期事件：\n{titles}\n关系：{rel_text or '无'}"
     )
     try:
-        resp = _shared.deepseek.chat.completions.create(
-            model=_shared.DEEPSEEK_MODEL,
+        resp = _shared.deepseek_chat(
             messages=[
                 {"role": "system", "content": "你是记忆反思器，输出简洁中文洞察。"},
                 {"role": "user", "content": prompt},
             ],
             max_tokens=240,
             temperature=0.4,
+            module="advisor",
+            detail="reflect",
         )
         lines = [
             l.strip().lstrip("-• ")
@@ -325,11 +327,12 @@ def _llm_review(belief, evidence):
         or "（无证据）"
     )
     try:
-        resp = _shared.deepseek.chat.completions.create(
-            model=_shared.DEEPSEEK_MODEL,
+        resp = _shared.deepseek_chat(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
             temperature=0.1,
+            module="advisor",
+            detail="decision",
         )
         raw = (resp.choices[0].message.content or "").strip()
         start, end = raw.find("{"), raw.rfind("}")

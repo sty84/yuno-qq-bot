@@ -153,14 +153,14 @@ def _llm_dossier(name, llm=None) -> dict:
         if llm:
             raw = llm(name)
         else:
-            resp = _shared.deepseek.chat.completions.create(
-                model=_shared.DEEPSEEK_MODEL,
+            resp = _shared.deepseek_chat(
                 messages=[
                     {"role": "system", "content": CHAR_PROMPT.format(name=name)},
                     {"role": "user", "content": f"角色：{name}"},
                 ],
                 max_tokens=900,
                 temperature=0.3,
+                module="character",
             )
             raw = resp.choices[0].message.content or ""
         raw = re.sub(

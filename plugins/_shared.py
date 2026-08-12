@@ -212,6 +212,23 @@ def record_llm_usage(module="chat", detail="", resp=None, chars=0):
         pass
 
 
+def deepseek_chat(messages, max_tokens=800, temperature=None, module="chat", detail=""):
+    """LLM 调用的统一入口（成本观测）：create + record_llm_usage，返回 resp。
+    所有 direct deepseek.chat.completions.create 都迁到这里，避免漏埋点。"""
+    kwargs = {
+        "model": DEEPSEEK_MODEL,
+        "messages": messages,
+        "max_tokens": int(max_tokens),
+        "timeout": 30,
+    }
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    resp = deepseek.chat.completions.create(**kwargs)
+    chars = sum(len(str(m.get("content") or "")) for m in (messages or []))
+    record_llm_usage(module, detail, resp, chars)
+    return resp
+
+
 def ask_deepseek(
     text: str,
     extra_context: str = "",
@@ -231,19 +248,10 @@ def ask_deepseek(
     last_err = None
     for attempt in range(3):
         try:
-            kwargs = {
-                "model": DEEPSEEK_MODEL,
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "timeout": 30,
-            }
-            if temperature is not None:
-                kwargs["temperature"] = temperature
-            resp = deepseek.chat.completions.create(**kwargs)
+            resp = deepseek_chat(messages, max_tokens=max_tokens, temperature=temperature, module=module, detail=detail)
             reply = (resp.choices[0].message.content or "").strip()
             _bump_counter("llm_calls", 1)
             _bump_counter("llm_chars", len(str(text)) + len(str(extra_context)) + len(reply))
-            record_llm_usage(module, detail, resp, len(str(text)) + len(str(extra_context)) + len(reply))
             return reply[:MAX_REPLY_LEN] + ("……" if len(reply) > MAX_REPLY_LEN else "")
         except Exception as e:
             last_err = e

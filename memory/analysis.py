@@ -169,14 +169,15 @@ def llm_enrich(text, reply="", force=False):
         with _llm_lock:
             if not force and now - _llm_state["ts"] < min_interval:
                 return None
-        resp = _shared.deepseek.chat.completions.create(
-            model=_shared.DEEPSEEK_MODEL,
+        resp = _shared.deepseek_chat(
             messages=[
                 {"role": "system", "content": LLM_EMOTION_PROMPT},
                 {"role": "user", "content": f"用户：{(text or '')[:300]}\n机器人：{(reply or '')[:300]}"},
             ],
             max_tokens=40,
             temperature=0,
+            module="emotion",
+            detail="llm_fallback",
         )
         raw = re.sub(
             r"^```(?:json)?\s*|\s*```$",

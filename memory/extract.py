@@ -66,16 +66,15 @@ def _norm_extract_item(item) -> str:
 def extract_facts(conversation) -> list[str]:
     """LLM 提取事实；任何失败都返回 []，不阻塞聊天。"""
     try:
-        resp = _shared.deepseek.chat.completions.create(
-            model=_shared.DEEPSEEK_MODEL,
+        resp = _shared.deepseek_chat(
             messages=[
                 {"role": "system", "content": EXTRACT_SYSTEM_PROMPT},
                 {"role": "user", "content": conversation},
             ],
             max_tokens=300,
             temperature=0.2,
+            module="extract",
         )
-        _shared.record_llm_usage("extract", "", resp, len(str(conversation)))
         raw = re.sub(
             r"^```(?:json)?\s*|\s*```$",
             "",
@@ -95,16 +94,16 @@ def extract_facts(conversation) -> list[str]:
 def structured_extract(conversation) -> dict:
     """第一阶段：结构化抽取（entities/attributes/facts）；任何失败返回 {}。"""
     try:
-        resp = _shared.deepseek.chat.completions.create(
-            model=_shared.DEEPSEEK_MODEL,
+        resp = _shared.deepseek_chat(
             messages=[
                 {"role": "system", "content": STRUCTURED_EXTRACT_PROMPT},
                 {"role": "user", "content": conversation},
             ],
             max_tokens=400,
             temperature=0.1,
+            module="extract",
+            detail="structured",
         )
-        _shared.record_llm_usage("extract", "structured", resp, len(str(conversation)))
         raw = re.sub(
             r"^```(?:json)?\s*|\s*```$",
             "",

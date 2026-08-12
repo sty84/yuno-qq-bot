@@ -285,14 +285,15 @@ def _light_consolidate() -> dict:
 def _llm_one(prompt) -> str:
     """轻量 LLM 总结（失败静默回退，绝不阻塞）。"""
     try:
-        resp = _shared.deepseek.chat.completions.create(
-            model=_shared.DEEPSEEK_MODEL,
+        resp = _shared.deepseek_chat(
             messages=[
                 {"role": "system", "content": "你是记忆巩固器。输出一句简洁的'今日回忆'，不要解释。"},
                 {"role": "user", "content": prompt},
             ],
             max_tokens=100,
             temperature=0.4,
+            module="sleep",
+            detail="recall",
         )
         return (resp.choices[0].message.content or "").strip()[:120]
     except Exception as e:
@@ -393,8 +394,7 @@ def _llm_dream(dtype, materials, logic_hint) -> str:
             prole = str(pack.world().get("role") or "")
         except Exception:
             pname, prole = "YUNO", ""
-        resp = _shared.deepseek.chat.completions.create(
-            model=_shared.DEEPSEEK_MODEL,
+        resp = _shared.deepseek_chat(
             messages=[
                 {"role": "system", "content": f"你是{pname}，正在讲述自己昨晚的梦。输出只包含梦的内容本身。"},
                 {
@@ -406,6 +406,8 @@ def _llm_dream(dtype, materials, logic_hint) -> str:
             ],
             max_tokens=160,
             temperature=0.9,
+            module="sleep",
+            detail="dream",
         )
         return _sanitize_dream(resp.choices[0].message.content or "")
     except Exception as e:

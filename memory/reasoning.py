@@ -687,15 +687,12 @@ def llm_rerank(query, candidates, top_k, paths=None):
             f"按与问题的相关度给以下记忆排序，只输出最相关的 {top_k} 条原文，每条一行，不要解释。\n"
             f"问题：{query}\n" + "\n".join(f"{i}. {c}" for i, c in enumerate(candidates))
         )
-        resp = _shared.deepseek.chat.completions.create(
-            model=_shared.DEEPSEEK_MODEL,
+        resp = _shared.deepseek_chat(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=300,
             temperature=0.0,
-        )
-        _shared.record_llm_usage(
-            "rerank", ",".join(paths or []), resp,
-            len(str(query)) + sum(len(str(c)) for c in candidates),
+            module="rerank",
+            detail=",".join(paths or []),
         )
         picked = []
         for line in (resp.choices[0].message.content or "").splitlines():

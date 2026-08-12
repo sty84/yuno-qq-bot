@@ -146,8 +146,7 @@ def investigate_correction(scope, key, text, candidate_facts, an=None) -> dict:
     if now - _investigate_state.get(scope, 0.0) < float(_cfg("investigate_throttle_s", 600)):
         return _rule_decision(old_conf, valid_from, scope, access_count)
     try:
-        resp = _shared.deepseek.chat.completions.create(
-            model=_shared.DEEPSEEK_MODEL,
+        resp = _shared.deepseek_chat(
             messages=[
                 {
                     "role": "system",
@@ -166,6 +165,7 @@ def investigate_correction(scope, key, text, candidate_facts, an=None) -> dict:
             ],
             max_tokens=100,
             temperature=0.0,
+            module="world",
         )
         raw = (resp.choices[0].message.content or "").strip()
         start, end = raw.find("{"), raw.rfind("}")

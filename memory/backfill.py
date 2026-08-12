@@ -42,14 +42,15 @@ def build_graph(scope=None, key=None) -> int:
 def _llm_one(prompt) -> str:
     try:
         from plugins import _shared
-        resp = _shared.deepseek.chat.completions.create(
-            model=_shared.DEEPSEEK_MODEL,
+        resp = _shared.deepseek_chat(
             messages=[
                 {"role": "system", "content": "你是记忆巩固器。输出一句简洁结论，不要解释。"},
                 {"role": "user", "content": prompt},
             ],
             max_tokens=120,
             temperature=0.3,
+            module="backfill",
+            detail="summary",
         )
         return (resp.choices[0].message.content or "").strip()[:100]
     except Exception as e:
@@ -72,8 +73,7 @@ def _llm_consolidate(topic, items) -> dict:
     模型忽略 JSON 指令时直接把纯文本当核心总结；完全失败返回 {}（调用方回退过程链）。"""
     try:
         from plugins import _shared
-        resp = _shared.deepseek.chat.completions.create(
-            model=_shared.DEEPSEEK_MODEL,
+        resp = _shared.deepseek_chat(
             messages=[
                 {"role": "system", "content": "你是记忆巩固器。只输出 JSON，不要解释。"},
                 {
@@ -85,6 +85,8 @@ def _llm_consolidate(topic, items) -> dict:
             ],
             max_tokens=260,
             temperature=0.3,
+            module="backfill",
+            detail="consolidate",
         )
         raw = (resp.choices[0].message.content or "").strip()
         start, end = raw.find("{"), raw.rfind("}")
