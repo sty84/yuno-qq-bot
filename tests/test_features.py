@@ -544,17 +544,30 @@ def test_all_features():
     _ts = datetime.now().isoformat(timespec="seconds")
     _db.memory_add("ai", "examples", "你是做什么的，DJ兼音控师", _ts, None, 0.9, "persona")
     _db.memory_add("ai", "identity", "千石由乃是乐队DJ兼音控师", _ts, None, 0.9, "persona")
+    _db.memory_add("ai", "personality", "性格节能主义、家里蹲，看似冷酷", _ts, None, 0.9, "persona")
+    _db.memory_add("ai", "preference", "喜欢冰美式和DJ打碟", _ts, None, 0.9, "persona")
+    _db.memory_add("ai", "experience_persona", "因选秀出道加入MewType", _ts, None, 0.9, "persona")
     lexical.bm25_upsert("ai", "examples", ["你是做什么的，DJ兼音控师"])
     lexical.bm25_upsert("ai", "identity", ["千石由乃是乐队DJ兼音控师"])
+    lexical.bm25_upsert("ai", "personality", ["性格节能主义、家里蹲，看似冷酷"])
+    lexical.bm25_upsert("ai", "preference", ["喜欢冰美式和DJ打碟"])
+    lexical.bm25_upsert("ai", "experience_persona", ["因选秀出道加入MewType"])
     _db.lexicon_sync("ai", "")
     reasoning._event_time_cache.update({"ts": 0.0, "key": None, "map": {}})
     meta_hits = reasoning.retrieve("做什么的", ["ai"], top_k=5, min_score=0.0)
     id_hits = reasoning.retrieve("千石由乃", ["ai"], top_k=5, min_score=0.0)
+    pers_hits = reasoning.retrieve("性格", ["ai"], top_k=5, min_score=0.0)
+    pref_hits = reasoning.retrieve("喜欢什么", ["ai"], top_k=5, min_score=0.0)
+    exp_hits = reasoning.retrieve("怎么出道", ["ai"], top_k=5, min_score=0.0)
     check(
         "ai-meta-excluded",
         not any("你是做什么的" in f for f, _s, _sc in meta_hits)
-        and any("乐队DJ" in f for f, _s, _sc in id_hits),
-        {"meta": meta_hits[:3], "id": id_hits[:3]},
+        and any("乐队DJ" in f for f, _s, _sc in id_hits)
+        and not any("节能主义" in f for f, _s, _sc in pers_hits)
+        and any("冰美式" in f for f, _s, _sc in pref_hits)
+        and any("出道" in f for f, _s, _sc in exp_hits),
+        {"meta": meta_hits[:3], "id": id_hits[:3],
+         "personality": pers_hits[:3], "pref": pref_hits[:3], "exp": exp_hits[:3]},
     )
 
     # ---- 改动 2：LLM 查询改写（宽泛→具体；已具体不改；失败降级；缓存）----

@@ -18,11 +18,13 @@ RRF_K = 60
 _event_time_cache = {"key": None, "map": {}, "ts": 0.0}
 _rewrite_cache = {}
 
-# ai scope 里的人设元字段（说话示例/行为规则/风格参数）不该进普通记忆检索——
-# 否则宽泛查询会命中"你是做什么的"这类示例文本（v2.3 改动 1）
+# ai scope 里的人设元字段（说话示例/行为规则/风格参数/性格设定/关系/动机）不该进普通记忆检索——
+# 否则宽泛查询会命中"你是做什么的"这类示例文本（v2.3 改动 1）。
+# 保留可检索的事实型字段：identity（你是谁）/ preference（你喜欢什么）/ experience_persona（你怎么出道的）。
 AI_META_EXCLUDE_KEYS = frozenset((
     "examples", "avoid", "defaults", "behavior_policy", "value",
     "conflict", "style", "catchphrase", "mood_profile",
+    "personality", "relationship", "motivation",
 ))
 
 # 宽泛/指代查询：LLM 改写为具体名词后再检索（v2.3 改动 2）
