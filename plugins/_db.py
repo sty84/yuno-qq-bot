@@ -321,6 +321,14 @@ def _create_tables():
                 scores TEXT NOT NULL DEFAULT '{}',
                 comment TEXT NOT NULL DEFAULT '',
                 avg REAL NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS llm_cost(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                module TEXT NOT NULL DEFAULT 'chat',
+                detail TEXT NOT NULL DEFAULT '',
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                chars INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS space_state(
                 id INTEGER PRIMARY KEY CHECK(id=1),
                 room TEXT NOT NULL DEFAULT '客厅',
@@ -986,6 +994,72 @@ def scenario_score_rows(limit=100):
                 d["scores"] = {}
             out.append(d)
         return out
+
+
+# ===== LLM token / 成本观测 =====
+def llm_cost_add(ts, module="chat", detail="", prompt_tokens=0, completion_tokens=0, chars=0):
+    """记录一次 LLM 调用的 token 消耗（按模块/细节归因，供成本页与机制权衡）。"""
+    with _lock:
+        c = _connect()
+        c.execute(
+            "INSERT INTO llm_cost(ts,module,detail,prompt_tokens,completion_tokens,chars) "
+            "VALUES(?,?,?,?,?,?)",
+            (
+                str(ts or datetime.now().isoformat(timespec="seconds")),
+                str(module or "chat")[:40],
+                str(detail or "")[:200],
+                max(0, int(prompt_tokens or 0)),
+                max(0, int(completion_tokens or 0)),
+                max(0, int(chars or 0)),
+            ),
+        )
+        c.commit()
+
+
+def llm_cost_summary(days=30) -> dict:
+    """按天 / 按模块 / 按检索路径聚合 token 消耗。"""
+    cutoff = (datetime.now() - timedelta(days=max(1, int(days)))).isoformat(timespec="seconds")
+    with _lock:
+        cur = _connect().execute(
+            "SELECT ts,module,detail,prompt_tokens,completion_tokens "
+            "FROM llm_cost WHERE ts >= ? ORDER BY ts",
+            (cutoff,),
+        )
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    total = {"calls": len(rows), "prompt": 0, "completion": 0}
+    by_day, by_module = {}, {}
+    by_path = {}
+    for r in rows:
+        p, c = int(r["prompt_tokens"]), int(r["completion_tokens"])
+        total["prompt"] += p
+        total["completion"] += c
+        day = str(r["ts"])[:10]
+        d = by_day.setdefault(day, {"calls": 0, "prompt": 0, "completion": 0})
+        d["calls"] += 1
+        d["prompt"] += p
+        d["completion"] += c
+        m = by_module.setdefault(str(r["module"] or "chat"), {"calls": 0, "prompt": 0, "completion": 0})
+        m["calls"] += 1
+        m["prompt"] += p
+        m["completion"] += c
+        # 检索路径：rerank 的 detail 里记录参与路径（lexical/vector/graph/…）
+        if str(r["module"]) == "rerank":
+            for path in str(r["detail"] or "").split(","):
+                path = path.strip()
+                if not path:
+                    continue
+                q = by_path.setdefault(path, {"calls": 0, "prompt": 0, "completion": 0})
+                q["calls"] += 1
+                q["prompt"] += p
+                q["completion"] += c
+    return {
+        "days": int(days),
+        "total": total,
+        "by_day": [{"date": k, **v} for k, v in sorted(by_day.items())],
+        "by_module": [{"module": k, **v} for k, v in sorted(by_module.items(), key=lambda x: -(x[1]["prompt"] + x[1]["completion"]))],
+        "by_path": [{"path": k, **v} for k, v in sorted(by_path.items(), key=lambda x: -(x[1]["prompt"] + x[1]["completion"]))],
+    }
 
 
 # ===== 空间/心智状态表（P0 数据模型优化：kv JSON → 正规表，带一次性迁移）=====

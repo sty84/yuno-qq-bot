@@ -1098,7 +1098,10 @@ def scenario_replay(path: str = "", score: bool = False, scenario_id=None) -> di
         conv = "\n".join(f"用户：{x['user']}\nAI：{x['ai']}" for x in r["replies"])
         s2 = {}
         try:
-            raw = _shared.ask_deepseek(SCENARIO_RUBRIC + "\n对话：\n" + conv, max_tokens=200, temperature=0.2)
+            raw = _shared.ask_deepseek(
+                SCENARIO_RUBRIC + "\n对话：\n" + conv,
+                max_tokens=200, temperature=0.2, module="scenario",
+            )
             s, e = raw.find("{"), raw.rfind("}")
             if s >= 0:
                 s2 = json.loads(raw[s:e + 1])

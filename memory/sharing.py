@@ -427,7 +427,7 @@ def _compose(scope, ctx: str, reason: str) -> str:
         "直接输出消息内容。"
     )
     try:
-        msg = _shared.ask_deepseek(prompt, system=system, max_tokens=120)
+        msg = _shared.ask_deepseek(prompt, system=system, max_tokens=120, module="sharing")
         from memory import sleep as sleep_mod
         msg = sleep_mod._sanitize_dream(msg)
         if msg:

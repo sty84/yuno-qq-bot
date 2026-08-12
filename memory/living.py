@@ -751,7 +751,7 @@ def propose_world_delta(scope, text, now=None):
     prompt = _WORLD_PROMPT.format(name=_persona_name()) + "\n已知物品：" + item_hint + "\n用户说：" + str(text)[:200]
     try:
         from plugins import _shared
-        reply = _shared.ask_deepseek(prompt, temperature=0)
+        reply = _shared.ask_deepseek(prompt, temperature=0, module="living")
     except Exception as e:
         _stats_err(e)
         return {"changed": 0, "reason": "llm_fail"}
@@ -922,7 +922,7 @@ def bootstrap_from_persona(scope="", now=None) -> dict:
         prompt = _BOOTSTRAP_PROMPT.replace("{name}", _persona_name()).replace("{max_items}", str(max_items)) + "\n人设摘要：\n" + persona
         if extra:
             prompt += "\n她的经历/偏好（记忆库）：\n" + "\n".join(extra[:6])
-        reply = _shared.ask_deepseek(prompt, temperature=0.7)
+        reply = _shared.ask_deepseek(prompt, temperature=0.7, module="living")
         m = re.search(r"\{.*\}", reply, re.S)
         if not m:
             return {"changed": 0, "reason": "parse_fail"}

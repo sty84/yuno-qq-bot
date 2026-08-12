@@ -434,6 +434,7 @@ def ask(
             history=_clean_history(history or []),
             system=sys_prompt,
             temperature=0.6,
+            module="cognitive",
         )
         parsed = _parse_cognitive(raw)
         if parsed:

@@ -63,6 +63,7 @@
     <div class="tabsep">分析</div>
     <div class="tab" data-page="diag">数据与诊断</div>
     <div class="tab" data-page="charts">图表分析</div>
+    <div class="tab" data-page="costs">成本</div>
   </div>
 
   <div class="page active" id="page-dash">
@@ -173,6 +174,21 @@
     <div class="chart" id="ablation-chart"></div>
   </div>
 
+  <div class="page" id="page-costs">
+    <div class="cards" id="cost-cards"></div>
+    <h3 class="sect">按模块 token 消耗</h3>
+    <div class="chart" id="cost-module-chart"></div>
+    <div class="muted">模块 = LLM 调用用途（chat 对话 / extract 提取 / rerank 检索重排 / cognitive 认知循环 / scenario 回放评分 / proactive 主动消息 / …）。七路检索本身是本地计算、零 token，只有 llm 重排和云端向量会花钱。</div>
+    <h3 class="sect">检索路径 token（llm 重排归因）</h3>
+    <div class="chart" id="cost-path-chart"></div>
+    <div class="muted">每次 llm 重排按"本次参与了哪几条检索路径"归因，能看到重排成本主要落在哪条路上。</div>
+    <h3 class="sect">按天累计</h3>
+    <div class="chart" id="cost-day-chart"></div>
+    <h3 class="sect">机制权衡：token 成本 × 消融效果</h3>
+    <div id="cost-tradeoff"></div>
+    <div class="muted">对照看：某机制在成本表里占比高、且消融矩阵里关掉它 delta≈0（不损失效果），就是该砍的；占比低但关掉明显退化（如 rerank），说明它是值钱的。</div>
+  </div>
+
   <script>
     const $ = (id) => document.getElementById(id);
     document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
@@ -185,6 +201,7 @@
       if (t.dataset.page === 'scenario') loadScenarios();
       if (t.dataset.page === 'ablation') loadAblation();
       if (t.dataset.page === 'subjects') renderSubjects();
+      if (t.dataset.page === 'costs') renderCosts();
     });
 
     async function api(path, opts) {
@@ -230,6 +247,8 @@
       let html = card('记忆条数', d.memory_counts.memories) + card('事件', d.memory_counts.events)
         + card('属性', d.memory_counts.attrs) + card('LLM 调用', c.llm_calls)
         + card('tick 项', tickKeys.length, tickKeys.join(' ')) + card('err 项', errKeys.length, errKeys.join(' '));
+      const ct = d.cost_today || {};
+      html += card('今日 tokens', ct.prompt != null ? ((ct.prompt || 0) + (ct.completion || 0)) : null, '¥' + fmt(ct.cost) + ' · ' + fmt(ct.calls) + ' 次调用');
       const b = d.baselines || {};
       html += card('检索 recall@5', b.memory_eval && b.memory_eval.recall_at_k, 'MRR ' + fmt(b.memory_eval && b.memory_eval.mrr));
       html += card('空间 where_acc', b.space_eval && b.space_eval.where_accuracy && b.space_eval.where_accuracy.accuracy);
@@ -721,6 +740,69 @@
           itemStyle: { color: ['#3b82f6', '#10b981', '#f59e0b'][i] },
         })),
       });
+    }
+
+    async function renderCosts() {
+      const c = await api('/api/costs?days=30');
+      const t = c.total || {};
+      const cost = v => v == null ? '—' : '¥' + v;
+      $('cost-cards').innerHTML = card('累计调用', t.calls, '近 ' + c.days + ' 天')
+        + card('prompt tokens', t.prompt)
+        + card('completion tokens', t.completion)
+        + card('估算花费', cost(c.total_cost),
+            '输入 ¥' + ((c.prices || {}).prompt_per_1m || 1) + '/1M · 输出 ¥' + ((c.prices || {}).completion_per_1m || 2) + '/1M');
+      const mods = c.by_module || [];
+      const mchart = echarts.init($('cost-module-chart'));
+      mchart.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['prompt', 'completion'], textStyle: { color: '#94a3b8' } },
+        grid: { left: 60, right: 20, top: 40, bottom: 70 },
+        xAxis: { type: 'category', data: mods.map(m => m.module), axisLabel: { color: '#94a3b8', interval: 0, rotate: 25, fontSize: 10 } },
+        yAxis: { type: 'value', axisLabel: { color: '#94a3b8' } },
+        series: [
+          { name: 'prompt', type: 'bar', stack: 't', data: mods.map(m => m.prompt), itemStyle: { color: '#3b82f6' } },
+          { name: 'completion', type: 'bar', stack: 't', data: mods.map(m => m.completion), itemStyle: { color: '#a78bfa' } },
+        ],
+      });
+      const paths = c.by_path || [];
+      const pchart = echarts.init($('cost-path-chart'));
+      pchart.setOption({
+        tooltip: {}, grid: { left: 60, right: 20, bottom: 50 },
+        xAxis: { type: 'category', data: paths.map(p => p.path), axisLabel: { color: '#94a3b8', interval: 0, rotate: 20 } },
+        yAxis: { type: 'value', axisLabel: { color: '#94a3b8' } },
+        series: [{ type: 'bar', data: paths.map(p => p.prompt + p.completion), itemStyle: { color: '#f59e0b' },
+                   label: { show: true, position: 'top', color: '#e2e8f0' } }],
+      });
+      const days = c.by_day || [];
+      const dchart = echarts.init($('cost-day-chart'));
+      dchart.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['tokens', '花费'], textStyle: { color: '#94a3b8' } },
+        grid: { left: 60, right: 60, top: 40, bottom: 60 },
+        xAxis: { type: 'category', data: days.map(d => d.date), axisLabel: { color: '#94a3b8', rotate: 30 } },
+        yAxis: [
+          { type: 'value', name: 'tokens', axisLabel: { color: '#94a3b8' } },
+          { type: 'value', name: '¥', axisLabel: { color: '#94a3b8' } },
+        ],
+        series: [
+          { name: 'tokens', type: 'line', smooth: true, data: days.map(d => d.prompt + d.completion), itemStyle: { color: '#3b82f6' }, yAxisIndex: 0 },
+          { name: '花费', type: 'line', smooth: true, data: days.map(d => d.cost), itemStyle: { color: '#ef4444' }, yAxisIndex: 1 },
+        ],
+      });
+      try {
+        const exps = await api('/api/experiments?limit=100');
+        const abl = exps.filter(e => e.action === 'ablation').slice(0, 14);
+        if (!abl.length) { $('cost-tradeoff').innerHTML = '<div class="muted">还没有消融记录（在消融实验页跑一次"运行消融"）</div>'; return; }
+        let h2 = '<table><tr><th>机制开关</th><th>recall delta</th><th>MRR delta</th><th>NDCG delta</th><th>回归</th></tr>';
+        abl.forEach(e => {
+          const d = e.delta || {};
+          h2 += `<tr><td>${escapeHtml(e.detail)}</td><td>${d.recall != null ? d.recall : '—'}</td>
+            <td>${d.mrr != null ? d.mrr : '—'}</td><td>${d.ndcg != null ? d.ndcg : '—'}</td>
+            <td class="${e.regression ? 'red' : ''}">${e.regression ? '⚠ 退化' : '正常'}</td></tr>`;
+        });
+        h2 += '</table>';
+        $('cost-tradeoff').innerHTML = h2;
+      } catch (e) { $('cost-tradeoff').innerHTML = '<div class="muted">消融数据加载失败：' + escapeHtml(e.message) + '</div>'; }
     }
 
     loadDash().catch(e => $('dash-cards').innerHTML = '<div class="red">加载失败：' + e.message + '</div>');

@@ -514,6 +514,18 @@ def test_all_features():
     )
     check("ablation-restore", core_after == core_before)
 
+    # ---- LLM token / 成本观测（v2.3）----
+    _db.llm_cost_add("2026-08-12T10:00:00", "chat", "", 1000, 200)
+    _db.llm_cost_add("2026-08-12T10:01:00", "rerank", "lexical,vector", 500, 100)
+    cs = _db.llm_cost_summary(30)
+    check(
+        "llm-cost-summary",
+        cs["total"]["prompt"] == 1500 and cs["total"]["completion"] == 300
+        and any(p["path"] == "lexical" for p in cs["by_path"])
+        and any(m["module"] == "rerank" for m in cs["by_module"]),
+        cs,
+    )
+
     # ---- lazy_label 收进 pack（去人设残留）----
     tr = living.travel_time("排练室", mode="walk", now=datetime.now())
     check("lazy-label-pack", "由乃懒得动" in (tr.get("factors") or []), tr.get("factors"))

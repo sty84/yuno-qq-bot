@@ -75,6 +75,7 @@ def extract_facts(conversation) -> list[str]:
             max_tokens=300,
             temperature=0.2,
         )
+        _shared.record_llm_usage("extract", "", resp, len(str(conversation)))
         raw = re.sub(
             r"^```(?:json)?\s*|\s*```$",
             "",
@@ -103,6 +104,7 @@ def structured_extract(conversation) -> dict:
             max_tokens=400,
             temperature=0.1,
         )
+        _shared.record_llm_usage("extract", "structured", resp, len(str(conversation)))
         raw = re.sub(
             r"^```(?:json)?\s*|\s*```$",
             "",

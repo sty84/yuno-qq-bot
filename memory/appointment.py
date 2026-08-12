@@ -171,7 +171,7 @@ def _poke_message(appt, round_no, now) -> str:
         "禁止用括号标注动作；禁止复述身份设定；不要长篇大论。"
     )
     try:
-        return _shared.ask_deepseek(prompt, system=system, max_tokens=150)
+        return _shared.ask_deepseek(prompt, system=system, max_tokens=150, module="appointment")
     except Exception as e:
         _stats_err(e)
         if round_no >= 2:

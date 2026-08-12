@@ -82,7 +82,8 @@ async def random_event_loop(make_ctx):
                 "自然、不刻意、像日常发言。"
             )
             msg = await asyncio.to_thread(
-                _shared.ask_deepseek, prompt, system=_shared.BASE_SYSTEM_PROMPT
+                _shared.ask_deepseek, prompt, system=_shared.BASE_SYSTEM_PROMPT,
+                module="proactive",
             )
             await _shared.send_message(ctx.api, "group", target, msg)
             if random.random() < 0.4:
@@ -170,6 +171,7 @@ async def inspection_loop(make_ctx):
                             _shared.ask_deepseek,
                             prompt,
                             system=_shared.BASE_SYSTEM_PROMPT,
+                            module="inspection",
                         )
                         await _shared.send_message(ctx.api, item["target_type"], item["target"], msg)
                     elif quiet:

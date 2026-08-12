@@ -425,7 +425,7 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
             if p["param"] == "fact"
         }
         if rc["mode"] == "llm":
-            rk = llm_rerank(query_text, candidates, top_k)
+            rk = llm_rerank(query_text, candidates, top_k, paths=[a for a, lst in lists.items() if lst])
         elif rc["mode"] == "cross":
             rk = cross_rerank(query_text, candidates, top_k, topic_facts)
         else:
@@ -680,8 +680,8 @@ def light_rerank(query, candidates, top_k, topic_facts=None):
     return scored[: max(1, int(top_k))]
 
 
-def llm_rerank(query, candidates, top_k):
-    """LLM 重排（best-effort，失败回退 light）。"""
+def llm_rerank(query, candidates, top_k, paths=None):
+    """LLM 重排（best-effort，失败回退 light）；paths=本次参与检索的算法（成本归因用）。"""
     try:
         prompt = (
             f"按与问题的相关度给以下记忆排序，只输出最相关的 {top_k} 条原文，每条一行，不要解释。\n"
@@ -692,6 +692,10 @@ def llm_rerank(query, candidates, top_k):
             messages=[{"role": "user", "content": prompt}],
             max_tokens=300,
             temperature=0.0,
+        )
+        _shared.record_llm_usage(
+            "rerank", ",".join(paths or []), resp,
+            len(str(query)) + sum(len(str(c)) for c in candidates),
         )
         picked = []
         for line in (resp.choices[0].message.content or "").splitlines():

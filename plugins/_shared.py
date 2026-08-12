@@ -193,6 +193,25 @@ def _bump_counter(key, n=1):
         pass
 
 
+def record_llm_usage(module="chat", detail="", resp=None, chars=0):
+    """LLM 调用成本观测：从响应 usage 取 prompt/completion token，落 llm_cost 表 + 计数器。
+    供成本页与"机制 × token × 消融"权衡用。"""
+    try:
+        pt = ct = 0
+        if resp is not None:
+            usage = getattr(resp, "usage", None)
+            if usage is not None:
+                pt = int(getattr(usage, "prompt_tokens", 0) or 0)
+                ct = int(getattr(usage, "completion_tokens", 0) or 0)
+        _db.llm_cost_add(
+            time.strftime("%Y-%m-%dT%H:%M:%S"), module, detail, pt, ct, int(chars or 0)
+        )
+        _bump_counter("llm_prompt_tokens", pt)
+        _bump_counter("llm_completion_tokens", ct)
+    except Exception:
+        pass
+
+
 def ask_deepseek(
     text: str,
     extra_context: str = "",
@@ -200,6 +219,8 @@ def ask_deepseek(
     system=None,
     max_tokens: int = 800,
     temperature=None,
+    module: str = "chat",
+    detail: str = "",
 ) -> str:
     messages = [{"role": "system", "content": system or system_prompt()}]
     if extra_context:
@@ -222,6 +243,7 @@ def ask_deepseek(
             reply = (resp.choices[0].message.content or "").strip()
             _bump_counter("llm_calls", 1)
             _bump_counter("llm_chars", len(str(text)) + len(str(extra_context)) + len(reply))
+            record_llm_usage(module, detail, resp, len(str(text)) + len(str(extra_context)) + len(reply))
             return reply[:MAX_REPLY_LEN] + ("……" if len(reply) > MAX_REPLY_LEN else "")
         except Exception as e:
             last_err = e

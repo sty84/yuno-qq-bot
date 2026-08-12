@@ -108,6 +108,27 @@ def _history_entry(kind, result):
     return {"ts": time.strftime("%Y-%m-%d %H:%M"), "kind": kind, "metrics": m}
 
 
+def _cost_prices() -> tuple:
+    cfg = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("cost", {}) or {}
+    try:
+        pp = float(cfg.get("prompt_price_per_1m", 1.0))
+        cp = float(cfg.get("completion_price_per_1m", 2.0))
+    except (TypeError, ValueError):
+        pp, cp = 1.0, 2.0
+    return pp, cp
+
+
+def _money(prompt, completion) -> float:
+    pp, cp = _cost_prices()
+    return round(float(prompt) / 1e6 * pp + float(completion) / 1e6 * cp, 4)
+
+
+def _cost_summary_today() -> dict:
+    t = _db.llm_cost_summary(1)["total"]
+    t["cost"] = _money(t["prompt"], t["completion"])
+    return t
+
+
 def submit(kind, fn) -> str:
     task_id = uuid.uuid4().hex[:12]
     with _lock:
@@ -267,6 +288,7 @@ def dashboard():
             "subjects_eval": _baseline_file("subjects_eval_baseline.json"),
         },
         "grow_report": _db.kv_get("memory", "last_grow_report"),
+        "cost_today": _cost_summary_today(),
     }
 
 
@@ -479,6 +501,22 @@ def consistency():
     from memory import controller
     done = controller.reconcile_pending()
     return {"pending": pending, "reconciled": done.get("reconciled", 0)}
+
+
+@app.get("/api/costs")
+def costs(days: int = 30):
+    """LLM token / 成本：总量、按天、按模块、按检索路径（rerank 归因）。"""
+    s = _db.llm_cost_summary(days)
+    s["total_cost"] = _money(s["total"]["prompt"], s["total"]["completion"])
+    for d in s["by_day"]:
+        d["cost"] = _money(d["prompt"], d["completion"])
+    for m in s["by_module"]:
+        m["cost"] = _money(m["prompt"], m["completion"])
+    for q in s["by_path"]:
+        q["cost"] = _money(q["prompt"], q["completion"])
+    pp, cp = _cost_prices()
+    s["prices"] = {"prompt_per_1m": pp, "completion_per_1m": cp}
+    return s
 
 
 @app.get("/")
