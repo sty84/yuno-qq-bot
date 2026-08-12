@@ -613,6 +613,41 @@ def test_all_features():
     _id_sec = _pt.split("# 性格", 1)[0]
     check("persona-no-snowferret-seed", "雪貂" not in _id_sec, "身份段仍含雪貂")
 
+    # ---- 证据门控管道（v2.3）----
+    # Step 1 来源标记：ingest 默认 user、sync_identity 标 pack、历史归一
+    memory.ingest("c2c:ev", "", "我上周买了只猫", "", facts=["上周买了只猫"])
+    ev_rows = [r for r in _db.memory_rows("c2c:ev") if r["fact"] == "上周买了只猫"]
+    check("source-user", ev_rows and ev_rows[0].get("source") == "user", ev_rows[:1])
+    _db.memory_add("c2c:ev", "", "旧说法", _ts, None, 0.6, "ingest:2026-08-01T00:00:00")
+    _db.memory_add("c2c:ev", "", "旧人设", _ts, None, 0.6, "persona")
+    _db.memory_source_normalize()
+    old_rows = {r["fact"]: r.get("source") for r in _db.memory_rows("c2c:ev")}
+    check("source-normalize", old_rows.get("旧说法") == "user" and old_rows.get("旧人设") == "pack", old_rows)
+    check("source-pack-ai", any(r.get("source") == "pack" for r in _db.memory_rows("ai")), "ai 无 pack 来源")
+    # Step 2 证据清单注入
+    lexical.bm25_upsert("c2c:ev", "", ["上周买了只猫", "旧说法"])
+    _db.lexicon_sync("c2c:ev", "")
+    reasoning._event_time_cache.update({"ts": 0.0, "key": None, "map": {}})
+    ev_block = context_mod._memory_block(
+        "上周买了猫", ["c2c:ev"], top_k=5, min_score=0.0,
+        extra_scopes=None, expand_query=False, recent=None,
+    )
+    check("evidence-block", "证据状态" in ev_block and "用户亲口陈述" in ev_block, ev_block[:200])
+    # Step 3 生成约束注入（有记忆注入时）
+    captured_ask2 = {}
+
+    def _fake_llm2(*a, **k):
+        captured_ask2["ctx"] = k.get("extra_context", "")
+        return "……嗯。"
+
+    _orig_ask2 = _shared.ask_deepseek
+    _shared.ask_deepseek = _fake_llm2
+    try:
+        agent.ask("上周买了猫", scopes=["c2c:ev"], learn=False)
+    finally:
+        _shared.ask_deepseek = _orig_ask2
+    check("evidence-rule", "证据规则" in captured_ask2.get("ctx", ""), captured_ask2.get("ctx", "")[:120])
+
     # ---- LLM token / 成本观测（v2.3）----
     _db.llm_cost_add("2026-08-12T10:00:00", "chat", "", 1000, 200)
     _db.llm_cost_add("2026-08-12T10:01:00", "rerank", "lexical,vector", 500, 100)

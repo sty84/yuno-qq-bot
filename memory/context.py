@@ -96,6 +96,23 @@ def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, r
             src_label = _source_label(src_map.get(f, ""))
             lines.append("- " + tag + label + src_label)
             shown += 1
+        # 证据门控（v2.3）：按来源统计证据状态，注入分桶说明
+        src_buckets = {}
+        for f, _s, _sc in hits:
+            s = src_map.get(f, "")
+            if s in ("user", "pack", "ai_speculation", "news"):
+                src_buckets[s] = src_buckets.get(s, 0) + 1
+        if src_buckets:
+            parts = []
+            if src_buckets.get("user"):
+                parts.append(f"用户亲口陈述 {src_buckets['user']} 条（高可信，可引用）")
+            if src_buckets.get("pack"):
+                parts.append(f"人设设定 {src_buckets['pack']} 条（可引用）")
+            if src_buckets.get("ai_speculation"):
+                parts.append(f"AI 推测 {src_buckets['ai_speculation']} 条（只能说'我好像记得'）")
+            if src_buckets.get("news"):
+                parts.append(f"资讯 {src_buckets['news']} 条（标注来源）")
+            lines.append("（证据状态：" + "；".join(parts) + "——只把'可引用'的当事实说）")
         if has_approx_time:
             lines.append("（注：以上部分时间记得不确切——用户追问具体日期时如实说'大概'，别编造具体日子；"
                          "能查证就帮 TA 确认。）")
@@ -120,6 +137,14 @@ def _source_label(src) -> str:
     """来源可信标注（v5 Provenance）。"""
     if not src:
         return ""
+    if src == "user":
+        return "·用户亲口说"
+    if src == "pack":
+        return "·人设设定"
+    if src == "ai_speculation":
+        return "·AI 推测"
+    if src == "news":
+        return "·资讯"
     if src.startswith("persona"):
         return "·人设"
     if src.startswith("character"):

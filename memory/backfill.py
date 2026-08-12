@@ -250,6 +250,11 @@ def run(batch=64) -> dict:
     report["entities"] = graph.build_entities()
     report["relations_tagged"] = graph.tag_relations()
     try:
+        # 证据门控（v2.3）：历史 source 归一（ingest→user / persona→pack）
+        report["source_normalized"] = _db.memory_source_normalize()
+    except Exception as e:
+        report["source_normalized"] = {"error": str(e)}
+    try:
         # 旧议题 mood 标签 → 补近似 VAD/复合情绪（幂等）
         report["topic_vad_backfilled"] = topic.backfill_vad()
     except Exception as e:

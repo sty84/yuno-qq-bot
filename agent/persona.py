@@ -222,7 +222,7 @@ def sync_identity() -> str:
     added = 0
     for key, conf, imp, content in fields:
         memory_controller.add_fact(
-            _ai_scope(), key, content, importance=imp, confidence=conf, source="persona"
+            _ai_scope(), key, content, importance=imp, confidence=conf, source="pack"
         )
         category = PERSONA_CATEGORY.get(key, "身份")
         topic.link_fact(_ai_scope(), key, content, category, conf)

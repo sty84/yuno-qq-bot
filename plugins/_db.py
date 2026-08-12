@@ -1786,6 +1786,21 @@ def memory_set_confidence(scope, key, fact, confidence):
         c.commit()
 
 
+def memory_source_normalize() -> dict:
+    """证据门控（v2.3）：历史 source 归一——ingest:* → user（用户亲口说），persona → pack（人设设定）。
+    幂等，可随 memory-grow 自动跑。"""
+    with _lock:
+        c = _connect()
+        cur = c.execute(
+            "UPDATE memories SET source='user' WHERE source LIKE 'ingest:%' OR source='ingest'"
+        )
+        n1 = cur.rowcount
+        cur = c.execute("UPDATE memories SET source='pack' WHERE source='persona'")
+        n2 = cur.rowcount
+        c.commit()
+        return {"ingest_to_user": n1, "persona_to_pack": n2}
+
+
 def memory_delete(scope, key, fact):
     """单条记忆删除（回收策略用）。"""
     with _lock:

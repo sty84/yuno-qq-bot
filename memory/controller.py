@@ -437,7 +437,8 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
             "confidence": conf,
         }
 
-    src = source or f"ingest:{ts[:19]}"
+    # 证据门控（v2.3）：用户 scope 的提取事实统一标 source="user"（用户亲口说，高可信）
+    src = source or "user"
     audience, speaker, mclass = _scene_meta(scope, key)
 
     # 记忆更新：近似重复合并（刷新旧记录，不堆叠）

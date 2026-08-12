@@ -812,6 +812,12 @@ def cmd_topic_vad_backfill() -> str:
     return json.dumps(topic.backfill_vad(), ensure_ascii=False, indent=2)
 
 
+def cmd_memory_source_backfill() -> str:
+    """证据门控：历史记忆 source 归一（ingest→user / persona→pack），幂等。"""
+    from plugins import _db
+    return json.dumps(_db.memory_source_normalize(), ensure_ascii=False, indent=2)
+
+
 def cmd_persona_smoke() -> str:
     """Persona Pack 冒烟：加载校验 + 房间图连通 + 模板渲染 + 代码硬编码扫描。"""
     from agent import persona as persona_mod
@@ -1485,6 +1491,9 @@ def main() -> int:
 
     p = sub.add_parser("topic-vad-backfill", help="旧议题补近似 VAD/复合情绪（幂等）")
     p.set_defaults(func=lambda a: print(cmd_topic_vad_backfill()) or 0)
+
+    p = sub.add_parser("memory-source-backfill", help="证据门控：历史记忆 source 归一（ingest→user / persona→pack）")
+    p.set_defaults(func=lambda a: print(cmd_memory_source_backfill()) or 0)
 
     p = sub.add_parser("persona-smoke", help="Persona Pack 冒烟：加载校验 + 房间连通 + 模板渲染 + 硬编码扫描")
     p.set_defaults(func=lambda a: print(cmd_persona_smoke()) or 0)

@@ -380,6 +380,14 @@ def ask(
             pass
         if mem_ctx:
             ctx_parts.append(mem_ctx)
+        if mem_ctx and scopes:
+            # 证据门控（v2.3 生成约束）：只有证据清单里"可引用"的内容才能当事实陈述
+            ctx_parts.append(
+                "【证据规则·硬性要求】只有上面检索注入记忆里能对应到的内容才能作为事实陈述："
+                "用户亲口说的（·用户亲口说）与人设设定（·人设设定）可引用；"
+                "'AI 推测'只能说'我好像记得'；"
+                "查不到对应记录的细节/约定/人物关系一律用'我不确定/我这边没记录'表达，禁止编造。"
+            )
     if extra_context:
         ctx_parts.append(extra_context)
     if scopes:
