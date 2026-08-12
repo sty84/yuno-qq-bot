@@ -612,6 +612,24 @@ def user_mood_slow(scope):
     }
 
 
+def blended_estimate(scope, alpha=0.7):
+    """心境一致性检索用（慢通道桥接）：快状态 × alpha + 日级底色 × (1-alpha)。
+    防止单条消息的情绪波动把检索带偏；无观测返回 None。"""
+    est = user_estimate(scope)
+    if not est or not est.get("vad"):
+        return None
+    out = dict(est["vad"])
+    slow = user_mood_slow(scope)
+    if slow and slow.get("vad"):
+        a = float(alpha)
+        out = {
+            "v": _norm(a * out["v"] + (1 - a) * float(slow["vad"]["v"])),
+            "a": _norm(a * out["a"] + (1 - a) * float(slow["vad"]["a"])),
+            "d": _norm(a * out["d"] + (1 - a) * float(slow["vad"]["d"])),
+        }
+    return out
+
+
 def _age_hours(r) -> float:
     try:
         return max(0.0, (time.time() - float(r.get("ts", time.time()))) / 3600.0)

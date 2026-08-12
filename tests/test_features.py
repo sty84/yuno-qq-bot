@@ -431,6 +431,12 @@ def test_all_features():
         fast2 and slow2 and slow2["vad"]["v"] > fast2["vad"]["v"],
         {"fast": fast2 and fast2["vad"], "slow": slow2 and slow2["vad"]},
     )
+    blend = emotion_mod.blended_estimate("c2c:slow", alpha=0.7)
+    check(
+        "mood-blend-slow",
+        blend and fast2["vad"]["v"] < blend["v"] < slow2["vad"]["v"],
+        blend,
+    )
 
     # ---- 情绪寻址复核（affective-episodic）：语义弱时按情绪 VAD 二级检索 ----
     emotion_mod.user_observe("c2c:ea", {"emotion": "低落", "valence": -0.7, "arousal": 0.6, "dominance": -0.5, "playful": False})
@@ -545,6 +551,20 @@ def test_all_features():
     )
     tblock = context_mod._topic_block("工作", ["c2c:t"])
     check("topic-mood-block", "情绪底色" in tblock, tblock[:200])
+
+    # ---- 缺口 1：旧议题 vad 回填（backfill，幂等）----
+    bf_ts = datetime.now().isoformat(timespec="seconds")
+    bf_tid = topic_mod.find_or_create("c2c:bf", "", "工作", "旧工作议题")
+    _db.topic_param_add(bf_tid, "fact", "悲喜交加，被夸了很开心但想到加班又难过", 0.7, bf_ts)
+    _db.topic_param_add(bf_tid, "mood", "低落", 0.7, bf_ts)
+    topic_mod.backfill_vad()
+    bf_params = _db.topic_params(bf_tid)
+    check("topic-vad-backfill", any(p["param"] == "vad" for p in bf_params), bf_params[:4])
+    check(
+        "topic-compound-backfill",
+        any(p["param"] == "compound" and p["value"] == "悲喜交加" for p in bf_params),
+        bf_params,
+    )
     w = pack_mod.world()
     check("pack-world", "layout" in w and "items" in w and w.get("role"), list(w.keys()))
     check("persona-name", persona_mod.persona_name() == "千石由乃", persona_mod.persona_name())

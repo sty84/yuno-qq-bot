@@ -781,6 +781,12 @@ def cmd_bandit_status(scope: str = "") -> str:
     return json.dumps(bandit.status(scope), ensure_ascii=False, indent=2)
 
 
+def cmd_topic_vad_backfill() -> str:
+    """给只有 mood 标签的旧议题补近似 VAD/复合情绪（幂等，也可随 memory-grow 自动跑）。"""
+    from memory import topic
+    return json.dumps(topic.backfill_vad(), ensure_ascii=False, indent=2)
+
+
 def cmd_persona_smoke() -> str:
     """Persona Pack 冒烟：加载校验 + 房间图连通 + 模板渲染 + 代码硬编码扫描。"""
     from agent import persona as persona_mod
@@ -1379,6 +1385,9 @@ def main() -> int:
     p = sub.add_parser("bandit-status", help="回应策略 bandit 后验：各策略均值 + 上次选择")
     p.add_argument("--scope", default="", help="用户 scope")
     p.set_defaults(func=lambda a: print(cmd_bandit_status(a.scope)) or 0)
+
+    p = sub.add_parser("topic-vad-backfill", help="旧议题补近似 VAD/复合情绪（幂等）")
+    p.set_defaults(func=lambda a: print(cmd_topic_vad_backfill()) or 0)
 
     p = sub.add_parser("persona-smoke", help="Persona Pack 冒烟：加载校验 + 房间连通 + 模板渲染 + 硬编码扫描")
     p.set_defaults(func=lambda a: print(cmd_persona_smoke()) or 0)

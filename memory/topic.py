@@ -262,6 +262,54 @@ def _vad_table_drift() -> dict:
     return drifts
 
 
+def backfill_vad(limit=200) -> dict:
+    """给只有 mood 标签、没有 vad 参数的旧议题补近似 VAD（来自 analysis.EMOTION_METRICS）
+    和复合情绪参数（emotion._compound_of）。幂等：已有 vad 的议题跳过。"""
+    from memory import analysis, emotion as emotion_mod
+    done = skipped = 0
+    samples = []
+    for t in _db.topic_rows(limit=limit):
+        params = _db.topic_params(t["id"])
+        if any(p.get("param") == "vad" for p in params):
+            skipped += 1
+            continue
+        moods = [p for p in params if p.get("param") == "mood"]
+        facts = [p.get("value") for p in params if p.get("param") == "fact"]
+        added = 0
+        last_mood = None
+        for p in moods:
+            m = analysis.EMOTION_METRICS.get(str(p.get("value") or ""))
+            if not m:
+                continue
+            last_mood = p
+            vad = [
+                round(float(m["valence"]), 4),
+                round(float(m["arousal"]), 4),
+                round(float(m["dominance"]), 4),
+            ]
+            _db.topic_param_add(
+                t["id"], "vad", json.dumps(vad, ensure_ascii=False),
+                float(p.get("confidence") or 0.7), str(p.get("updated_at") or ""),
+            )
+            added += 1
+        if not added:
+            continue
+        compound = ""
+        try:
+            fact = facts[-1] if facts else str(t.get("topic") or "")
+            compound = emotion_mod._compound_of(fact, str(last_mood.get("value") or "") if last_mood else "", vad)
+            if compound and not any(pp.get("param") == "compound" for pp in params):
+                _db.topic_param_add(
+                    t["id"], "compound", compound, 0.6,
+                    str(last_mood.get("updated_at") or "") if last_mood else "",
+                )
+        except Exception:
+            pass
+        done += 1
+        samples.append({"topic": t.get("topic"), "vad_added": added, "compound": compound})
+    return {"backfilled": done, "already_had_vad": skipped, "samples": samples[:10]}
+
+
 def package(topic_id) -> dict:
     row = _db.topic_get(topic_id)
     if not row:

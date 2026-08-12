@@ -325,9 +325,10 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
         try:
             from memory import emotion as _emotion_mod, topic as topic_mod
             emotion_mod = _emotion_mod
-            est = _emotion_mod.user_estimate(all_scopes[0] if all_scopes else "")
-            if est and est.get("vad"):
-                user_vad = est["vad"]
+            scope0 = all_scopes[0] if all_scopes else ""
+            # 慢通道桥接（v2.2+）：快状态 × mood_alpha_fast + 日级底色 × (1-fast)
+            user_vad = _emotion_mod.blended_estimate(scope0, float(_cfg("mood_alpha_fast", 0.7)))
+            if user_vad:
                 mood_facts = topic_mod.mood_map(all_scopes)
         except Exception as e:
             _stats_err(e)

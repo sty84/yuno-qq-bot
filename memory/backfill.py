@@ -248,6 +248,11 @@ def run(batch=64) -> dict:
     report["entities"] = graph.build_entities()
     report["relations_tagged"] = graph.tag_relations()
     try:
+        # 旧议题 mood 标签 → 补近似 VAD/复合情绪（幂等）
+        report["topic_vad_backfilled"] = topic.backfill_vad()
+    except Exception as e:
+        report["topic_vad_backfilled"] = {"error": str(e)}
+    try:
         from memory import procedures as procedures_mod
         report["procedures"] = procedures_mod.stats()  # System 1 习惯统计
     except Exception as e:
