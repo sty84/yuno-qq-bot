@@ -540,6 +540,49 @@ def test_all_features():
         {"baseline": iso.get("baseline"), "matrix": iso.get("matrix")},
     )
 
+    # ---- 改动 1：ai 人设元字段（examples/规则）排除出普通检索 ----
+    _ts = datetime.now().isoformat(timespec="seconds")
+    _db.memory_add("ai", "examples", "你是做什么的，DJ兼音控师", _ts, None, 0.9, "persona")
+    _db.memory_add("ai", "identity", "千石由乃是乐队DJ兼音控师", _ts, None, 0.9, "persona")
+    lexical.bm25_upsert("ai", "examples", ["你是做什么的，DJ兼音控师"])
+    lexical.bm25_upsert("ai", "identity", ["千石由乃是乐队DJ兼音控师"])
+    _db.lexicon_sync("ai", "")
+    reasoning._event_time_cache.update({"ts": 0.0, "key": None, "map": {}})
+    meta_hits = reasoning.retrieve("做什么的", ["ai"], top_k=5, min_score=0.0)
+    id_hits = reasoning.retrieve("千石由乃", ["ai"], top_k=5, min_score=0.0)
+    check(
+        "ai-meta-excluded",
+        not any("你是做什么的" in f for f, _s, _sc in meta_hits)
+        and any("乐队DJ" in f for f, _s, _sc in id_hits),
+        {"meta": meta_hits[:3], "id": id_hits[:3]},
+    )
+
+    # ---- 改动 2：LLM 查询改写（宽泛→具体；已具体不改；失败降级；缓存）----
+    reasoning._rewrite_cache.clear()
+    check("rewrite-skip-specific", reasoning.rewrite_query("阿拉蕾在干什么") == "阿拉蕾在干什么")
+
+    class _FakeMsg:
+        content = "仲町阿拉蕾 最近 行踪"
+
+    class _FakeResp:
+        choices = [type("_C", (), {"message": _FakeMsg()})()]
+
+    class _FakeCompletions:
+        def create(self, **k):
+            return _FakeResp()
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    _orig_deepseek = _shared.deepseek
+    _shared.deepseek = type("_O", (), {"chat": _FakeChat()})()
+    try:
+        rw1 = reasoning.rewrite_query("我最近说过什么")
+        rw2 = reasoning.rewrite_query("我最近说过什么")
+    finally:
+        _shared.deepseek = _orig_deepseek
+    check("rewrite-llm", rw1 == "仲町阿拉蕾 最近 行踪" and rw2 == rw1, (rw1, rw2))
+
     # ---- LLM token / 成本观测（v2.3）----
     _db.llm_cost_add("2026-08-12T10:00:00", "chat", "", 1000, 200)
     _db.llm_cost_add("2026-08-12T10:01:00", "rerank", "lexical,vector", 500, 100)

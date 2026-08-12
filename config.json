@@ -74,8 +74,8 @@
       "throttle_s": 60,
       "context_budget_chars": 2000,
       "query": {
-        "_comment": "预留：LLM 查询重写/多查询尚未实现，rewrite_llm 与 multi_query 当前无效，改这里不生效。",
-        "rewrite_llm": false,
+        "_comment": "LLM 查询重写（v2.3 已实现）：宽泛/指代查询改写为具体名词再检索；已具体不改写、失败降级原句、同 query 缓存。",
+        "rewrite_llm": true,
         "multi_query": true
       },
       "rerank": {

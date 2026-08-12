@@ -3,6 +3,7 @@
 每个算法独立产出有序候选，再用 Reciprocal Rank Fusion 融合（可配置权重），
 最后叠加 Memory Policy（重要度/时效）与可信度。换新算法 = 往 _ranked_lists 加一个分支。"""
 
+import re
 import time
 from datetime import datetime
 
@@ -15,6 +16,20 @@ _route_cache = None
 _route_flush_ts = {"ts": 0.0}
 RRF_K = 60
 _event_time_cache = {"key": None, "map": {}, "ts": 0.0}
+_rewrite_cache = {}
+
+# ai scope 里的人设元字段（说话示例/行为规则/风格参数）不该进普通记忆检索——
+# 否则宽泛查询会命中"你是做什么的"这类示例文本（v2.3 改动 1）
+AI_META_EXCLUDE_KEYS = frozenset((
+    "examples", "avoid", "defaults", "behavior_policy", "value",
+    "conflict", "style", "catchphrase", "mood_profile",
+))
+
+# 宽泛/指代查询：LLM 改写为具体名词后再检索（v2.3 改动 2）
+_DEICTIC_RE = re.compile(
+    r"我(?:最近|上次|之前|以前)?(?:说过|说过什么|做过|做过什么|是做什么的|是谁|有什么)"
+    r"|你(?:是做什么的|是谁)|我们(?:是|做过|说过)|我(?:想|要|有)什么"
+)
 
 
 def _event_time_map(scopes) -> dict:
@@ -64,6 +79,47 @@ def _query_vec(text):
     vec = vecs[0] if vecs else None
     _query_cache = {"ts": time.time(), "text": text, "vec": vec}
     return vec
+
+
+def _rewrite_enabled() -> bool:
+    """memory.core.query.rewrite_llm：LLM 查询改写开关（缺省开启）。"""
+    try:
+        q = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("query", {}) or {}
+        return bool(q.get("rewrite_llm", True))
+    except Exception:
+        return True
+
+
+def rewrite_query(query, scopes=None) -> str:
+    """LLM 查询改写（治本）：宽泛/指代查询 → 具体名词短语，再走检索。
+    已具体不改写（省 token）；LLM 失败降级原句；同 query 缓存不重复调用。"""
+    global _rewrite_cache
+    q = str(query or "").strip()
+    if not q or not _DEICTIC_RE.search(q):
+        return q
+    if q in _rewrite_cache:
+        return _rewrite_cache[q]
+    try:
+        from plugins import _shared
+        prompt = (
+            "把下面这句宽泛/指代式的提问改写成适合记忆检索的具体名词短语。"
+            "输出一行（主语+主题+关键词，中文，不超过 15 字），不要解释、不要引号。\n"
+            f"原句：{q[:100]}"
+        )
+        resp = _shared.deepseek_chat(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=30, temperature=0.1,
+            module="query_rewrite", detail="rewrite",
+        )
+        out = (resp.choices[0].message.content or "").strip().strip('"“”')
+        if not out or len(out) > 30 or out == q:
+            return q
+        if len(_rewrite_cache) > 200:
+            _rewrite_cache = {}
+        _rewrite_cache[q] = out
+        return out
+    except Exception:
+        return q
 
 
 def _plan(query_text) -> dict:
@@ -312,6 +368,11 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
                 if r["fact"] in candidates
                 and _visible(r, scopes)
                 and not str(r.get("fact", "")).startswith("enc:")
+                # v2.3 改动 1：ai scope 的人设元字段（说话示例/规则/风格）不进普通检索
+                and not (
+                    str(r.get("scope") or "").startswith("ai")
+                    and str(r.get("key") or "") in AI_META_EXCLUDE_KEYS
+                )
                 and (not loc_mark or loc_mark in str(r.get("fact", "")))
                 and float(r.get("privacy", 0.0)) < privacy_th
             ]
@@ -481,6 +542,10 @@ def retrieve(
         _stats_err(e)
     if not query_text or not scopes:
         return []
+    orig_query = query_text
+    if _rewrite_enabled():
+        # LLM 查询改写（v2.3 改动 2）：宽泛/指代查询 → 具体名词；已具体/失败/缓存直接返回原句
+        query_text = rewrite_query(query_text, scopes)
     if window is None and not _cfg("ablation_disable_time", False):
         try:
             from memory import time_extract
@@ -539,7 +604,7 @@ def retrieve(
         except Exception as e:
             _stats_err(e)
     if min_score >= 0.05 and (_cfg("telemetry", {}) or {}).get("query_log", True):
-        _db.query_log_add(query_text, scopes, top_k, [f for f, _s, _sc in hits])
+        _db.query_log_add(orig_query, scopes, top_k, [f for f, _s, _sc in hits])
     # 隐式反馈：只对真正返回的记忆计一次调用
     rows = {}
     for scope in list(scopes) + list(extra_scopes or []):
