@@ -318,6 +318,20 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
     if not rows:
         return []
 
+    # 心境一致性检索（v2.2+）：当前用户情绪 VAD × 议题情绪质心距离 → 乘数加权
+    mood_boost = float(_cfg("mood_boost", 0.12))
+    user_vad, mood_facts, emotion_mod = None, {}, None
+    if mood_boost > 0:
+        try:
+            from memory import emotion as _emotion_mod, topic as topic_mod
+            emotion_mod = _emotion_mod
+            est = _emotion_mod.user_estimate(all_scopes[0] if all_scopes else "")
+            if est and est.get("vad"):
+                user_vad = est["vad"]
+                mood_facts = topic_mod.mood_map(all_scopes)
+        except Exception as e:
+            _stats_err(e)
+
     # RRF 融合
     fusion = {}
     for algo, lst in lists.items():
@@ -381,6 +395,12 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
         # 策略/置信度作为乘性微调因子（v31）：相关度为主排序，强度只做微调
         s *= 1.0 + pc
         s *= 1.0 + weights["confidence"] * conf
+        if user_vad and fact in mood_facts and emotion_mod is not None:
+            try:
+                d = min(1.0, emotion_mod.dist(user_vad, mood_facts[fact]["vad"]) / 1.8)
+                s *= 1.0 + mood_boost * (1.0 - d)  # 越贴近当前情绪，权重越高
+            except Exception as e:
+                _stats_err(e)
         scored.append((s, fact, r["scope"]))
 
     max_score = max((s for s, _f, _sc in scored), default=0.0) or 1.0

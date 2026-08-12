@@ -136,7 +136,14 @@ def cmd_emotion_eval(path: str = "") -> str:
             probes = json.load(f)
     except OSError as e:
         return f"评测集不存在：{path}（{e}）"
-    return json.dumps(memory.emotion_eval(probes), ensure_ascii=False, indent=2)
+    res = memory.emotion_eval(probes)
+    try:
+        # v2.2+ 议题 mood-VAD 一致性（写入标签↔存向量 + 跨表 VAD 漂移）
+        from memory import topic as topic_mod
+        res["topic_mood"] = topic_mod.mood_eval()
+    except Exception:
+        pass
+    return json.dumps(res, ensure_ascii=False, indent=2)
 
 
 def cmd_emotion_log(days: int = 14, out: str = "") -> str:

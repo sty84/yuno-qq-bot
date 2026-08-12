@@ -410,6 +410,38 @@ def test_all_features():
     check("class-work-stable", policy_mod.fact_class("c2c:x", "", "我在腾讯工作") == "stable")
     cr = policy_mod.classify_report()
     check("class-report", cr.get("accuracy") == 1.0 and not cr.get("errors"), cr)
+
+    # ---- 议题情绪打通（topic mood ↔ VAD，v2.2+）----
+    from memory import topic as topic_mod
+    tid1 = topic_mod.link_fact(
+        "c2c:t", "", "今天工作很累", "工作", confidence=0.7,
+        an={"emotion": "低落", "valence": -0.7, "arousal": 0.6, "dominance": -0.5,
+            "importance": 0.5, "playful": False},
+    )
+    tid2 = topic_mod.link_fact(
+        "c2c:t", "", "今天工作很累", "工作", confidence=0.7,
+        an={"emotion": "开心", "valence": 0.8, "arousal": 0.5, "dominance": 0.5,
+            "importance": 0.5, "playful": False},
+    )
+    check("topic-vad-same-id", tid1 == tid2, (tid1, tid2))
+    tparams = _db.topic_params(tid1)
+    check("topic-vad-stored", sum(1 for p in tparams if p["param"] == "vad") >= 2, tparams[:4])
+    tc = topic_mod.mood_centroid(tid1)
+    check(
+        "topic-mood-centroid",
+        tc is not None and tc.get("n") == 2 and abs(tc["vad"]["v"]) < 0.3 and "trend" in tc,
+        tc,
+    )
+    check("topic-mood-map", "今天工作很累" in topic_mod.mood_map(["c2c:t"]))
+    tme = topic_mod.mood_eval()
+    check(
+        "topic-mood-eval",
+        "write_consistency" in tme and "centroid_consistency" in tme
+        and isinstance(tme.get("vad_table_drift"), dict),
+        tme,
+    )
+    tblock = context_mod._topic_block("工作", ["c2c:t"])
+    check("topic-mood-block", "情绪底色" in tblock, tblock[:200])
     w = pack_mod.world()
     check("pack-world", "layout" in w and "items" in w and w.get("role"), list(w.keys()))
     check("persona-name", persona_mod.persona_name() == "千石由乃", persona_mod.persona_name())

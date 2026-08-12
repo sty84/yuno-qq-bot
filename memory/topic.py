@@ -1,6 +1,8 @@
 """议题化：大类（category）→ 议题（topic）→ 参数（fact / motive / background / mood / playful / confidence）。
 话题按实体命名（如“MCP 项目”），同一议题的事实/情绪/玩笑语境聚合在一起，检索时按议题打包。"""
 
+import json
+import time
 from datetime import datetime
 
 from plugins import _db
@@ -51,6 +53,20 @@ def link_fact(scope, key, fact, category, confidence=0.7, an=None) -> int:
     _db.topic_param_add(tid, "fact", fact, confidence, ts)
     if an.get("emotion") and an["emotion"] != "平静":
         _db.topic_param_add(tid, "mood", an["emotion"], confidence, ts)
+    # v2.2+ 情绪打通：mood 标签保留兼容，并行补存 VAD 向量 + 复合情绪（analysis 结果里本来就带 VAD）
+    try:
+        vad = [
+            round(float(an.get("valence", 0.0)), 4),
+            round(float(an.get("arousal", 0.0)), 4),
+            round(float(an.get("dominance", 0.0)), 4),
+        ]
+        _db.topic_param_add(tid, "vad", json.dumps(vad, ensure_ascii=False), confidence, ts)
+        from memory import emotion as emotion_mod
+        compound = emotion_mod._compound_of(fact, an.get("emotion") or "", vad)
+        if compound:
+            _db.topic_param_add(tid, "compound", compound, confidence, ts)
+    except Exception:
+        pass
     _db.topic_param_add(
         tid, "playful",
         "true" if an.get("playful") else "false",
@@ -58,6 +74,192 @@ def link_fact(scope, key, fact, category, confidence=0.7, an=None) -> int:
         ts,
     )
     return tid
+
+
+def mood_centroid_from_params(params, window_days=180) -> dict:
+    """议题情绪质心：vad 参数按时间衰减 + 位置加权平均（同 emotion.user_estimate 模式）。
+    返回 {vad, label, intensity, label_zh, trend, n, compound}；无 vad 参数返回 None。"""
+    vads = [(i, p) for i, p in enumerate(params or []) if p.get("param") == "vad"]
+    if not vads:
+        return None
+    n = len(vads)
+    now = time.time()
+    weights = []
+    for i, p in vads:
+        age_days = 0.0
+        try:
+            ut = str(p.get("updated_at") or "")
+            if ut:
+                age_days = max(0.0, (now - datetime.fromisoformat(ut[:19]).timestamp()) / 86400.0)
+        except Exception:
+            pass
+        rec = 0.5 ** (age_days / float(window_days))   # 时间衰减：window_days 半衰期
+        pos = 0.5 + 0.5 * i / max(1, n - 1)           # 越近权重越高
+        weights.append(rec * pos)
+    total = sum(weights)
+    s = {"v": 0.0, "a": 0.0, "d": 0.0}
+
+    def _vad(p):
+        try:
+            v = json.loads(str(p.get("value") or "[]"))
+            return [float(v[0]), float(v[1]), float(v[2])]
+        except Exception:
+            return None
+
+    vals = [(_vad(p), w) for (_, p), w in zip(vads, weights)]
+    vals = [(v, w) for v, w in vals if v]
+    if not vals:
+        return None
+    total = sum(w for _v, w in vals)
+    for v, w in vals:
+        s["v"] += v[0] * w / total
+        s["a"] += v[1] * w / total
+        s["d"] += v[2] * w / total
+    half = max(1, n // 2)
+    v_first = sum(_vad(p)[0] for _, p in vads[:half] if _vad(p)) / max(1, half)
+    rest = vads[half:]
+    v_last = sum(_vad(p)[0] for _, p in rest if _vad(p)) / max(1, len(rest)) if rest else v_first
+    trend = "变好" if v_last - v_first > 0.2 else ("变差" if v_first - v_last > 0.2 else "平稳")
+    from memory import emotion as emotion_mod
+    label, intensity, _ = emotion_mod.label_from_vad(s)
+    compound = next((p.get("value") for p in reversed(params or []) if p.get("param") == "compound"), "")
+    return {
+        "vad": s,
+        "label": label,
+        "intensity": round(intensity, 2),
+        "label_zh": emotion_mod.label_zh(s),
+        "trend": trend,
+        "n": n,
+        "compound": str(compound or ""),
+    }
+
+
+def mood_centroid(topic_id, window_days=180) -> dict:
+    """按 topic_id 取议题情绪质心。"""
+    return mood_centroid_from_params(_db.topic_params(topic_id), window_days)
+
+
+def mood_text(topic_id=None, params=None) -> str:
+    """议题情绪底色文本：'低落（偏无力）→ 近两周转开心'；复合时带底色。"""
+    c = mood_centroid_from_params(params) if params is not None else (
+        mood_centroid(topic_id) if topic_id else None
+    )
+    if not c or c["label"] == "平静":
+        return ""
+    parts = [c["label_zh"]]
+    a = c["vad"]["a"]
+    if abs(a) < 0.25:
+        parts.append("偏平静/无力")
+    elif a > 0.55:
+        parts.append("偏强烈")
+    if c["trend"] != "平稳":
+        parts.append("近两周转开心" if c["trend"] == "变好" else "近两周转低落")
+    if c.get("compound"):
+        parts.append(f"复合底色：{c['compound']}")
+    return "；".join(parts)
+
+
+def mood_map(scopes, limit=200) -> dict:
+    """fact → 议题情绪质心（供检索层心境一致性加权）。"""
+    out = {}
+    for scope in scopes or []:
+        for t in _db.topic_rows(scope, limit=limit):
+            params = _db.topic_params(t["id"])
+            c = mood_centroid_from_params(params)
+            if not c:
+                continue
+            for p in params:
+                if p.get("param") == "fact":
+                    out[p.get("value")] = c
+    return out
+
+
+def mood_eval(limit=200) -> dict:
+    """议题 mood-VAD 一致性：
+    1) write_consistency：同一时刻写入的 mood 标签 ↔ vad 向量应一致（来自同一 analysis）；
+    2) centroid_consistency：聚合质心应贴近某个 mood 标签（混合情绪的议题可合理地不贴近）；
+    3) compound_topics：复合情绪写入后不坍缩；
+    4) vad_table_drift：analysis.EMOTION_METRICS 与 emotion.LABEL_VAD 跨表漂移。"""
+    from memory import analysis, emotion as emotion_mod
+    write_n = write_ok = centroid_n = centroid_ok = compound_n = 0
+    samples = []
+    for t in _db.topic_rows(limit=limit):
+        params = _db.topic_params(t["id"])
+        moods = sorted({p.get("value") for p in params if p.get("param") == "mood"})
+        # 写入一致性：同一 updated_at 组内 mood/vad 按插入顺序配对
+        by_ts = {}
+        for p in params:
+            by_ts.setdefault(str(p.get("updated_at") or ""), []).append(p)
+        for ps in by_ts.values():
+            ms = [p for p in ps if p.get("param") == "mood"]
+            vs = [p for p in ps if p.get("param") == "vad"]
+            for m, v in zip(ms, vs):
+                write_n += 1
+                mt = analysis.EMOTION_METRICS.get(m.get("value"))
+                ok = True
+                if mt:
+                    try:
+                        vv = json.loads(str(v.get("value") or "[]"))
+                        d = emotion_mod.dist(
+                            {"v": vv[0], "a": vv[1], "d": vv[2]},
+                            {"v": mt["valence"], "a": mt["arousal"], "d": mt["dominance"]},
+                        )
+                        ok = d < 0.15
+                    except Exception:
+                        ok = False
+                if ok:
+                    write_ok += 1
+        c = mood_centroid_from_params(params)
+        if not c:
+            continue
+        centroid_n += 1
+        cok = False
+        for m in moods:
+            mt = analysis.EMOTION_METRICS.get(m)
+            if not mt:
+                continue
+            exp = {"v": mt["valence"], "a": mt["arousal"], "d": mt["dominance"]}
+            if emotion_mod.dist(c["vad"], exp) < 0.45:
+                cok = True
+                break
+        if cok:
+            centroid_ok += 1
+        comps = [p.get("value") for p in params if p.get("param") == "compound"]
+        if comps:
+            compound_n += 1
+        samples.append({
+            "topic": t.get("topic"), "centroid_label": c["label"],
+            "moods": moods, "centroid_ok": cok,
+            "compound": comps[-1] if comps else "",
+        })
+    return {
+        "n": len(_db.topic_rows(limit=limit)),
+        "write_consistency": round(write_ok / write_n, 3) if write_n else None,
+        "write_n": write_n,
+        "centroid_consistency": round(centroid_ok / centroid_n, 3) if centroid_n else None,
+        "centroid_n": centroid_n,
+        "compound_topics": compound_n,
+        "samples": samples[:10],
+        "vad_table_drift": _vad_table_drift(),
+    }
+
+
+def _vad_table_drift() -> dict:
+    """analysis.EMOTION_METRICS 与 emotion.LABEL_VAD 的同名标签 VAD 漂移（跨表一致性）。"""
+    from memory import analysis, emotion as emotion_mod
+    drifts = {}
+    for label, m in analysis.EMOTION_METRICS.items():
+        lv = emotion_mod.LABEL_VAD.get(label)
+        if not lv:
+            continue
+        d = emotion_mod.dist({"v": m["valence"], "a": m["arousal"], "d": m["dominance"]}, lv)
+        if d > 0.25:
+            drifts[label] = {
+                "metrics": {k: m.get(k) for k in ("valence", "arousal", "dominance")},
+                "label_vad": lv,
+                "dist": round(d, 3),
+            }
+    return drifts
 
 
 def package(topic_id) -> dict:

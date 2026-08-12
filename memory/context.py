@@ -217,8 +217,16 @@ def _topic_block(query, scopes) -> str:
             line = f"- [{t['category']}] {t['topic']}（{t.get('status', 'active')}）"
             if facts:
                 line += "\n  · " + "\n  · ".join(facts[:3])
-            if moods:
-                line += f"\n  情绪：{'/'.join(moods)}"
+            try:
+                from memory import topic as topic_mod
+                mtext = topic_mod.mood_text(params=t.get("params"))
+                if mtext:
+                    line += f"\n  情绪底色：{mtext}"
+                elif moods:
+                    line += f"\n  情绪：{'/'.join(moods)}"
+            except Exception:
+                if moods:
+                    line += f"\n  情绪：{'/'.join(moods)}"
             if playful:
                 line += "\n  （玩笑语境为主）"
             lines.append(line)
