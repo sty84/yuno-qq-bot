@@ -76,19 +76,38 @@ _BASIC_EMO_WORDS = {
     "信": "信任", "放心": "信任",
 }
 
-# 现有 analysis 标签 → VAD（用户侧观测用，独立于 analysis 的 metrics 以免循环依赖）
-LABEL_VAD = {
+# 现有 analysis 标签 → VAD（用户侧观测用）
+# v2.2+ 统一：LABEL_VAD 从 analysis.EMOTION_METRICS 派生（单一事实源），
+# 避免"低落"在 analysis（arousal 0.6）与 emotion（arousal -0.35）两表漂移打架。
+_LABEL_VAD_FALLBACK = {
     "开心": {"v": 0.8, "a": 0.5, "d": 0.5},
     "兴奋": {"v": 0.8, "a": 0.85, "d": 0.4},
     "期待": {"v": 0.4, "a": 0.65, "d": 0.3},
     "焦虑": {"v": -0.5, "a": 0.85, "d": -0.4},
-    "低落": {"v": -0.55, "a": -0.35, "d": -0.4},
+    "低落": {"v": -0.7, "a": 0.6, "d": -0.5},
     "愤怒": {"v": -0.7, "a": 0.7, "d": 0.5},
     "恐惧": {"v": -0.8, "a": 0.7, "d": -0.7},
     "惊讶": {"v": 0.0, "a": 0.8, "d": 0.0},
     "厌恶": {"v": -0.7, "a": 0.3, "d": 0.1},
     "平静": {"v": 0.0, "a": 0.0, "d": 0.0},
 }
+
+
+def _build_label_vad() -> dict:
+    """单一事实源：从 analysis.EMOTION_METRICS 派生；期待 由情绪锥锚点兜底。"""
+    try:
+        from memory import analysis as _analysis
+        out = {
+            label: {"v": m["valence"], "a": m["arousal"], "d": m["dominance"]}
+            for label, m in _analysis.EMOTION_METRICS.items()
+        }
+        out.setdefault("期待", {"v": 0.4, "a": 0.65, "d": 0.3})
+        return out
+    except Exception:
+        return dict(_LABEL_VAD_FALLBACK)
+
+
+LABEL_VAD = _build_label_vad()
 
 INTENSIFIERS = (
     (("有点", "稍微", "一点点", "略", "些许"), 0.6),
@@ -331,15 +350,17 @@ def ai_block():
 # ===== 用户情绪观测 =====
 def _user_vad(an):
     an = an or {}
+    # analysis 显式 VAD 字段优先（与 LABEL_VAD 同源，双保险；兼容旧调用方只传 label）
+    if an.get("valence") is not None or an.get("arousal") is not None or an.get("dominance") is not None:
+        return {
+            "v": _norm(an.get("valence", 0.0)),
+            "a": _norm(an.get("arousal", 0.0)),
+            "d": _norm(an.get("dominance", 0.0)),
+        }
     label = str(an.get("emotion") or "平静")
     if label in LABEL_VAD:
         return dict(LABEL_VAD[label])
-    # 兼容已有 VAD 字段
-    return {
-        "v": _norm(an.get("valence", 0.0)),
-        "a": _norm(an.get("arousal", 0.0)),
-        "d": _norm(an.get("dominance", 0.0)),
-    }
+    return {"v": 0.0, "a": 0.0, "d": 0.0}
 
 
 def _intensity_mult(text) -> float:
