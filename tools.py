@@ -373,7 +373,8 @@ def cmd_memory_probes(limit: int, out: str) -> str:
         )
     if not probes:
         return "没有待导出的查询日志（先让机器人跑一阵子）"
-    dest = pathlib.Path(out) if out else ROOT / "data" / "probes.json"
+    # 证据门控/评测集联动修复：必须写活库 DATA_DIR（persona-<pack>），否则消融/管理台读不到
+    dest = pathlib.Path(out) if out else _shared.DATA_DIR / "probes.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(probes, ensure_ascii=False, indent=2), encoding="utf-8")
     _db.query_log_mark_exported([r["id"] for r in rows])
@@ -512,7 +513,7 @@ def cmd_data_export(out: str = "", with_config: bool = False) -> str:
         }
         (tmp / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
         for name in ("probes.json",):
-            src = ROOT / "data" / name
+            src = _shared.DATA_DIR / name
             if src.exists():
                 shutil.copyfile(src, tmp / name)
         if with_config:
@@ -1314,7 +1315,7 @@ def main() -> int:
 
     p = sub.add_parser("memory-probes", help="把查询日志导出为评测集")
     p.add_argument("--limit", type=int, default=200)
-    p.add_argument("--out", default="", help="输出路径（默认 data/probes.json）")
+    p.add_argument("--out", default="", help="输出路径（默认 DATA_DIR/probes.json，即 persona-<pack> 活库）")
     p.set_defaults(func=lambda a: print(cmd_memory_probes(a.limit, a.out)) or 0)
 
     p = sub.add_parser("memory-calibrate", help="用评测集训练置信度标定")

@@ -738,6 +738,11 @@ def test_all_features():
     removed = appt_mod.clear_scope("c2c:poke2")
     check("appt-clear-scope", removed == 1 and appt_mod._appts() == [], (removed, appt_mod._appts()))
 
+    # ---- 评测集路径联动：memory-probes 导出到活库 DATA_DIR（消融/管理台同源）----
+    _db.query_log_add("白巧克力放在哪", ["c2c:t"], 5, ["白巧克力"])
+    p_res = tools_mod.cmd_memory_probes(limit=10, out="")
+    check("probes-dest-live", str(_shared.DATA_DIR / "probes.json") in p_res, p_res[:120])
+
     # ---- 犹豫层（v2.3）：软硬分离 + 概率化 ----
     from memory import hesitation
     _orig_hcfg = _shared.CONFIG.setdefault("memory", {}).setdefault("core", {}).setdefault("hesitation", {})
