@@ -162,6 +162,7 @@ def stats() -> dict:
         hold = int(c.get("hesitation_hold", 0))
         disc = int(c.get("hesitation_discard", 0))
         gate = int(c.get("evidence_gate_block", 0))
+        hedge = int(c.get("evidence_gate_hedge", 0))
         return {
             "eval": ev,
             "send": send, "rewrite": rw, "hold": hold, "discard": disc,
@@ -170,6 +171,7 @@ def stats() -> dict:
             "hold_rate": round(hold / max(1, ev), 3),
             "discard_rate": round(disc / max(1, ev), 3),
             "evidence_gate_block": gate,
+            "evidence_gate_hedge": hedge,
         }
     except Exception:
         return {}

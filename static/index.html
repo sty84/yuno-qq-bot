@@ -277,7 +277,7 @@
         const s = h.stats || {};
         html += card('犹豫评估', s.eval, 'send ' + fmt(s.send) + ' · rewrite ' + fmt(s.rewrite) + ' · hold ' + fmt(s.hold) + ' · discard ' + fmt(s.discard));
         html += card('discard 率', s.discard_rate, 'hold ' + fmt(s.hold_rate));
-        html += card('证据门控拦截', s.evidence_gate_block, '无据断言重写');
+        html += card('证据门控拦截', s.evidence_gate_block, '重写 ' + fmt(s.evidence_gate_hedge) + ' 次加含糊后缀');
       } catch (e) {}
       const b = d.baselines || {};
       html += card('检索 recall@5', b.memory_eval && b.memory_eval.recall_at_k, 'MRR ' + fmt(b.memory_eval && b.memory_eval.mrr));
@@ -410,7 +410,7 @@
         const s = h.stats || {};
         $('diag-hesitation').innerHTML = card('犹豫评估', s.eval, 'send ' + fmt(s.send) + ' · rewrite ' + fmt(s.rewrite) + ' · hold ' + fmt(s.hold) + ' · discard ' + fmt(s.discard))
           + card('discard 率', s.discard_rate, 'hold ' + fmt(s.hold_rate))
-          + card('证据门控拦截', s.evidence_gate_block, '无据断言重写');
+          + card('证据门控拦截', s.evidence_gate_block, '重写 ' + fmt(s.evidence_gate_hedge) + ' 次加含糊后缀');
         const recent = h.recent || [];
         let hh = '<table><tr><th>时间</th><th>场景</th><th>动作</th><th>原因</th><th>延迟s</th><th>内心独白</th></tr>';
         recent.forEach(r => {

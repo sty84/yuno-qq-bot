@@ -556,11 +556,18 @@ def ask(
         if reason:
             try:
                 import memory.stats as _st
-                _st.bump("evidence_gate_block")
+                if str(reason).startswith("语义推断"):
+                    _st.bump("evidence_gate_hedge")  # 推断：只加含糊后缀，不重写
+                else:
+                    _st.bump("evidence_gate_block")  # 编造/黑名单：整句重写
             except Exception:
                 pass
             meta["evidence_gate"] = reason
-            reply = "……这个我记不太清了，我这边好像没有这个记录。"
+            if str(reason).startswith("语义推断"):
+                # 方向 3 修正：推断不拦截，仅要求句尾含糊化
+                reply = str(reply or "").rstrip("。！!？?") + "……（这句是我猜的，可能不准）"
+            else:
+                reply = "……这个我记不太清了，我这边好像没有这个记录。"
     except Exception:
         pass
     meta["reply"] = reply

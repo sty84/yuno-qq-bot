@@ -758,6 +758,38 @@ def test_all_features():
     finally:
         _shared.deepseek = _orig_ds3
     check("semantic-pass", sa2 is None, sa2)
+    # 方向 3 修正：推断不拦截，句尾加含糊后缀
+    captured_ask5 = {}
+
+    def _fake_llm5(*a, **k):
+        captured_ask5["ctx"] = k.get("extra_context", "")
+        return "律想换套鼓麦，说现在的底鼓听起来像在敲塑料桶，这个说法我听着挺靠谱的，应该没问题，具体型号还没定"
+
+    _orig_ask5 = _shared.ask_deepseek
+    _shared.ask_deepseek = _fake_llm5
+
+    class _AM3:
+        content = '{"assertions":[{"text":"律想换鼓麦","basis":"推断"}]}'
+
+    class _AR3:
+        choices = [type("_C", (), {"message": _AM3()})()]
+
+    class _AC3:
+        def create(self, **k):
+            return _AR3()
+
+    _orig_ds4 = _shared.deepseek
+    _shared.deepseek = type("_O", (), {"chat": type("_CH", (), {"completions": _AC3()})()})()
+    try:
+        rep5, meta5 = agent.ask("其他人申请换什么了", scopes=["c2c:ev"], learn=False)
+    finally:
+        _shared.ask_deepseek = _orig_ask5
+        _shared.deepseek = _orig_ds4
+    check(
+        "semantic-infer-hedge",
+        "是我猜的" in rep5 and str(meta5.get("evidence_gate", "")).startswith("语义推断"),
+        (rep5, meta5),
+    )
 
     # ---- 催约治理（v2.3）：黑名单过滤/巡检清理/一轮一 scope/clear 联动 ----
     from memory import appointment as appt_mod
