@@ -128,4 +128,38 @@ def gate(msg, scope="", kind="generic", ctx=""):
             out["reason"] = "discard_softened"
             out["delay_s"] = min(delay_max, r.get("delay_s", 3))
     _bump(f"hesitation_{out['action']}")
+    if out.get("reason") and out["reason"] != "skip":
+        try:
+            from datetime import datetime
+            from plugins import _db
+            _db.hesitation_log_add(
+                datetime.now().isoformat(timespec="seconds"),
+                scope, kind, out["action"], out["reason"], out["delay_s"], out.get("monologue", ""),
+            )
+        except Exception:
+            pass
     return out
+
+
+def stats() -> dict:
+    """犹豫/门控统计（管理台数据源）：评估次数、各动作率、证据门控拦截数。"""
+    try:
+        import memory.stats as _st
+        c = _st.counters()
+        ev = int(c.get("hesitation_eval", 0))
+        send = int(c.get("hesitation_send", 0))
+        rw = int(c.get("hesitation_rewrite", 0))
+        hold = int(c.get("hesitation_hold", 0))
+        disc = int(c.get("hesitation_discard", 0))
+        gate = int(c.get("evidence_gate_block", 0))
+        return {
+            "eval": ev,
+            "send": send, "rewrite": rw, "hold": hold, "discard": disc,
+            "send_rate": round(send / max(1, ev), 3),
+            "rewrite_rate": round(rw / max(1, ev), 3),
+            "hold_rate": round(hold / max(1, ev), 3),
+            "discard_rate": round(disc / max(1, ev), 3),
+            "evidence_gate_block": gate,
+        }
+    except Exception:
+        return {}

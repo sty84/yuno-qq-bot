@@ -1026,6 +1026,7 @@ def ablation_switches(core) -> dict:
         "off_emotion_address": ("关情绪寻址复核", lambda: core.update({"emotion_address": False})),
         "off_bandit": ("关回应策略 bandit", lambda: core.setdefault("bandit", {}).update({"enabled": False})),
         "off_revive": ("关泊松主动触发", lambda: core.setdefault("revive", {}).update({"rate_per_day": 0})),
+        "off_hesitation": ("关犹豫层", lambda: core.setdefault("hesitation", {}).update({"enabled": False})),
     }
 
 
@@ -1049,6 +1050,7 @@ def ablation_state() -> dict:
         "emotion_address": bool(core.get("emotion_address", True)),
         "bandit": bool((core.get("bandit") or {}).get("enabled", True)),
         "revive": float((core.get("revive") or {}).get("rate_per_day", 2.0)) > 0,
+        "hesitation": bool((core.get("hesitation") or {}).get("enabled", True)),
     }
 
 
@@ -1071,6 +1073,7 @@ def apply_switch(name, value) -> dict:
         "emotion_address": lambda: core.update({"emotion_address": v}),
         "bandit": lambda: core.setdefault("bandit", {}).update({"enabled": v}),
         "revive": lambda: core.setdefault("revive", {}).update({"rate_per_day": 2.0 if v else 0}),
+        "hesitation": lambda: core.setdefault("hesitation", {}).update({"enabled": v}),
     }
     if name not in setters:
         return {"error": f"未知开关：{name}"}

@@ -330,6 +330,15 @@ def _create_tables():
                 prompt_tokens INTEGER NOT NULL DEFAULT 0,
                 completion_tokens INTEGER NOT NULL DEFAULT 0,
                 chars INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS hesitation_log(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                scope TEXT NOT NULL DEFAULT '',
+                kind TEXT NOT NULL DEFAULT '',
+                action TEXT NOT NULL DEFAULT '',
+                reason TEXT NOT NULL DEFAULT '',
+                delay_s INTEGER NOT NULL DEFAULT 0,
+                monologue TEXT NOT NULL DEFAULT '');
             CREATE TABLE IF NOT EXISTS space_state(
                 id INTEGER PRIMARY KEY CHECK(id=1),
                 room TEXT NOT NULL DEFAULT '客厅',
@@ -1067,6 +1076,39 @@ def llm_cost_summary(days=30) -> dict:
         "by_module": [{"module": k, **v} for k, v in sorted(by_module.items(), key=lambda x: -(x[1]["prompt"] + x[1]["completion"]))],
         "by_path": [{"path": k, **v} for k, v in sorted(by_path.items(), key=lambda x: -(x[1]["prompt"] + x[1]["completion"]))],
     }
+
+
+# ===== 犹豫层日志（管理台可回看）=====
+def hesitation_log_add(ts, scope, kind, action, reason, delay_s=0, monologue=""):
+    """记录一次犹豫决策（保留最近 500 条）。"""
+    with _lock:
+        c = _connect()
+        c.execute(
+            "INSERT INTO hesitation_log(ts,scope,kind,action,reason,delay_s,monologue) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (
+                str(ts or datetime.now().isoformat(timespec="seconds")),
+                str(scope or "")[:80], str(kind or "")[:30],
+                str(action or "")[:20], str(reason or "")[:40],
+                max(0, int(delay_s or 0)), str(monologue or "")[:120],
+            ),
+        )
+        c.execute(
+            "DELETE FROM hesitation_log WHERE id NOT IN "
+            "(SELECT id FROM hesitation_log ORDER BY id DESC LIMIT 500)"
+        )
+        c.commit()
+
+
+def hesitation_log_rows(limit=50):
+    with _lock:
+        cur = _connect().execute(
+            "SELECT id,ts,scope,kind,action,reason,delay_s,monologue "
+            "FROM hesitation_log ORDER BY id DESC LIMIT ?",
+            (max(1, int(limit)),),
+        )
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
 # ===== 空间/心智状态表（P0 数据模型优化：kv JSON → 正规表，带一次性迁移）=====

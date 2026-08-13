@@ -253,6 +253,10 @@ class AblationRun(BaseModel):
     switches: list = []
 
 
+class ToolRun(BaseModel):
+    name: str
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
@@ -517,6 +521,24 @@ def costs(days: int = 30):
     pp, cp = _cost_prices()
     s["prices"] = {"prompt_per_1m": pp, "completion_per_1m": cp}
     return s
+
+
+@app.get("/api/hesitation")
+def hesitation():
+    """犹豫层统计 + 最近决策明细（管理台回看）。"""
+    from memory import hesitation as hesitation_mod
+    return {"stats": hesitation_mod.stats(), "recent": _db.hesitation_log_rows(30)}
+
+
+@app.post("/api/tools")
+def run_tool(req: ToolRun):
+    """运维动作白名单（诊断页按钮）：约定表巡检清理 / 记忆来源归一。"""
+    if req.name == "appointment-clean":
+        from memory import appointment
+        return appointment.clean()
+    if req.name == "memory-source-backfill":
+        return _db.memory_source_normalize()
+    raise HTTPException(400, f"未知工具：{req.name}")
 
 
 @app.get("/")

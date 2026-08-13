@@ -137,6 +137,12 @@
     <div class="cards" id="diag-classify"></div>
     <h3 class="sect">双轨制一致性</h3>
     <div class="cards" id="diag-consistency"></div>
+    <h3 class="sect">运维动作</h3>
+    <button onclick="runTool('appointment-clean')">约定表巡检清理</button>
+    <button onclick="runTool('memory-source-backfill')">记忆来源归一</button>
+    <h3 class="sect">犹豫层（主动消息发前斟酌）</h3>
+    <div class="cards" id="diag-hesitation"></div>
+    <div id="diag-hesitation-log"></div>
     <div class="chart" id="diag-route"></div>
     <pre id="diag-cal" style="display:none"></pre>
     <h2 style="margin-top:14px;font-size:15px">实验日志（回归门禁）</h2>
@@ -266,6 +272,13 @@
         + card('tick 项', tickKeys.length, tickKeys.join(' ')) + card('err 项', errKeys.length, errKeys.join(' '));
       const ct = d.cost_today || {};
       html += card('今日 tokens', ct.prompt != null ? ((ct.prompt || 0) + (ct.completion || 0)) : null, '¥' + fmt(ct.cost) + ' · ' + fmt(ct.calls) + ' 次调用');
+      try {
+        const h = await api('/api/hesitation');
+        const s = h.stats || {};
+        html += card('犹豫评估', s.eval, 'send ' + fmt(s.send) + ' · rewrite ' + fmt(s.rewrite) + ' · hold ' + fmt(s.hold) + ' · discard ' + fmt(s.discard));
+        html += card('discard 率', s.discard_rate, 'hold ' + fmt(s.hold_rate));
+        html += card('证据门控拦截', s.evidence_gate_block, '无据断言重写');
+      } catch (e) {}
       const b = d.baselines || {};
       html += card('检索 recall@5', b.memory_eval && b.memory_eval.recall_at_k, 'MRR ' + fmt(b.memory_eval && b.memory_eval.mrr));
       html += card('空间 where_acc', b.space_eval && b.space_eval.where_accuracy && b.space_eval.where_accuracy.accuracy);
@@ -392,6 +405,21 @@
         $('diag-consistency').innerHTML = card('待处理冲突', cs.pending)
           + card('本次重算', cs.reconciled);
       } catch (e) { $('diag-consistency').innerHTML = '<div class="muted">一致性加载失败：' + escapeHtml(e.message) + '</div>'; }
+      try {
+        const h = await api('/api/hesitation');
+        const s = h.stats || {};
+        $('diag-hesitation').innerHTML = card('犹豫评估', s.eval, 'send ' + fmt(s.send) + ' · rewrite ' + fmt(s.rewrite) + ' · hold ' + fmt(s.hold) + ' · discard ' + fmt(s.discard))
+          + card('discard 率', s.discard_rate, 'hold ' + fmt(s.hold_rate))
+          + card('证据门控拦截', s.evidence_gate_block, '无据断言重写');
+        const recent = h.recent || [];
+        let hh = '<table><tr><th>时间</th><th>场景</th><th>动作</th><th>原因</th><th>延迟s</th><th>内心独白</th></tr>';
+        recent.forEach(r => {
+          hh += `<tr><td>${escapeHtml(r.ts)}</td><td>${escapeHtml(r.kind)}</td><td>${escapeHtml(r.action)}</td>
+            <td>${escapeHtml(r.reason)}</td><td>${r.delay_s}</td><td class="muted">${escapeHtml(r.monologue)}</td></tr>`;
+        });
+        hh += '</table>';
+        $('diag-hesitation-log').innerHTML = hh;
+      } catch (e) { $('diag-hesitation').innerHTML = '<div class="muted">犹豫层加载失败：' + escapeHtml(e.message) + '</div>'; }
       const rs = d.route_stats || {};
       const algos = Object.keys(rs).filter(k => rs[k].trials > 0);
       const chart = echarts.init($('diag-route'));
@@ -690,7 +718,7 @@
       ['vector', '向量检索'], ['graph', '图谱'], ['lexical', '词法'], ['time_window', '时间窗口'],
       ['emotion', '情绪'], ['sharing', '分享'], ['space', '空间'], ['system1', 'System1'],
       ['cognitive_turn', '认知循环'], ['mood_boost', '心境一致加权'], ['emotion_address', '情绪寻址复核'],
-      ['bandit', '回应策略 bandit'], ['revive', '泊松主动触发'],
+      ['bandit', '回应策略 bandit'], ['revive', '泊松主动触发'], ['hesitation', '犹豫层'],
     ];
 
     async function loadAblation() {
@@ -712,6 +740,16 @@
         if (r.error) { alert(r.error); el.checked = !v; }
         el.parentElement.classList.toggle('off', !v);
       } catch (e) { alert('切换失败：' + e.message); el.checked = !v; }
+    }
+
+    async function runTool(name) {
+      try {
+        const r = await api('/api/tools', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        alert(JSON.stringify(r, null, 2));
+      } catch (e) { alert('执行失败：' + e.message); }
     }
 
     async function runAblation() {
