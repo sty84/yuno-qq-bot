@@ -1142,14 +1142,20 @@ def run_ablation(probes, names=None) -> dict:
     return {"baseline": base_res, "matrix": rows}
 
 
-def cmd_ablation() -> str:
-    """机制消融：临时覆盖 config 单开关，同一套 probes 各跑一遍，输出贡献表 + 实验日志。"""
+def cmd_ablation(save=False) -> str:
+    """机制消融：临时覆盖 config 单开关，同一套 probes 各跑一遍，输出贡献表 + 实验日志。
+    --save 把矩阵落成 data/persona-yuno/ablation_baseline.json（第一次跑 = 改前基线）。"""
     _capability, _db, _shared = _plugins()
     probes_path = _shared.DATA_DIR / "probes.json"
     if not probes_path.exists():
         return "评测集不存在（先 tools.py memory-probes 生成）"
     probes = json.loads(probes_path.read_text(encoding="utf-8"))
-    return json.dumps(run_ablation(probes), ensure_ascii=False, indent=2)
+    res = run_ablation(probes)
+    if save:
+        dest = _shared.DATA_DIR / "ablation_baseline.json"
+        dest.write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
+        res["baseline_saved"] = str(dest)
+    return json.dumps(res, ensure_ascii=False, indent=2)
 
 
 def cmd_experiments(limit=50) -> str:
@@ -1522,7 +1528,8 @@ def main() -> int:
     p.set_defaults(func=lambda a: print(cmd_persona_switch(a.pack)) or 0)
 
     p = sub.add_parser("ablation", help="机制消融矩阵：单开关 × probes，输出贡献表并写实验日志")
-    p.set_defaults(func=lambda a: print(cmd_ablation()) or 0)
+    p.add_argument("--save", action="store_true", help="把矩阵落成 ablation_baseline.json（第一次跑=改前基线）")
+    p.set_defaults(func=lambda a: print(cmd_ablation(a.save)) or 0)
 
     p = sub.add_parser("experiments", help="实验日志：基线前后与回归标记")
     p.add_argument("--limit", type=int, default=50)
