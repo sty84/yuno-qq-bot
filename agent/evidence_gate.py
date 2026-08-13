@@ -36,8 +36,9 @@ def _evidence_set(evidence) -> set:
     return out
 
 
-def contains_unsupported_claim(reply, evidence=None, banned=None, user_text=""):
-    """返回命中原因（str）；None = 通过。user_text=本轮用户消息（提议型约定视为会话内证据）。"""
+def contains_unsupported_claim(reply, evidence=None, banned=None, user_text="", check_claims=True):
+    """返回命中原因（str）；None = 通过。user_text=本轮用户消息（提议型约定视为会话内证据）。
+    check_claims=False：只做黑名单层（主动催约场景——授权来自约定本身，断言不逐字核对）。"""
     t = str(reply or "").strip()
     if not t:
         return None
@@ -46,6 +47,8 @@ def contains_unsupported_claim(reply, evidence=None, banned=None, user_text=""):
             return f"黑名单:{w}"
     if USER_PROPOSAL_RE.search(str(user_text or "")):
         return None  # 用户在提议约定，bot 的确认有会话内依据
+    if not check_claims:
+        return None
     ev = _evidence_set(evidence)
     for pat in CLAIM_PATTERNS:
         m = re.search(pat, t)

@@ -676,6 +676,19 @@ def test_all_features():
         "gate-user-ask-block",
         evidence_gate.contains_unsupported_claim("我们约好了明天见面", [], [], user_text="我们约了什么") is not None,
     )
+    # 催约泛化措辞 vs 逐字核对：check_claims=False 放行（授权来自约定本身），黑名单仍拦
+    check(
+        "gate-claims-on-blocks",
+        evidence_gate.contains_unsupported_claim("我们不是说好了吗", ["8月13号那事"], []) is not None,
+    )
+    check(
+        "gate-claims-off-pass",
+        evidence_gate.contains_unsupported_claim("我们不是说好了吗", ["8月13号那事"], [], check_claims=False) is None,
+    )
+    check(
+        "gate-claims-off-blacklist",
+        evidence_gate.contains_unsupported_claim("阿拉蕾是雪貂", [], ["雪貂"], check_claims=False) == "黑名单:雪貂",
+    )
     # core.ask 集成：LLM 编"约好了"但证据只有"上周买了只猫" → 重写
     captured_ask3 = {}
 
@@ -759,6 +772,23 @@ def test_all_features():
     finally:
         _shared.deepseek = _orig_ds2
     check("hesitation-fail-send", h2.get("action") == "send" and h2.get("reason") == "eval_fail_send", h2)
+    # rewrite 路径：rewrite_prob=1.0 → 采纳改口版
+    class _HM2:
+        content = '{"action":"rewrite","delay_s":1,"rewrite":"改口版","thought":"还是改一下"}'
+
+    class _HR2:
+        choices = [type("_C", (), {"message": _HM2()})()]
+
+    class _HC3:
+        def create(self, **k):
+            return _HR2()
+
+    _shared.deepseek = type("_O", (), {"chat": type("_CH", (), {"completions": _HC3()})()})()
+    try:
+        h4 = hesitation.gate("原消息", "c2c:h", "generic")
+    finally:
+        _shared.deepseek = _orig_ds2
+    check("hesitation-rewrite", h4.get("action") == "rewrite" and h4.get("msg") == "改口版", h4)
     # 禁用 → 直接发
     _shared.CONFIG["memory"]["core"]["hesitation"]["enabled"] = False
     h3 = hesitation.gate("消息", "c2c:h", "generic")

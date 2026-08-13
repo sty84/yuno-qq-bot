@@ -9,8 +9,6 @@
   → 走现有 notif 队列发给用户 → S 降残值 + 冷却 + 日/周上限。
 """
 
-import json
-import random
 from datetime import date, datetime, timedelta
 
 from plugins import _db, _shared

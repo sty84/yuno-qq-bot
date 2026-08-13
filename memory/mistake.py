@@ -9,7 +9,7 @@
 
 import hashlib
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from plugins import _db, _shared
 from memory import relationship

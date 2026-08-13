@@ -221,6 +221,7 @@ def _poke_message(appt, round_no, now) -> str:
         from agent import evidence_gate
         reason = evidence_gate.contains_unsupported_claim(
             msg, evidence=[str(appt.get("text") or "")], banned=_banned_words(), user_text="",
+            check_claims=False,  # 催约授权来自约定本身：只做黑名单层，泛化措辞不误伤
         )
         if reason:
             return ""

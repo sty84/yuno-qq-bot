@@ -4,8 +4,6 @@
   python -m yuno_memory --host 127.0.0.1 --port 8457 --data-dir ./data
 """
 
-import pathlib
-
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
