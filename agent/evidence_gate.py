@@ -61,3 +61,56 @@ def contains_unsupported_claim(reply, evidence=None, banned=None, user_text="", 
         if not content_tok or not ev or not any(content_tok & fact_keywords(e) for e in ev):
             return f"无证据断言:{pat}"
     return None
+
+
+def _sem_cfg(key, default):
+    try:
+        from plugins import _shared
+        g = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("evidence_gate", {}) or {}
+        return g.get(key, default)
+    except Exception:
+        return default
+
+
+def semantic_annotate(reply, evidence=None, banned=None):
+    """方向 3（语义自检）：LLM 把回复里的断言按依据分类（日程表/记忆/推断/编造），
+    只放行"日程表/记忆"，推断必须含糊、编造一律拦截。
+    正则预筛 + min_reply_len 控制成本；失败返回 None（默认放行，硬门仍在）。"""
+    t = str(reply or "").strip()
+    if len(t) < int(_sem_cfg("min_reply_len", 40)):
+        return None
+    for w in (banned or []):
+        if w and w in t:
+            return f"黑名单:{w}"
+    ev = _evidence_set(evidence)
+    ev_txt = "；".join(list(ev)[:10])[:400]
+    prompt = (
+        "下面是一条 AI 回复。把其中每个断言按依据分类："
+        "日程表(结构化日程/约定)、记忆(检索到的记忆)、推断(合理猜测)、编造(无任何依据的虚构)。"
+        "只输出 JSON：{\"assertions\":[{\"text\":\"...\",\"basis\":\"日程表|记忆|推断|编造\"}]}。\n"
+        f"回复：{t[:400]}\n"
+        f"可用记忆/日程：{ev_txt or '（无）'}\n"
+        "依据要求：只有'日程表'和'记忆'可当事实陈述；'推断'必须用'可能/我猜'；'编造'一律不允许。"
+    )
+    try:
+        import json
+        from plugins import _shared
+        resp = _shared.deepseek_chat(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=220, temperature=0.1,
+            module="evidence_annotate",
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        s, e = raw.find("{"), raw.rfind("}")
+        if s < 0:
+            return None
+        data = json.loads(raw[s:e + 1])
+        for a in data.get("assertions", []) or []:
+            basis = str(a.get("basis", "")).strip()
+            if basis == "编造":
+                return f"语义编造:{str(a.get('text', ''))[:40]}"
+            if basis == "推断":
+                return f"语义推断:{str(a.get('text', ''))[:40]}"
+    except Exception:
+        pass
+    return None

@@ -30,6 +30,9 @@ KV_KEY = "appointments"
 APP_VERBS = (
     "见面", "见", "约", "一起", "找你", "来找你", "集合", "碰头",
     "不见不散", "说好", "带上", "来接我", "老地方",
+    # 事件型约定（确定性知识走结构化存储，不走检索碰运气）
+    "演出", "排练", "会议", "面试", "考试", "比赛", "活动", "聚餐", "吃饭",
+    "定了", "定在", "定到", "改到", "改在", "推迟到", "提前到",
 )
 TIME_BANDS = {
     "凌晨": (0, 6), "早上": (6, 10), "上午": (9, 12), "中午": (11, 14),
@@ -37,7 +40,7 @@ TIME_BANDS = {
 }
 WEEKDAYS = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
 
-_DATE_RE = re.compile(r"(今天|明天|后天|(?:周|星期)([一二三四五六日天])|(\d{1,2})\s*天(?:之)?后)")
+_DATE_RE = re.compile(r"(今天|明天|后天|月底|(?:周|星期)([一二三四五六日天])|(\d{1,2})\s*(?:天(?:之)?后|号))")
 _TIME_RE = re.compile(r"(凌晨|早上|上午|中午|下午|傍晚|晚上)?\s*(\d{1,2})\s*(?:点|时|:|：)\s*(\d{1,2})?\s*分?")
 
 
@@ -61,13 +64,24 @@ def _parse_dt(text, scope):
     m_date = _DATE_RE.search(text or "")
     day = now.date()
     if m_date:
-        if m_date.group(1) in ("今天", "明天", "后天"):
-            day = now.date() + timedelta(days={"今天": 0, "明天": 1, "后天": 2}[m_date.group(1)])
+        g = m_date.group(1)
+        if g in ("今天", "明天", "后天"):
+            day = now.date() + timedelta(days={"今天": 0, "明天": 1, "后天": 2}[g])
+        elif g == "月底":
+            import calendar
+            day = now.date().replace(day=calendar.monthrange(now.year, now.month)[1])
         elif m_date.group(2):
             wd = WEEKDAYS[m_date.group(2)]
             day = now.date() + timedelta(days=(wd - now.weekday()) % 7 or 7)
         elif m_date.group(3):
-            day = now.date() + timedelta(days=int(m_date.group(3)))
+            num = int(m_date.group(3))
+            if "号" in m_date.group(0):
+                # "X号"：本月该日，已过则顺延到下月
+                day = now.date().replace(day=num)
+                if day < now.date():
+                    day = (now.date().replace(day=1) + timedelta(days=32)).replace(day=num)
+            else:
+                day = now.date() + timedelta(days=num)
     m_time = _TIME_RE.search(text or "")
     has_time = bool(m_time)
     hour, minute = 12, 0

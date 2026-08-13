@@ -13,6 +13,7 @@ _TIME_Q_RE = re.compile(
 _MEMORY_GAP_RE = re.compile(r"不记得|记不清|想不起来|没印象|忘记了|不太记得|什么事|怎么了|咋了|啥|嗯？|嗯\?|啊？")
 _LAST_BOT_CLAIM_RE = re.compile(r"约好|约定|答应|说好|约了")
 _APPT_TOPIC_RE = re.compile(r"约定|答应|约好|说好|约了|约的|约过|约什么|见面|放鸽子")
+_STRUCTURED_DOMAIN_RE = re.compile(r"约定|约好|几点|什么时候|几号|演出|排练|日程|安排|设备|预算|表格|在哪|位置|哪里")
 
 # 历史里任何具体钟点（"凌晨两点十四""快两点半""在想两点十四分的事"）
 # 都不能当现行时间用——但"说好晚上8点见"这类约定陈述要保留
@@ -330,6 +331,13 @@ def ask(
                 ctx_parts.append(s)
             if s := mistake.context_block(scopes[0], text):  # 近期错误与原谅（v23）
                 ctx_parts.append(s)
+            if _STRUCTURED_DOMAIN_RE.search(text or ""):
+                # 方向 1（确定性优先）：日程/约定/设备等先查结构化块，按它答，查不到就明说
+                ctx_parts.append(
+                    "【结构化事实优先·硬性要求】本问题的答案以上面的【待履约约定】【此刻状态】"
+                    "【周围环境】等结构化块为准：查得到就按它答；查不到就明说'我这边没查到'，"
+                    "禁止编造表格内容、金额、他人意见或具体日期。"
+                )
         except Exception as e:
             _stats_err(e)
             pass
@@ -542,6 +550,9 @@ def ask(
                 pass
         banned = pack_mod.behavior().get("banned_claims") or []
         reason = evidence_gate.contains_unsupported_claim(reply, evidence, banned=banned, user_text=text)
+        if not reason and evidence_gate._sem_cfg("semantic", True):
+            # 方向 3（语义自检）：正则放行但回复有实质内容时，让 LLM 标注断言依据
+            reason = evidence_gate.semantic_annotate(reply, evidence, banned=banned)
         if reason:
             try:
                 import memory.stats as _st

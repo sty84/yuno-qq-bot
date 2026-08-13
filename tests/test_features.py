@@ -704,10 +704,69 @@ def test_all_features():
         _shared.ask_deepseek = _orig_ask3
     check("gate-rewrite", "记不太清" in rep3 and meta3.get("evidence_gate"), (rep3, meta3))
 
+    # 方向 1：结构化事实优先规则注入（确定性领域查表优先）
+    captured_ask4 = {}
+
+    def _fake_llm4(*a, **k):
+        captured_ask4["ctx"] = k.get("extra_context", "")
+        return "……我查一下日程。"
+
+    _orig_ask4 = _shared.ask_deepseek
+    _shared.ask_deepseek = _fake_llm4
+    try:
+        agent.ask("月底演出时间定了吗", scopes=["c2c:gap"], learn=False)
+    finally:
+        _shared.ask_deepseek = _orig_ask4
+    check("structured-first", "结构化事实优先" in captured_ask4.get("ctx", ""), captured_ask4.get("ctx", "")[:80])
+
+    # 方向 3：语义自检（LLM 标注依据：编造拦截 / 记忆放行）
+    class _AM:
+        content = '{"assertions":[{"text":"公司批了设备预算，我把调音台参数都填进去了","basis":"编造"}]}'
+
+    class _AR:
+        choices = [type("_C", (), {"message": _AM()})()]
+
+    class _AC:
+        def create(self, **k):
+            return _AR()
+
+    _orig_ds3 = _shared.deepseek
+    _shared.deepseek = type("_O", (), {"chat": type("_CH", (), {"completions": _AC()})()})()
+    try:
+        sa1 = evidence_gate.semantic_annotate(
+            "公司批了设备预算，我把新买的调音台参数都填进设备申请表里了，其他人也没意见，律还说要加防震架", [""], [],
+        )
+    finally:
+        _shared.deepseek = _orig_ds3
+    check("semantic-fabricated", sa1 and "语义编造" in sa1, sa1)
+
+    class _AM2:
+        content = '{"assertions":[{"text":"你喜欢冰美式","basis":"记忆"}]}'
+
+    class _AR2:
+        choices = [type("_C", (), {"message": _AM2()})()]
+
+    class _AC2:
+        def create(self, **k):
+            return _AR2()
+
+    _shared.deepseek = type("_O", (), {"chat": type("_CH", (), {"completions": _AC2()})()})()
+    try:
+        sa2 = evidence_gate.semantic_annotate(
+            "对，你喜欢冰美式，我记着呢，冰箱里应该还有库存可以喝", ["你喜欢冰美式"], [],
+        )
+    finally:
+        _shared.deepseek = _orig_ds3
+    check("semantic-pass", sa2 is None, sa2)
+
     # ---- 催约治理（v2.3）：黑名单过滤/巡检清理/一轮一 scope/clear 联动 ----
     from memory import appointment as appt_mod
     rj = appt_mod.extract("c2c:poke", "明天下午3点见面，去隔壁乐队看雪貂")
     check("appt-extract-banned", rj.get("added") == 0, rj)
+    # 方向 1：事件型约定捕获（"定了/定在/X号"不再丢）
+    ev1 = appt_mod.extract("c2c:poke", "明天3点面试定了")
+    ev2 = appt_mod.extract("c2c:poke", "月底演出时间定了")
+    check("appt-event-capture", ev1.get("added") == 1 and ev2.get("added") == 1, (ev1, ev2))
     _db.kv_set("memory", "appointments", [
         {"id": 1, "scope": "c2c:poke", "time": "2026-08-12T10:00:00+08:00", "has_time": True,
          "text": "约好和阿拉蕾去隔壁乐队", "created_at": "2026-08-12T09:00:00+08:00", "status": "waiting", "poked": 0},
@@ -794,6 +853,27 @@ def test_all_features():
     finally:
         _shared.deepseek = _orig_ds2
     check("hesitation-rewrite", h4.get("action") == "rewrite" and h4.get("msg") == "改口版", h4)
+    # 方向 3 折叠：依据标注"编造" → 强制 discard（不走概率门）
+    class _HM3:
+        content = '{"action":"send","delay_s":0,"rewrite":"","thought":"这话太假了","basis":"编造"}'
+
+    class _HR3:
+        choices = [type("_C", (), {"message": _HM3()})()]
+
+    class _HC4:
+        def create(self, **k):
+            return _HR3()
+
+    _shared.deepseek = type("_O", (), {"chat": type("_CH", (), {"completions": _HC4()})()})()
+    try:
+        h5 = hesitation.gate("公司批了十亿预算", "c2c:h", "generic")
+    finally:
+        _shared.deepseek = _orig_ds2
+    check(
+        "hesitation-basis-fabricated",
+        h5.get("action") == "discard" and h5.get("reason") == "basis_fabricated",
+        h5,
+    )
     # 禁用 → 直接发
     _shared.CONFIG["memory"]["core"]["hesitation"]["enabled"] = False
     h3 = hesitation.gate("消息", "c2c:h", "generic")

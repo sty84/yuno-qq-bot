@@ -40,12 +40,14 @@ def _evaluate(msg, scope, kind, ctx=""):
         prompt = (
             "你刚写完一条准备主动发给用户的消息，发之前你犹豫了一下。"
             "以角色内心独白的方式评估，只输出 JSON："
-            '{"action":"send|rewrite|hold|discard","delay_s":3,"rewrite":"改口后的版本","thought":"一句内心独白"}。\n'
+            '{"action":"send|rewrite|hold|discard","delay_s":3,"rewrite":"改口后的版本",'
+            '"thought":"一句内心独白","basis":"日程表|记忆|推断|编造"}。\n'
             f"消息：{msg}\n"
             f"场景：{kind}\n"
             + (f"上下文：{ctx}\n" if ctx else "")
             + "要求：模拟'这话是不是有点烦/这个点他可能在忙/算了还是说吧'这类真实斟酌；"
-            "delay_s 0~10；只有真的觉得不该说才 discard；rewrite 在改口时给出改后的文本。"
+            "delay_s 0~10；只有真的觉得不该说才 discard；rewrite 在改口时给出改后的文本；"
+            "basis 标注这条消息的依据：日程表/记忆可发，推断要含糊，编造必须 discard。"
         )
         resp = _shared.deepseek_chat(
             messages=[{"role": "user", "content": prompt}],
@@ -65,6 +67,7 @@ def _evaluate(msg, scope, kind, ctx=""):
             "delay_s": max(0, min(10, int(d.get("delay_s") or 0))),
             "rewrite": str(d.get("rewrite") or "").strip()[:200],
             "thought": str(d.get("thought") or "").strip()[:100],
+            "basis": str(d.get("basis") or "").strip()[:10],
         }
     except Exception:
         return None
@@ -95,6 +98,13 @@ def gate(msg, scope="", kind="generic", ctx=""):
     delay_max = float(_cfg("delay_max_s", 10))
     discard_cap = float(_cfg("discard_cap", 0.2))
     out["monologue"] = r.get("thought", "")
+    if r.get("basis") == "编造":
+        # 方向 3 折叠：依据标注为编造 → 强制 discard（不进入概率门）
+        out["action"] = "discard"
+        out["reason"] = "basis_fabricated"
+        out["delay_s"] = 0
+        _bump("hesitation_discard")
+        return out
     action = r["action"]
     if action == "send":
         out["reason"] = "send"
