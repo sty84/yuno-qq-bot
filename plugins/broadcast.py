@@ -85,6 +85,15 @@ async def random_event_loop(make_ctx):
                 _shared.ask_deepseek, prompt, system=_shared.BASE_SYSTEM_PROMPT,
                 module="proactive",
             )
+            try:
+                from agent import evidence_gate
+                from memory import pack
+                if evidence_gate.contains_unsupported_claim(
+                    msg, evidence=[], banned=pack.behavior().get("banned_claims") or [], user_text="",
+                ):
+                    continue  # 证据门控：主动消息含黑名单词/无据断言 → 放弃本次
+            except Exception as e:
+                _stats_err(e)
             await _shared.send_message(ctx.api, "group", target, msg)
             if random.random() < 0.4:
                 _shared.set_mood(random.choice(_shared.MOODS))
@@ -173,7 +182,18 @@ async def inspection_loop(make_ctx):
                             system=_shared.BASE_SYSTEM_PROMPT,
                             module="inspection",
                         )
-                        await _shared.send_message(ctx.api, item["target_type"], item["target"], msg)
+                        _send_ok = True
+                        try:
+                            from agent import evidence_gate
+                            from memory import pack
+                            if evidence_gate.contains_unsupported_claim(
+                                msg, evidence=[str(prompt)], banned=pack.behavior().get("banned_claims") or [], user_text="",
+                            ):
+                                _send_ok = False
+                        except Exception as e:
+                            _stats_err(e)
+                        if _send_ok:
+                            await _shared.send_message(ctx.api, item["target_type"], item["target"], msg)
                     elif quiet:
                         print(f"[检查] {item['scope']} 静默推进（{item['container']}）")
                     elif paused:

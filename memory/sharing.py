@@ -432,6 +432,17 @@ def _compose(scope, ctx: str, reason: str) -> str:
         from memory import sleep as sleep_mod
         msg = sleep_mod._sanitize_dream(msg)
         if msg:
+            # 证据门控 v2：主动分享消息也过门控（黑名单词/无据断言 → 放弃）
+            try:
+                from agent import evidence_gate
+                from memory import pack
+                reason2 = evidence_gate.contains_unsupported_claim(
+                    msg, evidence=[str(ctx or "")], banned=pack.behavior().get("banned_claims") or [], user_text="",
+                )
+                if reason2:
+                    return ""
+            except Exception as e:
+                _stats_err(e)
             return msg[:80]
     except Exception as e:
         _stats_err(e)

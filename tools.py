@@ -308,8 +308,14 @@ def cmd_memory_clear_user(uid: str) -> str:
     from plugins import _db
     scope = f"c2c:{uid}"
     _db.purge_scope(scope)
+    removed_appts = 0
+    try:
+        from memory import appointment
+        removed_appts = appointment.clear_scope(scope)  # 约定在 kv，不在 memories，需单独清
+    except Exception:
+        pass
     _db.audit_add("memory.clear_user", scope)
-    return f"已清除 {scope} 的全部记忆/事件/议题/索引"
+    return f"已清除 {scope} 的全部记忆/事件/议题/索引（约定 {removed_appts} 条）"
 
 
 _PROBE_SOCIAL_WORDS = (
@@ -816,6 +822,12 @@ def cmd_memory_source_backfill() -> str:
     """证据门控：历史记忆 source 归一（ingest→user / persona→pack），幂等。"""
     from plugins import _db
     return json.dumps(_db.memory_source_normalize(), ensure_ascii=False, indent=2)
+
+
+def cmd_appointment_clean() -> str:
+    """巡检清理：含黑名单词的约定条目标记 done（防催约复活编造）。"""
+    from memory import appointment
+    return json.dumps(appointment.clean(), ensure_ascii=False, indent=2)
 
 
 def cmd_persona_smoke() -> str:
@@ -1494,6 +1506,9 @@ def main() -> int:
 
     p = sub.add_parser("memory-source-backfill", help="证据门控：历史记忆 source 归一（ingest→user / persona→pack）")
     p.set_defaults(func=lambda a: print(cmd_memory_source_backfill()) or 0)
+
+    p = sub.add_parser("appointment-clean", help="巡检清理：含黑名单词的约定条目标记 done（防催约复活编造）")
+    p.set_defaults(func=lambda a: print(cmd_appointment_clean()) or 0)
 
     p = sub.add_parser("persona-smoke", help="Persona Pack 冒烟：加载校验 + 房间连通 + 模板渲染 + 硬编码扫描")
     p.set_defaults(func=lambda a: print(cmd_persona_smoke()) or 0)

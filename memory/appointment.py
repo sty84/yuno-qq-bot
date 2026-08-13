@@ -93,6 +93,15 @@ def _appts():
     return _db.kv_get(KV_NS, KV_KEY, []) or []
 
 
+def _banned_words() -> list:
+    """已确认虚构词（来自 pack behavior.banned_claims，人格无关逻辑 + pack 数据）。"""
+    try:
+        from memory import pack
+        return list(pack.behavior().get("banned_claims") or [])
+    except Exception:
+        return []
+
+
 def _target_of(scope):
     if scope.startswith("c2c:"):
         return "c2c", scope.split(":", 1)[1]
@@ -108,6 +117,9 @@ def extract(scope, text) -> dict:
     t = str(text or "").strip()
     if not t or not any(v in t for v in APP_VERBS):
         return {"added": 0}
+    # 证据门控 v2：含已确认虚构词（黑名单）的"约定"直接拒绝入库
+    if any(w in t for w in _banned_words()):
+        return {"added": 0, "rejected": "黑名单"}
     dt, has_time = _parse_dt(t, scope)
     if not dt:
         return {"added": 0}
@@ -129,6 +141,33 @@ def extract(scope, text) -> dict:
     appts.append(appt)
     _db.kv_set(KV_NS, KV_KEY, appts)
     return {"added": 1, "appointment": appt}
+
+
+def clean() -> dict:
+    """巡检清理：把含黑名单词（已确认虚构）的 waiting 约定标记 done，防催约复活编造。"""
+    banned = _banned_words()
+    if not banned:
+        return {"cleaned": 0}
+    appts = _appts()
+    removed, new_appts = 0, []
+    for a in appts:
+        if a.get("status") == "waiting" and any(w in str(a.get("text", "")) for w in banned):
+            a["status"] = "done"
+            a["note"] = "evidence_gate: 黑名单清除"
+            removed += 1
+        new_appts.append(a)
+    if removed:
+        _db.kv_set(KV_NS, KV_KEY, new_appts)
+    return {"cleaned": removed}
+
+
+def clear_scope(scope) -> int:
+    """清除某个 scope 的全部约定（清记忆指令联动用）。"""
+    appts = _appts()
+    kept = [a for a in appts if a.get("scope") != scope]
+    if len(kept) != len(appts):
+        _db.kv_set(KV_NS, KV_KEY, kept)
+    return len(appts) - len(kept)
 
 
 def _human_time(iso):
@@ -171,12 +210,23 @@ def _poke_message(appt, round_no, now) -> str:
         "禁止用括号标注动作；禁止复述身份设定；不要长篇大论。"
     )
     try:
-        return _shared.ask_deepseek(prompt, system=system, max_tokens=150, module="appointment")
+        msg = _shared.ask_deepseek(prompt, system=system, max_tokens=150, module="appointment")
     except Exception as e:
         _stats_err(e)
         if round_no >= 2:
             return f"都过去{mins}分钟了。……我不是催你，就是怕你出事。忙完记得回我一句。"
         return f"说好{time_text}的，人呢。……我数到十，不来我就当放我鸽子了。"
+    # 证据门控 v2：主动催约消息也过门控（黑名单词/无据断言 → 放弃本次催）
+    try:
+        from agent import evidence_gate
+        reason = evidence_gate.contains_unsupported_claim(
+            msg, evidence=[str(appt.get("text") or "")], banned=_banned_words(), user_text="",
+        )
+        if reason:
+            return ""
+    except Exception as e:
+        _stats_err(e)
+    return msg
 
 
 def check_and_poke(now=None) -> list:
@@ -187,11 +237,16 @@ def check_and_poke(now=None) -> list:
         now = now.replace(tzinfo=_zone(None))
     base_grace = float(_cfg("grace_min", 15))
     interval = timedelta(minutes=float(_cfg("poke_interval_min", 30)))
+    try:
+        clean()  # 巡检：先清黑名单残留，防编造约定继续催（再读快照）
+    except Exception as e:
+        _stats_err(e)
     raw = _db.kv_get_raw(KV_NS, KV_KEY)
     appts = json.loads(raw) if raw else []
     to_poke, new_appts = [], []
     changed = False
-    for a in appts:
+    poked_scopes = set()
+    for a in sorted(appts, key=lambda x: str(x.get("time") or "")):
         a2 = dict(a)
         if a.get("status") != "waiting":
             new_appts.append(a)
@@ -249,12 +304,21 @@ def check_and_poke(now=None) -> list:
             changed = True
             new_appts.append(a2)
             continue
+        if a2["scope"] in poked_scopes:
+            # 合并/限流：同一用户一轮只催一条（按时间先后逐轮催，其余顺延）
+            new_appts.append(a2)
+            continue
         msg = _poke_message(a2, poked + 1, now)
+        if not msg:
+            # 门控放弃本次催：不计数，顺延下轮
+            new_appts.append(a2)
+            continue
         a2["poked"] = poked + 1
         a2["poked_at"] = now.isoformat(timespec="seconds")
         if a2["poked"] >= 2:
             a2["status"] = "done"
         to_poke.append((a2, target_type, target, msg))
+        poked_scopes.add(a2["scope"])
         changed = True
         new_appts.append(a2)
     if not to_poke:

@@ -691,6 +691,40 @@ def test_all_features():
         _shared.ask_deepseek = _orig_ask3
     check("gate-rewrite", "记不太清" in rep3 and meta3.get("evidence_gate"), (rep3, meta3))
 
+    # ---- 催约治理（v2.3）：黑名单过滤/巡检清理/一轮一 scope/clear 联动 ----
+    from memory import appointment as appt_mod
+    rj = appt_mod.extract("c2c:poke", "明天下午3点见面，去隔壁乐队看雪貂")
+    check("appt-extract-banned", rj.get("added") == 0, rj)
+    _db.kv_set("memory", "appointments", [
+        {"id": 1, "scope": "c2c:poke", "time": "2026-08-12T10:00:00+08:00", "has_time": True,
+         "text": "约好和阿拉蕾去隔壁乐队", "created_at": "2026-08-12T09:00:00+08:00", "status": "waiting", "poked": 0},
+        {"id": 2, "scope": "c2c:poke2", "time": "2026-08-12T11:00:00+08:00", "has_time": True,
+         "text": "约好打游戏", "created_at": "2026-08-12T10:00:00+08:00", "status": "waiting", "poked": 0},
+    ])
+    cl = appt_mod.clean()
+    after_clean = {a["id"]: a["status"] for a in _db.kv_get("memory", "appointments", [])}
+    check(
+        "appt-clean",
+        cl.get("cleaned") == 1 and after_clean.get(1) == "done" and after_clean.get(2) == "waiting",
+        after_clean,
+    )
+    _db.kv_set("memory", "appointments", [
+        {"id": 3, "scope": "c2c:poke", "time": "2026-08-12T10:00:00+08:00", "has_time": True,
+         "text": "约好打游戏", "created_at": "2026-08-12T09:00:00+08:00", "status": "waiting", "poked": 0},
+        {"id": 4, "scope": "c2c:poke", "time": "2026-08-12T09:00:00+08:00", "has_time": True,
+         "text": "约好见面", "created_at": "2026-08-12T08:00:00+08:00", "status": "waiting", "poked": 0},
+    ])
+    _db.kv_set("memory", "lastmsg:c2c:poke", "")
+    _db.kv_set("memory", "lastmsg:c2c:poke2", "")
+    poked = appt_mod.check_and_poke(now=datetime.now().astimezone())
+    check("appt-one-per-scope", len(poked) == 1 and poked[0].get("id") == 4, [p.get("id") for p in poked])
+    _db.kv_set("memory", "appointments", [
+        {"id": 5, "scope": "c2c:poke2", "time": "2026-08-12T10:00:00+08:00", "has_time": True,
+         "text": "约好打游戏", "created_at": "2026-08-12T09:00:00+08:00", "status": "waiting", "poked": 0},
+    ])
+    removed = appt_mod.clear_scope("c2c:poke2")
+    check("appt-clear-scope", removed == 1 and appt_mod._appts() == [], (removed, appt_mod._appts()))
+
     # ---- LLM token / 成本观测（v2.3）----
     _db.llm_cost_add("2026-08-12T10:00:00", "chat", "", 1000, 200)
     _db.llm_cost_add("2026-08-12T10:01:00", "rerank", "lexical,vector", 500, 100)
