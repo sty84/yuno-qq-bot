@@ -313,11 +313,23 @@ def check_and_poke(now=None) -> list:
             # 门控放弃本次催：不计数，顺延下轮
             new_appts.append(a2)
             continue
+        # 犹豫层（v2.3）：催约也过犹豫门（discard 才真不发；其余延迟到 scheduled_at）
+        try:
+            from memory import hesitation
+            h = hesitation.gate(msg, a2["scope"], "appointment")
+            if h.get("action") == "discard":
+                new_appts.append(a2)
+                continue
+            msg = h.get("msg") or msg
+            delay_s = int(h.get("delay_s") or 0)
+        except Exception as e:
+            _stats_err(e)
+            delay_s = 0
         a2["poked"] = poked + 1
         a2["poked_at"] = now.isoformat(timespec="seconds")
         if a2["poked"] >= 2:
             a2["status"] = "done"
-        to_poke.append((a2, target_type, target, msg))
+        to_poke.append((a2, target_type, target, msg, delay_s))
         poked_scopes.add(a2["scope"])
         changed = True
         new_appts.append(a2)
@@ -332,8 +344,11 @@ def check_and_poke(now=None) -> list:
     if not _db.kv_cas(KV_NS, KV_KEY, raw, new_raw):
         return []
     sent = []
-    for a2, target_type, target, msg in to_poke:
-        _db.notif_add(target_type, target, msg)
+    for a2, target_type, target, msg, delay_s in to_poke:
+        scheduled_at = ""
+        if delay_s > 0:
+            scheduled_at = (now + timedelta(seconds=delay_s)).isoformat(timespec="seconds")
+        _db.notif_add(target_type, target, msg, scheduled_at=scheduled_at)
         try:
             from memory import mistake
             mistake.record_no_show(a2["scope"], a2.get("text", ""))  # 迟到 = 一次“放鸽子”错误

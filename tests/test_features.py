@@ -725,6 +725,56 @@ def test_all_features():
     removed = appt_mod.clear_scope("c2c:poke2")
     check("appt-clear-scope", removed == 1 and appt_mod._appts() == [], (removed, appt_mod._appts()))
 
+    # ---- 犹豫层（v2.3）：软硬分离 + 概率化 ----
+    from memory import hesitation
+    _orig_hcfg = _shared.CONFIG.setdefault("memory", {}).setdefault("core", {}).setdefault("hesitation", {})
+    _shared.CONFIG["memory"]["core"]["hesitation"].update(
+        {"enabled": True, "sample_rate": 1.0, "discard_cap": 1.0, "rewrite_prob": 1.0, "delay_max_s": 5}
+    )
+
+    class _HM:
+        content = '{"action":"discard","delay_s":2,"rewrite":"","thought":"算了不发了"}'
+
+    class _HR:
+        choices = [type("_C", (), {"message": _HM()})()]
+
+    class _HC:
+        def create(self, **k):
+            return _HR()
+
+    _orig_ds2 = _shared.deepseek
+    _shared.deepseek = type("_O", (), {"chat": type("_CH", (), {"completions": _HC()})()})()
+    try:
+        h1 = hesitation.gate("我有点烦", "c2c:h", "generic")
+    finally:
+        _shared.deepseek = _orig_ds2
+    check("hesitation-discard", h1.get("action") == "discard", h1)
+    # eval 失败 → 默认放行
+    class _HC2:
+        def create(self, **k):
+            raise Exception("stub fail")
+    _shared.deepseek = type("_O", (), {"chat": type("_CH", (), {"completions": _HC2()})()})()
+    try:
+        h2 = hesitation.gate("消息", "c2c:h", "generic")
+    finally:
+        _shared.deepseek = _orig_ds2
+    check("hesitation-fail-send", h2.get("action") == "send" and h2.get("reason") == "eval_fail_send", h2)
+    # 禁用 → 直接发
+    _shared.CONFIG["memory"]["core"]["hesitation"]["enabled"] = False
+    h3 = hesitation.gate("消息", "c2c:h", "generic")
+    _shared.CONFIG["memory"]["core"]["hesitation"] = _orig_hcfg
+    check("hesitation-disabled", h3.get("action") == "send" and h3.get("delay_s") == 0, h3)
+    # notif scheduled_at：未来的延迟发送，到点才出现在 pending
+    from datetime import timedelta as _td
+    _db.notif_add("c2c", "future", "迟到消息", scheduled_at=(datetime.now() + _td(seconds=60)).isoformat(timespec="seconds"))
+    _db.notif_add("c2c", "now", "立即消息", scheduled_at="")
+    pend = _db.notif_pending()
+    check(
+        "notif-scheduled",
+        any(i["target"] == "now" for i in pend) and not any(i["target"] == "future" for i in pend),
+        [i["target"] for i in pend],
+    )
+
     # ---- LLM token / 成本观测（v2.3）----
     _db.llm_cost_add("2026-08-12T10:00:00", "chat", "", 1000, 200)
     _db.llm_cost_add("2026-08-12T10:01:00", "rerank", "lexical,vector", 500, 100)

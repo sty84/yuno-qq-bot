@@ -94,6 +94,18 @@ async def random_event_loop(make_ctx):
                     continue  # 证据门控：主动消息含黑名单词/无据断言 → 放弃本次
             except Exception as e:
                 _stats_err(e)
+            # 犹豫层（v2.3）：随机动态也过犹豫门（discard 放弃；其余延迟几秒再发）
+            try:
+                from memory import hesitation
+                h = await asyncio.to_thread(hesitation.gate, msg, "group:" + target, "random")
+                if h.get("action") == "discard":
+                    continue
+                msg = h.get("msg") or msg
+                delay = int(h.get("delay_s") or 0)
+                if delay > 0:
+                    await asyncio.sleep(min(delay, 10))
+            except Exception as e:
+                _stats_err(e)
             await _shared.send_message(ctx.api, "group", target, msg)
             if random.random() < 0.4:
                 _shared.set_mood(random.choice(_shared.MOODS))
@@ -193,7 +205,24 @@ async def inspection_loop(make_ctx):
                         except Exception as e:
                             _stats_err(e)
                         if _send_ok:
-                            await _shared.send_message(ctx.api, item["target_type"], item["target"], msg)
+                            # 犹豫层（v2.3）：检查汇报也过犹豫门（discard 放弃；其余延迟几秒）
+                            _send_now = True
+                            try:
+                                from memory import hesitation
+                                h = await asyncio.to_thread(
+                                    hesitation.gate, msg, item["scope"], "inspection", prompt or "",
+                                )
+                                if h.get("action") == "discard":
+                                    _send_now = False
+                                else:
+                                    msg = h.get("msg") or msg
+                                    delay = int(h.get("delay_s") or 0)
+                                    if delay > 0:
+                                        await asyncio.sleep(min(delay, 10))
+                            except Exception as e:
+                                _stats_err(e)
+                            if _send_now:
+                                await _shared.send_message(ctx.api, item["target_type"], item["target"], msg)
                     elif quiet:
                         print(f"[检查] {item['scope']} 静默推进（{item['container']}）")
                     elif paused:

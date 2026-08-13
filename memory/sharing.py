@@ -497,7 +497,21 @@ def drive(scope="", now=None) -> dict:
     target_type, target = _target_of(scope)
     if not target_type or not target or not msg:
         return {"sent": False, "reason": "no target/msg", "desire": d}
-    _db.notif_add(target_type, target, msg)
+    # 犹豫层（v2.3）：分享消息也过犹豫门（discard 才真不发；其余延迟到 scheduled_at）
+    try:
+        from memory import hesitation
+        h = hesitation.gate(msg, scope, "sharing", ctx="\n".join(ctx_parts))
+        if h.get("action") == "discard":
+            return {"sent": False, "reason": "hesitation_discard", "desire": d}
+        msg = h.get("msg") or msg
+        delay_s = int(h.get("delay_s") or 0)
+    except Exception as e:
+        _stats_err(e)
+        delay_s = 0
+    scheduled_at = ""
+    if delay_s > 0:
+        scheduled_at = (now + timedelta(seconds=delay_s)).isoformat(timespec="seconds")
+    _db.notif_add(target_type, target, msg, scheduled_at=scheduled_at)
     _mark_sent_reason(now, reason)
     try:
         from memory import interaction as interaction_mod

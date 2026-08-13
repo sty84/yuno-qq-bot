@@ -99,6 +99,7 @@ def _create_tables():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 target_type TEXT NOT NULL, target TEXT NOT NULL,
                 content TEXT NOT NULL, created_at TEXT, sent_at TEXT,
+                scheduled_at TEXT,
                 retries INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS memories(
                 scope TEXT NOT NULL, key TEXT NOT NULL,
@@ -496,6 +497,12 @@ def _create_tables():
             pass
         try:
             c.execute("ALTER TABLE trace_review ADD COLUMN scores TEXT NOT NULL DEFAULT '{}'")
+            c.commit()
+        except sqlite3.OperationalError:
+            pass
+        try:
+            # 犹豫层（v2.3）：通知可延后发送（scheduled_at 之前不发）
+            c.execute("ALTER TABLE notifications ADD COLUMN scheduled_at TEXT")
             c.commit()
         except sqlite3.OperationalError:
             pass
@@ -1461,12 +1468,17 @@ def audit_query(limit=50, action=None):
 
 
 # ===== 通知队列（App/MCP 触发，QQ 播报插件消费）=====
-def notif_add(target_type, target, content):
+def notif_add(target_type, target, content, scheduled_at=""):
+    """入通知队列；scheduled_at（ISO，可空=立即）用于犹豫层延迟发送。"""
     with _lock:
         c = _connect()
         c.execute(
-            "INSERT INTO notifications(target_type,target,content,created_at) VALUES(?,?,?,?)",
-            (target_type, target, str(content)[:500], datetime.now().isoformat(timespec="seconds")),
+            "INSERT INTO notifications(target_type,target,content,created_at,scheduled_at) VALUES(?,?,?,?,?)",
+            (
+                target_type, target, str(content)[:500],
+                datetime.now().isoformat(timespec="seconds"),
+                str(scheduled_at or "")[:30],
+            ),
         )
         c.commit()
 
@@ -1475,8 +1487,10 @@ def notif_pending(limit=20):
     with _lock:
         rows = _connect().execute(
             "SELECT id,target_type,target,content FROM notifications "
-            "WHERE sent_at IS NULL AND failed=0 ORDER BY id LIMIT ?",
-            (limit,),
+            "WHERE sent_at IS NULL AND failed=0 "
+            "AND (scheduled_at IS NULL OR scheduled_at='' OR scheduled_at<=?) "
+            "ORDER BY id LIMIT ?",
+            (datetime.now().isoformat(timespec="seconds"), limit),
         ).fetchall()
         return [dict(r) for r in rows]
 
