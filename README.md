@@ -366,6 +366,8 @@ printf '0 3 * * * cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py backup >>
 | `TIMEZONE` | 默认 Asia/Shanghai；用户声明所在地时会自动记住并切换 |
 | `YUNO_API_TOKEN` | yuno-memory SDK 服务 Bearer token（可选；设置后所有 HTTP 请求需带 `Authorization: Bearer <token>`，公网暴露时务必设置） |
 | `YUNO_WEB_TOKEN` | 评测管理台 webapp Bearer token（可选；设置后所有请求含首页需鉴权） |
+| `YUNO_DB_BACKEND` | 数据库后端，默认 `postgresql`；如需强制 SQLite 可设为 `sqlite` |
+| `YUNO_PG_HOST/PORT/DB/USER/PASSWORD` | PostgreSQL 连接参数（默认 127.0.0.1:5432/yuno/esp/yuno） |
 
 ### config.json（关键段）
 

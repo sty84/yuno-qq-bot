@@ -1,7 +1,7 @@
 # PostgreSQL 迁移记录
 
 > 日期：2026-08-15
-> 状态：数据迁移完成并验证一致；应用运行时仍默认使用 SQLite。
+> 状态：数据迁移完成并验证一致；应用默认使用 PostgreSQL，SQLite 仅作为测试/兼容开关保留。
 
 ## 已完成
 
@@ -51,6 +51,6 @@ export YUNO_PG_PASSWORD=yuno
 
 ## 尚未完成
 
-- `plugins/_db.py` 还没有切换为 PostgreSQL 后端，应用运行仍使用 SQLite。
+- `plugins/_db.py` 已默认切换为 PostgreSQL；设 `YUNO_DB_BACKEND=sqlite` 可强制 SQLite（主要用于测试隔离）。
 - 需要继续实现 PG adapter，覆盖现有 `_db` 的读写接口。
 - 需要处理 FTS5 → PostgreSQL 全文检索 / pgvector。

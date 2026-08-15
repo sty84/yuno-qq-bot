@@ -3649,9 +3649,9 @@ def _stats_err(e):
         pass
 
 
-# ===== PostgreSQL 后端切换（可选）=====
-# 设置 YUNO_DB_BACKEND=postgresql 时，将本模块的所有接口委托给 _db_pg。
-if os.getenv("YUNO_DB_BACKEND", "").strip().lower() == "postgresql":
+# ===== PostgreSQL 后端切换 =====
+# 默认使用 PostgreSQL（只留 PG 模式）；如需强制 SQLite 可设 YUNO_DB_BACKEND=sqlite。
+if os.getenv("YUNO_DB_BACKEND", "postgresql").strip().lower() == "postgresql":
     from plugins import _db_pg as _pg_backend
     for _name in dir(_pg_backend):
         if not _name.startswith("__"):
