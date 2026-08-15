@@ -41,6 +41,8 @@ class CognitiveTurn:
     activated_memories: list = field(default_factory=list)
     options: list = field(default_factory=list)
     action: Any = None
+    reply: str = ""
+    meta: dict = field(default_factory=dict)
 
 
 class MemoryPort:
@@ -86,16 +88,17 @@ class ActionPort:
 class CognitiveArchitecture:
     """组合记忆/决策/动作端口，形成统一认知流程。"""
 
-    def __init__(self, memory=None, decision=None, action=None):
+    def __init__(self, memory=None, decision=None, action=None, responder=None):
         self.memory = memory or MemoryPort()
         self.decision = decision or DecisionPort()
         self.action = action or ActionPort()
+        self.responder = responder
 
-    def run(self, query: str, scope: str = "", context: str = "") -> CognitiveTurn:
+    def run(self, query: str, scope: str = "", context: str = "", *args, **kwargs) -> CognitiveTurn:
         decision = self.decision.decide(query, scope, context)
         hits = self.memory.search(query, [scope] if scope else [], top_k=5)
         action = self.action.execute(decision.get("options", [{}])[0].get("action", "reply") if decision.get("options") else "reply", text=query)
-        return CognitiveTurn(
+        turn = CognitiveTurn(
             query=query,
             scope=scope,
             situation=decision.get("situation", {}),
@@ -105,6 +108,11 @@ class CognitiveArchitecture:
             options=decision.get("options", []),
             action=action,
         )
+        if self.responder is not None:
+            reply, meta = self.responder(query, *args, **kwargs)
+            turn.reply = reply
+            turn.meta = meta
+        return turn
 
     def run_to_dict(self, query: str, scope: str = "", context: str = "") -> dict:
         turn = self.run(query, scope, context)
