@@ -300,6 +300,24 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/status")
+def status():
+    """运维状态：schema 版本、DB 大小、最近 grow、运行中任务数。"""
+    db_size = 0
+    if _db.DB_PATH:
+        try:
+            db_size = pathlib.Path(_db.DB_PATH).stat().st_size
+        except Exception:
+            pass
+    return {
+        "schema_version": _db._schema_version(),
+        "db_size": db_size,
+        "last_grow": _db.kv_get("memory", "last_grow_report"),
+        "tasks_running": sum(1 for t in _tasks.values() if t.get("status") == "running"),
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
 @app.get("/api/public/stats")
 def public_stats():
     """公开只读统计：用于展示页/监控，不暴露敏感数据。"""

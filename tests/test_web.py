@@ -247,3 +247,16 @@ def test_data_dump_endpoint():
     body = r.json()
     assert isinstance(body, dict)
     assert "memories" in body and "events" in body
+
+
+def test_status_endpoint():
+    """运维状态接口返回 schema 版本、DB 大小、任务数。"""
+    from starlette.testclient import TestClient
+    import webapp
+    client = TestClient(webapp.app)
+    r = client.get("/api/status")
+    assert r.status_code == 200, r.status_code
+    body = r.json()
+    assert "schema_version" in body
+    assert "db_size" in body
+    assert "tasks_running" in body
