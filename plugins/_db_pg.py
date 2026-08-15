@@ -11,6 +11,7 @@
 import json
 import os
 import threading
+from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 
@@ -2286,20 +2287,49 @@ def bm25_stats():
 
 
 def bm25_upsert(scope, key, tokenized):
+    """tokenized: [(fact, [term,...])]，增量更新给定事实。"""
+    key = key or ""
     with _lock:
         cur = _connect().cursor()
-        fact = " ".join(tokenized or [])
-        cur.execute(
-            "INSERT INTO bm25_docs(scope,key,fact,doc_len) VALUES(%s,%s,%s,%s) "
-            "ON CONFLICT(scope,key,fact) DO UPDATE SET doc_len=EXCLUDED.doc_len",
-            (scope, key or "", fact, len(tokenized or [])),
-        )
+        for fact, terms in tokenized:
+            cur.execute("DELETE FROM bm25_terms WHERE scope=%s AND key=%s AND fact=%s", (scope, key, str(fact)))
+            cur.execute("DELETE FROM bm25_docs WHERE scope=%s AND key=%s AND fact=%s", (scope, key, str(fact)))
+            cur.execute(
+                "INSERT INTO bm25_docs(scope,key,fact,doc_len) VALUES(%s,%s,%s,%s) "
+                "ON CONFLICT(scope,key,fact) DO UPDATE SET doc_len=EXCLUDED.doc_len",
+                (scope, key, str(fact), len(terms)),
+            )
+            for term, tf in Counter(terms).items():
+                cur.execute(
+                    "INSERT INTO bm25_terms(term,scope,key,fact,tf) VALUES(%s,%s,%s,%s,%s) "
+                    "ON CONFLICT(term,scope,key,fact) DO UPDATE SET tf=EXCLUDED.tf",
+                    (term, scope, key, str(fact), tf),
+                )
         _maybe_commit()
         cur.close()
 
 
 def bm25_sync(scope, key, tokenized):
-    bm25_upsert(scope, key, tokenized)
+    """tokenized: [(fact, [term,...])]，替换该 scope+key 的倒排与文档长度。"""
+    key = key or ""
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("DELETE FROM bm25_terms WHERE scope=%s AND key=%s", (scope, key))
+        cur.execute("DELETE FROM bm25_docs WHERE scope=%s AND key=%s", (scope, key))
+        for fact, terms in tokenized:
+            cur.execute(
+                "INSERT INTO bm25_docs(scope,key,fact,doc_len) VALUES(%s,%s,%s,%s) "
+                "ON CONFLICT(scope,key,fact) DO UPDATE SET doc_len=EXCLUDED.doc_len",
+                (scope, key, str(fact), len(terms)),
+            )
+            for term, tf in Counter(terms).items():
+                cur.execute(
+                    "INSERT INTO bm25_terms(term,scope,key,fact,tf) VALUES(%s,%s,%s,%s,%s) "
+                    "ON CONFLICT(term,scope,key,fact) DO UPDATE SET tf=EXCLUDED.tf",
+                    (term, scope, key, str(fact), tf),
+                )
+        _maybe_commit()
+        cur.close()
 
 
 def bm25_postings(terms, scopes):
@@ -2326,23 +2356,14 @@ def bm25_doc_lens(keys):
     with _lock:
         cur = _connect().cursor(cursor_factory=RealDictCursor)
         out = {}
-        for i in range(0, len(keys), 200):
-            chunk = keys[i:i+200]
-            marks = ",".join(["(?,?,?)"] * len(chunk))
-            params = []
-            for sc,k,f in chunk:
-                params.extend([sc, k or "", str(f)])
-            # PG 使用 %s
-            marks = ",".join(["%s,%s,%s"] * len(chunk))
-            flat = []
-            for sc,k,f in chunk:
-                flat.extend([sc, k or "", str(f)])
+        for sc, k, f in keys:
             cur.execute(
-                f"SELECT scope,key,fact,doc_len FROM bm25_docs WHERE (scope,key,fact) IN ({marks})",
-                flat,
+                "SELECT scope,key,fact,doc_len FROM bm25_docs WHERE scope=%s AND key=%s AND fact=%s",
+                (sc, k or "", str(f)),
             )
-            for r in cur.fetchall():
-                out[(r["scope"], r["key"], r["fact"])] = r["doc_len"]
+            row = cur.fetchone()
+            if row:
+                out[(row["scope"], row["key"], row["fact"])] = row["doc_len"]
         cur.close()
         return out
 
@@ -2357,11 +2378,27 @@ def lexicon_rebuild() -> int:
 
 
 def lexicon_search(query, scopes, limit=10):
-    return []
+    """PG 简易词法检索：用 ILIKE 子串匹配（后续可换 pg_trgm）。"""
+    q = str(query or "").strip()
+    if not q:
+        return []
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        sql = "SELECT scope,key,fact,0 AS rank FROM memories WHERE fact ILIKE %s"
+        params = [f"%{q}%"]
+        if scopes:
+            marks = ",".join(["%s"] * len(scopes))
+            sql += f" AND scope IN ({marks})"
+            params += list(scopes)
+        sql += " LIMIT %s"; params.append(max(1, int(limit)))
+        cur.execute(sql, params)
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        return rows
 
 
 def fts_available() -> bool:
-    return False
+    return True
 
 
 def set_audit_max(n):
