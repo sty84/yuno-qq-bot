@@ -58,49 +58,66 @@
   </style>
 <style>
     :root {
-      --panel-bg: rgba(255,255,255,0.06);
-      --panel-border: rgba(255,255,255,0.12);
-      --accent: #818cf8;
-      --accent2: #a78bfa;
-      --accent3: #2dd4bf;
+      --panel-bg: rgba(255,255,255,0.75);
+      --panel-border: rgba(255,255,255,0.9);
+      --accent: #ec4899;
+      --accent2: #a855f7;
+      --accent3: #06b6d4;
     }
-    body { background: #0b0f1a; }
+    body { background: #fdf2f8; color: #1e293b; }
     .sidebar {
-      background: rgba(11,15,26,0.72);
-      backdrop-filter: blur(14px);
-      border-right: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.72);
+      backdrop-filter: blur(16px);
+      border-right: 1px solid rgba(100,116,139,0.15);
+      color: #1e293b;
     }
+    .brand { color: #7c3aed; }
     .tab {
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.06);
-      border-radius: 10px;
-      transition: background .2s, transform .15s, border-color .2s;
+      background: rgba(255,255,255,0.6);
+      border: 1px solid rgba(100,116,139,0.1);
+      border-radius: 12px;
+      color: #334155;
+      transition: background .2s, transform .15s, border-color .2s, color .2s;
     }
-    .tab:hover { background: rgba(255,255,255,0.1); transform: translateX(2px); }
+    .tab:hover { background: rgba(255,255,255,0.85); color: #be185d; transform: translateX(2px); }
     .tab.active {
-      background: linear-gradient(135deg, #6366f1, #a855f7);
+      background: linear-gradient(135deg, #ec4899, #a855f7);
       border-color: transparent;
       color: #fff;
     }
+    .tabsep { color: #94a3b8; }
     .card {
       background: var(--panel-bg);
       border: 1px solid var(--panel-border);
-      border-radius: 16px;
-      backdrop-filter: blur(10px);
+      border-radius: 18px;
+      color: #1e293b;
+      backdrop-filter: blur(14px);
+      box-shadow: 0 4px 20px rgba(236,72,153,0.08);
       transition: transform .2s, border-color .2s, box-shadow .2s;
     }
     .card:hover {
-      transform: translateY(-3px);
-      border-color: rgba(129,140,248,.5);
-      box-shadow: 0 8px 30px rgba(99,102,241,.15);
+      transform: translateY(-4px);
+      border-color: rgba(236,72,153,0.35);
+      box-shadow: 0 12px 30px rgba(236,72,153,0.15);
     }
+    .card .k, .card .sub, .muted { color: #64748b; }
     .panel {
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 16px;
-      backdrop-filter: blur(10px);
+      background: rgba(255,255,255,0.7);
+      border: 1px solid rgba(255,255,255,0.9);
+      border-radius: 18px;
+      color: #1e293b;
+      backdrop-filter: blur(14px);
+      box-shadow: 0 8px 30px rgba(168,85,247,0.08);
     }
+    h1, h2, h3 { color: #7c3aed; }
     .cards { gap: 14px; }
+    table th { background: rgba(236,72,153,0.08); color: #6d28d9; }
+    table td { color: #334155; border-color: rgba(100,116,139,0.15); }
+    pre {
+      background: rgba(255,255,255,0.65);
+      color: #1e293b;
+      border: 1px solid rgba(100,116,139,0.15);
+    }
     h1 { background: linear-gradient(90deg, var(--accent), var(--accent2), var(--accent3));
          -webkit-background-clip: text; background-clip: text; color: transparent; }
   </style>
@@ -395,10 +412,10 @@
       const cats = b.categories || {};
       const chart = echarts.init($('mem-chart'));
       chart.setOption({
-        title: { text: '分桶召回率', textStyle: { color: '#e2e8f0', fontSize: 13 } },
+        title: { text: '分桶召回率', textStyle: { color: '#1e293b', fontSize: 13 } },
         tooltip: {}, grid: { left: 40, right: 20, bottom: 40 },
-        xAxis: { type: 'category', data: Object.keys(cats), axisLabel: { color: '#94a3b8' } },
-        yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+        xAxis: { type: 'category', data: Object.keys(cats), axisLabel: { color: '#64748b' } },
+        yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
         series: [{ type: 'bar', data: Object.values(cats).map(x => x.recall), itemStyle: { color: '#3b82f6' } }],
       });
     }
@@ -442,10 +459,10 @@
       const cats = b.by_category || {};
       const chart = echarts.init($('emotion-chart'));
       chart.setOption({
-        title: { text: '分情绪准确率', textStyle: { color: '#e2e8f0', fontSize: 13 } },
+        title: { text: '分情绪准确率', textStyle: { color: '#1e293b', fontSize: 13 } },
         tooltip: {}, grid: { left: 40, right: 20, bottom: 40 },
-        xAxis: { type: 'category', data: Object.keys(cats), axisLabel: { color: '#94a3b8', interval: 0, rotate: 30 } },
-        yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+        xAxis: { type: 'category', data: Object.keys(cats), axisLabel: { color: '#64748b', interval: 0, rotate: 30 } },
+        yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
         series: [{ type: 'bar', data: Object.values(cats).map(x => x.accuracy), itemStyle: { color: '#a78bfa' } }],
       });
     }
@@ -511,15 +528,15 @@
       const algos = Object.keys(rs).filter(k => rs[k].trials > 0);
       const chart = echarts.init($('diag-route'));
       chart.setOption({
-        title: { text: '检索路由命中率（各算法）', textStyle: { color: '#e2e8f0', fontSize: 13 } },
+        title: { text: '检索路由命中率（各算法）', textStyle: { color: '#1e293b', fontSize: 13 } },
         tooltip: {}, grid: { left: 40, right: 20, bottom: 40 },
-        xAxis: { type: 'category', data: algos, axisLabel: { color: '#94a3b8' } },
-        yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+        xAxis: { type: 'category', data: algos, axisLabel: { color: '#64748b' } },
+        yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
         series: [{
           type: 'bar',
           data: algos.map(k => rs[k].rate),
           itemStyle: { color: '#f59e0b' },
-          label: { show: true, position: 'top', color: '#e2e8f0', formatter: p => rs[algos[p.dataIndex]].hits + '/' + rs[algos[p.dataIndex]].trials },
+          label: { show: true, position: 'top', color: '#1e293b', formatter: p => rs[algos[p.dataIndex]].hits + '/' + rs[algos[p.dataIndex]].trials },
         }],
       });
       if (d.calibrate) { $('diag-cal').style.display = 'block'; $('diag-cal').textContent = d.calibrate; }
@@ -550,10 +567,10 @@
       const tchart = echarts.init($('trend-chart'));
       tchart.setOption({
         tooltip: { trigger: 'axis' },
-        legend: { data: defs.map(d => d.name), textStyle: { color: '#94a3b8' } },
+        legend: { data: defs.map(d => d.name), textStyle: { color: '#64748b' } },
         grid: { left: 45, right: 20, top: 40, bottom: 40 },
-        xAxis: { type: 'category', data: ts, axisLabel: { color: '#94a3b8', rotate: 30 } },
-        yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+        xAxis: { type: 'category', data: ts, axisLabel: { color: '#64748b', rotate: 30 } },
+        yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
         series: defs.map(d => ({
           name: d.name, type: 'line', smooth: true, connectNulls: false,
           data: h.map(x => x.metrics && x.metrics[d.key] != null ? x.metrics[d.key] : null),
@@ -569,10 +586,10 @@
       });
       const cchart = echarts.init($('compare-chart'));
       cchart.setOption({
-        tooltip: {}, legend: { data: ['最新', '历史平均'], textStyle: { color: '#94a3b8' } },
+        tooltip: {}, legend: { data: ['最新', '历史平均'], textStyle: { color: '#64748b' } },
         grid: { left: 45, right: 20, top: 40, bottom: 40 },
-        xAxis: { type: 'category', data: labels, axisLabel: { color: '#94a3b8' } },
-        yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+        xAxis: { type: 'category', data: labels, axisLabel: { color: '#64748b' } },
+        yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
         series: [
           { name: '最新', type: 'bar', data: keys.map(k => latest[k] != null ? latest[k] : null), itemStyle: { color: '#3b82f6' } },
           { name: '历史平均', type: 'bar', data: keys.map(k => avg[k] != null ? avg[k] : null), itemStyle: { color: '#64748b' } },
@@ -583,10 +600,10 @@
         const bchart = echarts.init($('bandit-chart'));
         bchart.setOption({
           tooltip: {}, grid: { left: 45, right: 20, bottom: 70 },
-          xAxis: { type: 'category', data: (b.strategies || []).map(s => s.label), axisLabel: { color: '#94a3b8', interval: 0, rotate: 20, fontSize: 10 } },
-          yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+          xAxis: { type: 'category', data: (b.strategies || []).map(s => s.label), axisLabel: { color: '#64748b', interval: 0, rotate: 20, fontSize: 10 } },
+          yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
           series: [{ type: 'bar', data: (b.strategies || []).map(s => s.mean), itemStyle: { color: '#a78bfa' },
-                     label: { show: true, position: 'top', color: '#e2e8f0' } }],
+                     label: { show: true, position: 'top', color: '#1e293b' } }],
         });
       } catch (e) { $('bandit-chart').innerHTML = '<div class="muted">bandit 数据加载失败：' + escapeHtml(e.message) + '</div>'; }
       try {
@@ -594,10 +611,10 @@
         const rchart = echarts.init($('revive-chart'));
         rchart.setOption({
           tooltip: {}, grid: { left: 45, right: 20, bottom: 40 },
-          xAxis: { type: 'category', data: Object.keys(r.posterior || {}), axisLabel: { color: '#94a3b8' } },
-          yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+          xAxis: { type: 'category', data: Object.keys(r.posterior || {}), axisLabel: { color: '#64748b' } },
+          yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
           series: [{ type: 'bar', data: Object.values(r.posterior || {}), itemStyle: { color: '#f59e0b' },
-                     label: { show: true, position: 'top', color: '#e2e8f0' } }],
+                     label: { show: true, position: 'top', color: '#1e293b' } }],
         });
       } catch (e) { $('revive-chart').innerHTML = '<div class="muted">revive 数据加载失败：' + escapeHtml(e.message) + '</div>'; }
     }
@@ -782,11 +799,11 @@
       const chart = echarts.init($('scenario-radar'));
       chart.setOption({
         tooltip: {},
-        legend: { data: ['人工', '机器分'], textStyle: { color: '#94a3b8' } },
+        legend: { data: ['人工', '机器分'], textStyle: { color: '#64748b' } },
         radar: {
           indicator: dims.map((d, i) => ({ name: labels[i], max: 5 })),
           radius: '62%',
-          axisName: { color: '#94a3b8' },
+          axisName: { color: '#64748b' },
           splitLine: { lineStyle: { color: '#334155' } },
           axisLine: { lineStyle: { color: '#334155' } },
         },
@@ -874,10 +891,10 @@
       const chart = echarts.init($('ablation-chart'));
       chart.setOption({
         tooltip: { trigger: 'axis' },
-        legend: { data: keys, textStyle: { color: '#94a3b8' } },
+        legend: { data: keys, textStyle: { color: '#64748b' } },
         grid: { left: 45, right: 20, top: 40, bottom: 90 },
-        xAxis: { type: 'category', data: rows.map(r => r.switch), axisLabel: { color: '#94a3b8', rotate: 35, interval: 0, fontSize: 10 } },
-        yAxis: { type: 'value', max: 1, axisLabel: { color: '#94a3b8' } },
+        xAxis: { type: 'category', data: rows.map(r => r.switch), axisLabel: { color: '#64748b', rotate: 35, interval: 0, fontSize: 10 } },
+        yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
         series: keys.map((k, i) => ({
           name: k, type: 'bar', data: rows.map(r => r[k]),
           itemStyle: { color: ['#3b82f6', '#10b981', '#f59e0b'][i] },
@@ -898,10 +915,10 @@
       const mchart = echarts.init($('cost-module-chart'));
       mchart.setOption({
         tooltip: { trigger: 'axis' },
-        legend: { data: ['prompt', 'completion'], textStyle: { color: '#94a3b8' } },
+        legend: { data: ['prompt', 'completion'], textStyle: { color: '#64748b' } },
         grid: { left: 60, right: 20, top: 40, bottom: 70 },
-        xAxis: { type: 'category', data: mods.map(m => m.module), axisLabel: { color: '#94a3b8', interval: 0, rotate: 25, fontSize: 10 } },
-        yAxis: { type: 'value', axisLabel: { color: '#94a3b8' } },
+        xAxis: { type: 'category', data: mods.map(m => m.module), axisLabel: { color: '#64748b', interval: 0, rotate: 25, fontSize: 10 } },
+        yAxis: { type: 'value', axisLabel: { color: '#64748b' } },
         series: [
           { name: 'prompt', type: 'bar', stack: 't', data: mods.map(m => m.prompt), itemStyle: { color: '#3b82f6' } },
           { name: 'completion', type: 'bar', stack: 't', data: mods.map(m => m.completion), itemStyle: { color: '#a78bfa' } },
@@ -911,21 +928,21 @@
       const pchart = echarts.init($('cost-path-chart'));
       pchart.setOption({
         tooltip: {}, grid: { left: 60, right: 20, bottom: 50 },
-        xAxis: { type: 'category', data: paths.map(p => p.path), axisLabel: { color: '#94a3b8', interval: 0, rotate: 20 } },
-        yAxis: { type: 'value', axisLabel: { color: '#94a3b8' } },
+        xAxis: { type: 'category', data: paths.map(p => p.path), axisLabel: { color: '#64748b', interval: 0, rotate: 20 } },
+        yAxis: { type: 'value', axisLabel: { color: '#64748b' } },
         series: [{ type: 'bar', data: paths.map(p => p.prompt + p.completion), itemStyle: { color: '#f59e0b' },
-                   label: { show: true, position: 'top', color: '#e2e8f0' } }],
+                   label: { show: true, position: 'top', color: '#1e293b' } }],
       });
       const days = c.by_day || [];
       const dchart = echarts.init($('cost-day-chart'));
       dchart.setOption({
         tooltip: { trigger: 'axis' },
-        legend: { data: ['tokens', '花费'], textStyle: { color: '#94a3b8' } },
+        legend: { data: ['tokens', '花费'], textStyle: { color: '#64748b' } },
         grid: { left: 60, right: 60, top: 40, bottom: 60 },
-        xAxis: { type: 'category', data: days.map(d => d.date), axisLabel: { color: '#94a3b8', rotate: 30 } },
+        xAxis: { type: 'category', data: days.map(d => d.date), axisLabel: { color: '#64748b', rotate: 30 } },
         yAxis: [
-          { type: 'value', name: 'tokens', axisLabel: { color: '#94a3b8' } },
-          { type: 'value', name: '¥', axisLabel: { color: '#94a3b8' } },
+          { type: 'value', name: 'tokens', axisLabel: { color: '#64748b' } },
+          { type: 'value', name: '¥', axisLabel: { color: '#64748b' } },
         ],
         series: [
           { name: 'tokens', type: 'line', smooth: true, data: days.map(d => d.prompt + d.completion), itemStyle: { color: '#3b82f6' }, yAxisIndex: 0 },
@@ -998,6 +1015,6 @@
     loadDash().catch(e => $('dash-cards').innerHTML = '<div class="red">加载失败：' + e.message + '</div>');
     setInterval(() => { if (!document.hidden) loadDash().catch(() => {}); }, 15000);
   </script>
-  <script src="/static/wave-bg.js"></script>
+  <script src="/static/bg-bands.js"></script>
 </body>
 </html>

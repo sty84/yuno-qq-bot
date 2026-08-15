@@ -7,14 +7,14 @@
   <script src="/static/vendor/echarts.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js';"></script>
   <style>
     :root {
-      --bg: #0b0f1a;
-      --panel: rgba(255,255,255,0.06);
-      --panel-border: rgba(255,255,255,0.12);
-      --text: #e2e8f0;
-      --muted: #94a3b8;
-      --accent: #818cf8;
-      --accent2: #a78bfa;
-      --accent3: #2dd4bf;
+      --bg: #fdf2f8;
+      --panel: rgba(255,255,255,0.72);
+      --panel-border: rgba(255,255,255,0.9);
+      --text: #1e293b;
+      --muted: #64748b;
+      --accent: #ec4899;
+      --accent2: #a855f7;
+      --accent3: #06b6d4;
     }
     * { box-sizing: border-box; }
     body {
@@ -23,36 +23,37 @@
       min-height: 100vh;
     }
     .wrap { max-width: 1080px; margin: 0 auto; position: relative; z-index: 1; }
-    h1 { font-size: 26px; font-weight: 700; background: linear-gradient(90deg, var(--accent), var(--accent2), var(--accent3));
+    h1 { font-size: 28px; font-weight: 800; background: linear-gradient(90deg, var(--accent), var(--accent2), var(--accent3));
          -webkit-background-clip: text; background-clip: text; color: transparent; margin-bottom: 4px; }
     .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
     .cards {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; margin-top: 18px;
     }
     .card {
-      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 16px;
-      padding: 16px 18px; backdrop-filter: blur(10px); transition: transform .2s, border-color .2s, box-shadow .2s;
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 18px;
+      padding: 16px 18px; backdrop-filter: blur(12px); box-shadow: 0 4px 20px rgba(236,72,153,.08);
+      transition: transform .2s, box-shadow .2s, border-color .2s;
     }
-    .card:hover { transform: translateY(-3px); border-color: rgba(129,140,248,.5); box-shadow: 0 8px 30px rgba(99,102,241,.15); }
+    .card:hover { transform: translateY(-4px); border-color: rgba(236,72,153,.35); box-shadow: 0 12px 30px rgba(236,72,153,.15); }
     .card .k { font-size: 12px; color: var(--muted); }
-    .card .v { font-size: 26px; font-weight: 700; margin-top: 6px; }
+    .card .v { font-size: 26px; font-weight: 800; margin-top: 6px; }
     .card .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
     .muted { color: var(--muted); font-size: 12px; margin-top: 20px; }
     .panel {
-      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 18px;
-      padding: 20px; margin-top: 22px; backdrop-filter: blur(12px);
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 20px;
+      padding: 20px; margin-top: 22px; backdrop-filter: blur(14px); box-shadow: 0 8px 30px rgba(168,85,247,.08);
     }
-    .panel h2 { font-size: 18px; margin: 0 0 10px; color: #c7d2fe; }
+    .panel h2 { font-size: 18px; margin: 0 0 10px; color: #7c3aed; }
     .chart { width: 100%; height: 320px; margin-top: 12px; }
     table { border-collapse: collapse; width: 100%; margin-top: 12px; font-size: 13px; }
-    th, td { border: 1px solid rgba(255,255,255,0.1); padding: 8px 12px; text-align: left; }
-    th { background: rgba(255,255,255,0.06); color: #c7d2fe; }
-    tr:hover td { background: rgba(255,255,255,0.03); }
+    th, td { border: 1px solid rgba(100,116,139,.2); padding: 8px 12px; text-align: left; }
+    th { background: rgba(255,255,255,0.6); color: #6d28d9; }
+    tr:hover td { background: rgba(255,255,255,0.4); }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     @media (max-width: 760px) {
       .grid-2 { grid-template-columns: 1fr; }
     }
-  </style>
+  </style>  </style>
 </head>
 <body>
   <canvas id="bg-canvas" style="position:fixed;inset:0;z-index:0;pointer-events:none;"></canvas>
@@ -130,13 +131,13 @@
         const chart = echarts.init(document.getElementById('trendChart'));
         chart.setOption({
           backgroundColor: 'transparent',
-          textStyle: { color: '#e2e8f0' },
+          textStyle: { color: '#1e293b' },
           tooltip: { trigger: 'axis' },
-          legend: { textStyle: { color: '#e2e8f0' }, top: 0 },
+          legend: { textStyle: { color: '#1e293b' }, top: 0 },
           grid: { left: 50, right: 20, top: 40, bottom: 40 },
-          xAxis: { type: 'category', data: times, axisLabel: { color: '#94a3b8' } },
-          yAxis: { type: 'value', min: 0, max: 1, axisLabel: { color: '#94a3b8' } },
-          color: ['#818cf8', '#a78bfa', '#2dd4bf'],
+          xAxis: { type: 'category', data: times, axisLabel: { color: '#64748b' } },
+          yAxis: { type: 'value', min: 0, max: 1, axisLabel: { color: '#64748b' } },
+          color: ['#ec4899', '#a855f7', '#06b6d4'],
           series,
         });
 
@@ -150,6 +151,6 @@
         document.getElementById('trendChart').textContent = '趋势加载失败：' + e;
       });
   </script>
-  <script src="/static/wave-bg.js"></script>
+  <script src="/static/bg-bands.js"></script>
 </body>
 </html>
