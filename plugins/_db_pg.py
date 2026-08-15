@@ -1108,7 +1108,7 @@ def trace_review_map(trace_ids):
 def trace_review_recent(limit=100):
     with _lock:
         cur = _connect().cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM trace_review ORDER BY created_at DESC, id DESC LIMIT %s", (max(1, int(limit)),))
+        cur.execute("SELECT * FROM trace_review ORDER BY created_at DESC LIMIT %s", (max(1, int(limit)),))
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
         return rows
@@ -1140,7 +1140,7 @@ def conv_review_map(conv_ids):
 def conv_review_recent(limit=100):
     with _lock:
         cur = _connect().cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM conv_review ORDER BY created_at DESC, id DESC LIMIT %s", (max(1, int(limit)),))
+        cur.execute("SELECT * FROM conv_review ORDER BY created_at DESC LIMIT %s", (max(1, int(limit)),))
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
         return rows
