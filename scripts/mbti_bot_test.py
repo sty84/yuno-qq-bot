@@ -12,9 +12,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import os
+import tempfile
+
+# 测试数据与 LLM 成本写入临时 SQLite，避免污染生产 PostgreSQL
+os.environ["YUNO_DB_BACKEND"] = "sqlite"
+from plugins import _db
+_db.init(tempfile.mkdtemp(prefix="mbti_test_"), force=True)
+
 from plugins import _shared
 from agent import persona
 from plugins.mbti import DIMENSIONS, QUESTIONS
+from plugins import _db_internal
 
 
 def ask_choice(q, system):
@@ -68,6 +77,11 @@ def main():
                 print("跳过（无有效答案）")
         mbti, scores = compute(answers)
         rounds.append({"round": r, "answers": answers, "mbti": mbti, "scores": scores})
+        _db_internal.record(
+            "mbti_run",
+            {"round": r, "answers": answers, "mbti": mbti, "scores": scores},
+            scope="mbti_bot_test",
+        )
         print(f"第 {r} 轮 MBTI: {mbti}  {scores}")
 
     # 对比
@@ -93,7 +107,9 @@ def main():
     out = Path(__file__).resolve().parents[1] / "docs" / "baselines" / "mbti_bot_test.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    _db_internal.record("mbti_summary", report, scope="mbti_bot_test")
     print(f"\n报告已保存: {out}")
+    print(f"内部记录已写入: {_db_internal.DB_PATH}")
 
 
 if __name__ == "__main__":

@@ -7,6 +7,9 @@
 import os
 import pytest
 
+# 默认使用独立测试库，避免污染生产 yuno
+os.environ.setdefault("YUNO_PG_DB", "yuno_test")
+
 pytestmark = pytest.mark.skipif(
     os.getenv("YUNO_PG_TEST") != "1",
     reason="需要设置 YUNO_PG_TEST=1 才运行 PostgreSQL 适配层测试",
