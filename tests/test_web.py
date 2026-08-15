@@ -260,3 +260,41 @@ def test_status_endpoint():
     assert "schema_version" in body
     assert "db_size" in body
     assert "tasks_running" in body
+
+
+def test_data_import_requires_confirm_and_imports():
+    """数据导入必须 confirm=true，确认后调用 restore_all。"""
+    from plugins import _db
+    from starlette.testclient import TestClient
+    import webapp
+    client = TestClient(webapp.app)
+    # 未确认 -> 400
+    r = client.post("/api/data/import", json={"data": {"kv": []}})
+    assert r.status_code == 400, r.status_code
+    # 确认后 -> ok
+    r2 = client.post("/api/data/import", json={
+        "data": {"kv": [{"namespace": "test", "key": "x", "value": "1"}]},
+        "confirm": True,
+    })
+    assert r2.status_code == 200, r2.status_code
+    assert r2.json()["ok"] is True
+    assert r2.json()["counts"].get("kv") == 1
+    audit = _db.audit_query(limit=5, action="web.data_import")
+    assert audit, "数据导入应写审计"
+
+
+def test_notify_requires_confirm():
+    """播报接口必须 confirm=true，确认后入队并写审计。"""
+    from plugins import _db
+    from starlette.testclient import TestClient
+    import webapp
+    client = TestClient(webapp.app)
+    r = client.post("/api/ops/notify", json={"content": "test", "target": "g1"})
+    assert r.status_code == 400, r.status_code
+    r2 = client.post("/api/ops/notify", json={
+        "content": "test alert", "target_type": "group", "target": "g1", "confirm": True,
+    })
+    assert r2.status_code == 200, r2.status_code
+    assert r2.json()["ok"] is True
+    audit = _db.audit_query(limit=5, action="notify.send")
+    assert audit, "播报应写审计"

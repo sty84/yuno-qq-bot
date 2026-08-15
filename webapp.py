@@ -273,6 +273,19 @@ class ToolRun(BaseModel):
     scope: str = ""
 
 
+class DataImportRequest(BaseModel):
+    data: dict = {}
+    replace: bool = False
+    confirm: bool = False
+
+
+class NotifyRequest(BaseModel):
+    content: str
+    target_type: str = "group"
+    target: str = ""
+    confirm: bool = False
+
+
 class ReviewSubmit(BaseModel):
     """记忆评分提交（路线图 trace 审核页）：五维均 1~5。"""
     trace_id: int
@@ -693,6 +706,34 @@ def convreview_submit(req: ConvReviewSubmit):
 def data_dump():
     """全量数据 JSON 导出（只读，含用户数据表；索引类由 grow 重建）。"""
     return _db.dump_all()
+
+
+@app.post("/api/data/import")
+def data_import(req: DataImportRequest):
+    """Web 数据导入（高危）：必须 confirm=true，导入前写审计。"""
+    if not req.confirm:
+        raise HTTPException(400, "数据导入为高危操作，需要 confirm=true")
+    if not req.data:
+        raise HTTPException(400, "data 不能为空")
+    _db.audit_add(
+        "web.data_import", "import",
+        f"tables={len(req.data)} replace={req.replace}",
+        operator="web",
+    )
+    counts = _db.restore_all(req.data, replace=req.replace)
+    return {"ok": True, "counts": counts}
+
+
+@app.post("/api/ops/notify")
+def notify(req: NotifyRequest):
+    """发送运维/告警播报（高危/易骚扰，必须 confirm=true）。"""
+    if not req.confirm:
+        raise HTTPException(400, "发送播报需要 confirm=true")
+    if not req.content.strip():
+        raise HTTPException(400, "content 不能为空")
+    from plugins import _capability
+    result = _capability.notify_send(req.target_type, req.target, req.content)
+    return {"ok": True, "result": result}
 
 
 @app.post("/api/tools")
