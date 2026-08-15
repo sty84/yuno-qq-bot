@@ -1,12 +1,17 @@
-# YUNO AI 2.3 —— 成长型 Agent Memory System
+# YUNO AI 2.4 —— 成长型 Agent Memory System
 
 > QQ 里聊天，App 里管理，MCP 串起所有能力。**记忆不是聊天记录，而是 AI 的长期认知。**
 
 YUNO 2.2 是一个把 **AI 长期记忆 / 人格成长 / 关系系统 / 决策辅助 / 生活化世界层** 做成完整认知闭环的 QQ 机器人，
 同时把记忆系统抽成可独立接入任意 Agent 的 **Python SDK + FastAPI 服务**。
 
-当前版本：**v2.3**（在 2.0/2.1/2.2 仓库基础上迭代；功能基线 v31/v32——记忆检索重排 + 多维情绪 +
-睡眠/日程/环境/分享/生活/空间/传感器世界层 + 认知层）。
+当前版本：**v2.4**（在 2.0/2.1/2.2/2.3 仓库基础上迭代；功能基线 v31/v32/v33——记忆检索重排 +
+多维情绪 + 睡眠/日程/环境/分享/生活/空间/传感器世界层 + 认知层 + 对话质量评分闭环）。
+
+v2.4 相对 v2.3 的主要变化：对话质量评分闭环（convreview，评分对象从记忆轨迹升级为对话回合，
+五维：记得/自然/有情绪/主动/边界；真实对话自动记录 + 场景回放入队；管理台与 CLI 双通道评分；
+低分自动审计归因、第一版只诊断不自动调参）；CI 补齐 web 层依赖与全量语法检查，web 冒烟覆盖
+对话评分接口。详见下方「v2.4 迭代重点」。
 
 v2.3 相对 v2.2 的主要变化：三维情绪与议题系统打通（VAD 存储/质心聚合/心境一致性检索/情绪底色
 注入/评测探针/单一事实源 + 旧议题回填与慢通道桥接）；情绪调制遗忘（arousal 缩放半衰期）与双速
@@ -14,7 +19,7 @@ v2.3 相对 v2.2 的主要变化：三维情绪与议题系统打通（VAD 存�
 出 SVG）；事实分类子串误伤修复（强锚点 + 语境确认 + 过程标记降级，`policy-classify` 探针）；
 revive-companion 泊松触发 + 贝叶斯用户状态推断；cognitive-engine Thompson Sampling 回应策略
 bandit；评测管理台（webapp）补齐消融热插拔开关、多主体/情绪一致性详情、对话回放五维评分、
-bandit/revive 图表与分类页签。详见下方「v2.3 迭代重点」。
+bandit/revive 图表与分类页签。详见下方「v2.4 迭代重点」。
 
 v2.2 相对 v2.1 的主要变化：新增心智状态中枢 / 目标意图（BDI）/ 程序记忆（System 1/2）/
 单次结构化输出等认知层；物品位置历史（事件溯源）+ 激活分级找东西（静默搜索、话题暂停、
@@ -104,7 +109,24 @@ flowchart LR
   `repair_spatial` 扩展（数量/状态一致性、同名多容器、容量检查）。
 - **代码审计**：246 处裸 except 全部换成 `err:<模块>` 计数 + 日志，异常可观测、可消融。
 
-### v2.3 迭代重点（最近一轮）
+### v2.4 迭代重点（最近一轮）
+
+- **对话质量评分闭环（convreview，北极星落地）**：
+  - 评分对象从"记忆处理轨迹"升级为"对话回合"（用户消息 + AI 回复），直接回答"这个 bot 活不活"；
+  - 五维：**记得**（引用历史不穿帮）/ **自然**（像人话不机械）/ **有情绪**（情绪连贯）/
+    **主动**（会主动分享/推进）/ **边界**（不乱编不泄密），每维 1~5；
+  - 数据源双通道：真实对话 `after_chat` 自动记录进 `conv_log` + `scenario-eval --review-export`
+    把场景回放对话写入同一队列；
+  - 管理台：`/api/review/queue?source=conv` 待评队列 + `/api/convreview/submit` 提交；
+    CLI：`memory-conv-md`（导出报告）/ `memory-conv-review <id> --remember 4 …`（评分）/
+    `memory-conv-report`（维度均值 + 低分归因）；
+  - 低分自动写审计 + 归因提示（如"记得低 → 查 query_log 样本 + 缺口守卫触发率"）；
+  - **第一版只诊断、不自动调参**（`conv_report.auto_adjust=false`），攒够人工评分再决定
+    哪些维度接入自动调整——与 trace 五维（驱动 confidence_factor 等参数）明确区分。
+- **工程化**：CI 补 web 层依赖（fastapi/httpx/uvicorn/jieba）与全量语法检查
+  （`git ls-files '*.py'`，修复前只查 7 个文件、web 层零覆盖）；web 冒烟新增对话评分接口用例。
+
+### v2.3 迭代重点
 
 - **情绪 ↔ 议题打通（三维情绪真正参与记忆）**：
   - 存储：`topic.link_fact` 在 mood 标签之外并行写 `vad` 向量与 `compound` 复合情绪参数
@@ -253,6 +275,10 @@ flowchart LR
 - **记忆轨迹 + 五维评分闭环**：每次处理记录轨迹（create/merge/update/decay/reject…），
   人工按 extraction/decision/confidence/provenance/privacy 五维评分，
   评分均值直接驱动 confidence_factor / 提取门槛 / 隐私阈值（"评分 → 行为"闭环）。
+- **对话质量评分闭环（v33 convreview）**：评分对象从记忆轨迹升级到对话回合（用户+AI），
+  五维（记得/自然/有情绪/主动/边界）；数据源 = 真实对话自动记录 + 场景回放
+  `scenario-eval --review-export`；低分自动审计 + 归因，只诊断不自动调参
+  （`memory-conv-md / memory-conv-review / memory-conv-report`）。
 - **隐私与加密**：规则检测（手机号/证件/财务/健康…），可选 AES-GCM 加密（`MEMORY_KEY`）；
   私聊记忆不进群、`/忘记` `/公开` 控制可见性。
 - **纠错调查与时间推理**：用户否定先调查再决定 update/keep/uncertain（不盲从），
@@ -338,6 +364,8 @@ printf '0 3 * * * cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py backup >>
 | `MEMORY_KEY` | 高隐私记忆 AES-GCM 加密密钥（可选） |
 | `CONFIG_PATH` / `QQBOT_CONFIG` | 覆盖配置路径（可选） |
 | `TIMEZONE` | 默认 Asia/Shanghai；用户声明所在地时会自动记住并切换 |
+| `YUNO_API_TOKEN` | yuno-memory SDK 服务 Bearer token（可选；设置后所有 HTTP 请求需带 `Authorization: Bearer <token>`，公网暴露时务必设置） |
+| `YUNO_WEB_TOKEN` | 评测管理台 webapp Bearer token（可选；设置后所有请求含首页需鉴权） |
 
 ### config.json（关键段）
 
@@ -381,20 +409,28 @@ printf '0 3 * * * cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py backup >>
 ## SDK 与 HTTP 服务
 
 ```bash
-python -m yuno_memory --host 127.0.0.1 --port 8457 --data-dir ./data --api-key <key> --embedder local
+python -m yuno_memory --host 127.0.0.1 --port 8457 --data-dir ./data --api-key <key> --embedder local --token <token>
 ```
 
-参数说明：`--host/--port` 监听地址，`--api-key` 请求鉴权，`--embedder local` 使用本地
-sentence-transformers（`openai_compatible` 则走云端 API），`--data-dir` 指定记忆库目录。
+参数说明：`--host/--port` 监听地址，`--api-key` LLM API key，`--embedder local` 使用本地
+sentence-transformers（`openai_compatible` 则走云端 API），`--data-dir` 指定记忆库目录，
+`--token` Bearer 鉴权 token（默认读环境变量 `YUNO_API_TOKEN`；空则不鉴权，本机使用）。
+`/memory/export` 的导出路径被限制在 `--data-dir` 内（防任意写盘）。
+
+评测管理台（webapp）同理：设置 `YUNO_WEB_TOKEN` 后所有请求需带 `Authorization: Bearer <token>`。
 
 ## 测试与维护
 
 ```bash
-python tools.py health              # 独立健康检查
+python tools.py health              # 独立健康检查（有服务离线时退出码 1，可被 cron 门控）
+python tools.py config-validate     # 校验 config.json（有错误时退出码 1）
 python tools.py backup              # 每日 SQLite 备份（保留 7 份）
 python tools.py memory-governance   # 记忆治理报告
 python tools.py memory-trace-md --limit 20   # 记忆轨迹
 python tools.py memory-trace-review <id> --extraction 5 --decision 4  # 人工评分
+python tools.py memory-conv-md --limit 20    # 对话评分报告（v33）
+python tools.py memory-conv-review <id> --remember 4 --natural 5  # 对话五维评分（v33）
+python tools.py memory-conv-report           # 对话五维诊断（维度均值 + 低分归因，v33）
 python tools.py memory-sleep        # 睡眠/梦境：浅睡+深睡巩固，REM 做梦
 python tools.py emotion-eval        # 情绪判断评测（分类准确率 + VAD MAE）
 python tools.py emotion-log         # 导出情绪判断日志（训练数据原料）
@@ -402,26 +438,32 @@ python tools.py memory-index --tune # 重建/调优自研 IVF 向量索引
 python tools.py memory-calibrate    # 用评测集训练置信度标定
 python tools.py data-export         # 全量数据打包
 python tools.py data-import <file>  # 导入数据
-python tools.py config-validate     # 校验 config.json（未知段/类型/取值越界）
 python tools.py floorplan-render    # 平面图 SVG 预览 + 房间几何事实表
 python tools.py policy-classify     # 事实分类探针（含关键词但实为过程/指令）
 python tools.py revive-status       # 主动消息：泊松概率 + 贝叶斯用户状态（只读）
 python tools.py bandit-status       # 回应策略后验（各策略均值 + 上次选择）
 python tools.py topic-vad-backfill  # 旧议题补近似 VAD/复合情绪（幂等）
 python tools.py scenario-eval --score  # 场景回放五维评分（LLM）
+python tools.py scenario-eval --review-export  # 场景回放对话写入评分队列（v33）
 python tools.py ablation            # 机制消融矩阵（单开关 × probes + 实验日志）
 python tools.py subjects-eval       # 多主体评测（写入/隐私/引用/可信度衰减）
 python tools.py consistency-eval    # 双轨制一致性（失效队列 + 重算）
 python tools.py experiments         # 实验日志（基线前后 + 回归标记）
 ```
 
-自动化测试：
+自动化测试（CI 全量执行）：
 
 ```bash
-python e2e_test.py             # 端到端一致性（v31.2）：生活回流/礼物隐私/嫌烦惩罚/久别重逢/话题锚点/情绪归因
-python load_test.py [并发数]   # 轻量负载：并发消息走 分析→情绪→观测→分享钩子
-python v29_test.py             # 专项验收：用户记忆不被 AI 自述污染
+make check                          # 推荐：配置校验 + diff 空白检查 + 全量 pytest
+python -m pytest -q                 # 全量回归（自动只收集 tests/，不会再误收根目录脚本）
+python e2e_test.py                  # 端到端一致性（v31.2）：生活回流/礼物隐私/嫌烦惩罚/久别重逢/话题锚点/情绪归因
+python load_test.py [并发数]        # 轻量负载：并发消息走 分析→情绪→观测→分享钩子
+python v29_test.py                  # 专项验收：用户记忆不被 AI 自述污染
 ```
+
+测试隔离说明：全部 pytest 用例绑定各自临时数据库（`_db.init(force=True)`），不写真实
+`data/bot.db`；`tests/test_features.py` 按域拆成 9 个函数共享模块级环境，函数间有库状态
+顺序依赖，请整文件运行。
 
 ## 仓库内文档
 
@@ -436,15 +478,24 @@ python v29_test.py             # 专项验收：用户记忆不被 AI 自述污�
 
 - **参数没有真实数据校准**：7 路检索权重、遗忘半衰期、信息增益阈值、情绪 VAD 基线等
   都是经验值，没有 baseline 数字，无法证明这些机制真的有效。
-- **回归测试仍待扩充**：已有 51 项 pytest 回归 + CI（语法 + 逻辑断言），但状态层单测和
-  真实 LLM 输出测试还薄，v29 验收需在服务器环境跑。
-- **仍有内存态**：`_chat_busy`、检索结果缓存、route_stats 等重启即失（六个核心状态已迁
-  正规表，其余待迁）。
 - **关键路径依赖 LLM**：提取/纠错调查/重排/world_delta 都调 LLM，成本和失败率不可控，
   单条消息最坏会触发两次以上 LLM 调用。
+- **仍有内存态**：`_chat_busy`、检索结果缓存、route_stats 等重启即失（六个核心状态已迁
+  正规表，其余待迁）。
 - **管理面部分完成**：评测管理台（webapp）已覆盖评测/消融/回放评分/图表，但 probes 评测集
   管理、trace 人工审核页、数据导出页尚未做；管理 App 仍是命令行 + 网页轮询。
 - **单机单用户**：SQLite + 内存态架构，无水平扩展与多租户设计。
+
+已修复（v2.3 工程轮）：
+
+- **回归测试从"3 个冒烟"到 22 项 pytest（164 check）**：`tests/test_features.py` 按域拆成
+  9 个函数；新增检索下推、web/SDK 冒烟、事务回滚用例；CI 全量语法检查（68 文件）+ 全依赖。
+- **CI 曾只查 7 个文件、web/SDK 零覆盖** → `py_compile $(git ls-files '*.py')` + fastapi/httpx 冒烟。
+- **两个 HTTP 服务曾零鉴权** → `YUNO_API_TOKEN` / `YUNO_WEB_TOKEN` Bearer 鉴权 + export 路径白名单。
+- **tools.py 退出码恒 0** → `health`/`config-validate` 失败返回非 0，cron 可门控。
+- **ingest 曾 10 次独立写无事务** → `_db.transaction()` 单事务原子写，中途失败整体回滚。
+- **检索全表扫描** → `fact IN (...)` 下推 + 隐式反馈批量提交。
+- **隐私加密曾静默降级明文** → 无密钥/失败显式告警日志。
 
 改进方向（按优先级）：
 

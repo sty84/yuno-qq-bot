@@ -6,48 +6,55 @@
 import os
 import sys
 
-TEST_DIR = os.getenv(
-    "V29_TEST_DIR",
-    r"C:\Users\STY\.codex\visualizations\2026\08\07\019fda20-33c8-7031-851a-541c0036115a\yuno_mem_test",
-)
-PROJECT_DIR = os.getenv("V29_PROJECT_DIR", os.path.dirname(os.path.abspath(__file__)))
-if not os.path.isdir(TEST_DIR):
-    print(f"跳过：测试目录不存在（{TEST_DIR}），可用环境变量 V29_TEST_DIR 指定。")
-    sys.exit(0)
-os.environ["CONFIG_PATH"] = os.path.join(TEST_DIR, "config_v22.json")
-sys.path.insert(0, TEST_DIR)
-sys.path.insert(0, PROJECT_DIR)
 
-import memory  # noqa: E402
-from memory import extract  # noqa: E402
-from plugins import _db  # noqa: E402
+def main():
 
-checks = []
+    TEST_DIR = os.getenv(
+        "V29_TEST_DIR",
+        r"C:\Users\STY\.codex\visualizations\2026\08\07\019fda20-33c8-7031-851a-541c0036115a\yuno_mem_test",
+    )
+    PROJECT_DIR = os.getenv("V29_PROJECT_DIR", os.path.dirname(os.path.abspath(__file__)))
+    if not os.path.isdir(TEST_DIR):
+        print(f"跳过：测试目录不存在（{TEST_DIR}），可用环境变量 V29_TEST_DIR 指定。")
+        return 0
+    os.environ["CONFIG_PATH"] = os.path.join(TEST_DIR, "config_v22.json")
+    sys.path.insert(0, TEST_DIR)
+    sys.path.insert(0, PROJECT_DIR)
 
+    import memory  # noqa: E402
+    from memory import extract  # noqa: E402
+    from plugins import _db  # noqa: E402
 
-def check(name, cond, extra=""):
-    checks.append(bool(cond))
-    print(("PASS" if cond else "FAIL"), name, extra if not cond else "")
+    checks = []
 
 
-# 1) prompt 指令
-check(
-    "污染-prompt有指令",
-    "只提取用户说的话" in extract.EXTRACT_SYSTEM_PROMPT
-    and "只提取用户说的话" in extract.STRUCTURED_EXTRACT_PROMPT,
-)
+    def check(name, cond, extra=""):
+        checks.append(bool(cond))
+        print(("PASS" if cond else "FAIL"), name, extra if not cond else "")
 
-# 2) 确定性过滤
-_db.memory_clear("c2c:v29")
-memory.ingest(
-    "c2c:v29", "", "测试", "好的",
-    facts=["机器人只会带半个坐垫", "用户养了一只橘猫", "YUNO 负责带能量饮料"],
-)
-rows = [r["fact"] for r in _db.memory_rows("c2c:v29")]
-check("污染-机器人开头被过滤", "机器人只会带半个坐垫" not in rows, rows)
-check("污染-YUNO开头被过滤", "YUNO 负责带能量饮料" not in rows, rows)
-check("污染-用户事实保留", "用户养了一只橘猫" in rows, rows)
 
-failed = [i for i, c in enumerate(checks) if not c]
-print("\nRESULT:", "ALL PASS" if not failed else f"FAILED #{failed}", f"({len(checks)} checks)")
-sys.exit(1 if failed else 0)
+    # 1) prompt 指令
+    check(
+        "污染-prompt有指令",
+        "只提取用户说的话" in extract.EXTRACT_SYSTEM_PROMPT
+        and "只提取用户说的话" in extract.STRUCTURED_EXTRACT_PROMPT,
+    )
+
+    # 2) 确定性过滤
+    _db.memory_clear("c2c:v29")
+    memory.ingest(
+        "c2c:v29", "", "测试", "好的",
+        facts=["机器人只会带半个坐垫", "用户养了一只橘猫", "YUNO 负责带能量饮料"],
+    )
+    rows = [r["fact"] for r in _db.memory_rows("c2c:v29")]
+    check("污染-机器人开头被过滤", "机器人只会带半个坐垫" not in rows, rows)
+    check("污染-YUNO开头被过滤", "YUNO 负责带能量饮料" not in rows, rows)
+    check("污染-用户事实保留", "用户养了一只橘猫" in rows, rows)
+
+    failed = [i for i, c in enumerate(checks) if not c]
+    print("\nRESULT:", "ALL PASS" if not failed else f"FAILED #{failed}", f"({len(checks)} checks)")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

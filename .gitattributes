@@ -1,0 +1,17 @@
+# 统一行尾：文本文件默认 LF；需要 CRLF 的再单独覆盖
+* text=auto eol=lf
+
+# 可执行脚本保持 LF
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+
+# Windows 批处理/服务文件保留 CRLF（如需）
+*.bat text eol=crlf
+*.cmd text eol=crlf
