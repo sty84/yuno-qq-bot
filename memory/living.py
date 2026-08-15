@@ -439,7 +439,7 @@ def cancel_search(scope) -> bool:
 def ask_npc(name, text, top_k=2) -> str:
     """问队友找东西/回忆：检索该 NPC 视角的记忆（含物品位置事件）。"""
     try:
-        from memory import reasoning, subjects
+        from memory import reasoning
         q = str(text or "")
         hits = reasoning.retrieve_subject(name, q, top_k=int(top_k), min_score=0.25)
         if not hits:

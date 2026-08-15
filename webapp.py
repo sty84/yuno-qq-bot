@@ -24,6 +24,15 @@ from pydantic import BaseModel
 
 from plugins import _db, _shared
 
+def _stats_err(e):
+    """裸 except 审计（与项目其他模块一致）。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("webapp", e)
+    except Exception:
+        pass
+
+
 
 def _apply_light_config():
     """4C4G 约束：webapp 是独立进程，默认关闭 embedding——
@@ -46,7 +55,7 @@ _tasks = {}
 _lock = threading.Lock()
 _sem = threading.BoundedSemaphore(MAX_CONCURRENT)
 _rate = {}
-_sessions = {}  # token -> expiry ts
+_sessions = {}  # token -> {"exp": ts, "role": "admin"|"readonly"}
 _SESSION_TTL = 12 * 3600
 
 
@@ -255,13 +264,27 @@ if _WEB_TOKEN:
         # 公开统计接口与公开页不鉴权，供只读展示页使用
         if request.url.path.startswith("/api/public/") or request.url.path == "/public" or request.url.path == "/api/auth/login":
             return await call_next(request)
+        # 基础 CSRF：非 GET 请求若带 Origin，必须与 Host 一致
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            origin = request.headers.get("origin")
+            if origin:
+                from urllib.parse import urlparse
+                parsed = urlparse(origin)
+                if parsed.netloc != request.headers.get("host", ""):
+                    return JSONResponse({"detail": "跨域请求被拒绝"}, status_code=403)
         auth = request.headers.get("Authorization", "")
         token = auth[7:] if auth.startswith("Bearer ") else ""
+        role = None
         if token == _WEB_TOKEN:
-            return await call_next(request)
-        if token in _sessions and _sessions[token] > time.time():
-            return await call_next(request)
-        return JSONResponse({"detail": "未授权"}, status_code=401)
+            role = "admin"
+        elif token in _sessions and _sessions[token]["exp"] > time.time():
+            role = _sessions[token]["role"]
+        if role is None:
+            return JSONResponse({"detail": "未授权"}, status_code=401)
+        request.state.role = role
+        if request.method not in ("GET", "HEAD", "OPTIONS") and role != "admin":
+            return JSONResponse({"detail": "需要管理员权限"}, status_code=403)
+        return await call_next(request)
 
 
 class LoginRequest(BaseModel):
@@ -338,13 +361,18 @@ class ConvReviewSubmit(BaseModel):
 
 @app.post("/api/auth/login")
 def login(req: LoginRequest):
-    """使用 YUNO_WEB_PASSWORD 换取短期会话 token。"""
-    password = os.getenv("YUNO_WEB_PASSWORD", "")
-    if not password or req.password != password:
+    """使用管理密码或只读密码换取短期会话 token。"""
+    admin_pw = os.getenv("YUNO_WEB_PASSWORD", "")
+    readonly_pw = os.getenv("YUNO_WEB_READONLY_PASSWORD", "")
+    if admin_pw and req.password == admin_pw:
+        role = "admin"
+    elif readonly_pw and req.password == readonly_pw:
+        role = "readonly"
+    else:
         raise HTTPException(401, "密码错误")
     token = uuid.uuid4().hex
-    _sessions[token] = time.time() + _SESSION_TTL
-    return {"token": token, "expires_in": _SESSION_TTL}
+    _sessions[token] = {"exp": time.time() + _SESSION_TTL, "role": role}
+    return {"token": token, "role": role, "expires_in": _SESSION_TTL}
 
 
 @app.get("/api/health")

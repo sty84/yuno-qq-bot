@@ -4,7 +4,6 @@
 correction_strong, playful, valence, arousal, dominance}。"""
 
 from memory._llmutil import parse_json_object
-import json
 import re
 import threading
 import time
@@ -228,7 +227,6 @@ def _local_emotion(text):
     global _local_clf
     try:
         if _local_clf is None:
-            import pathlib
             import pickle
             from plugins import _shared
             p = _shared.DATA_DIR / "models" / "emotion_clf.pkl"

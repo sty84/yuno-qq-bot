@@ -87,19 +87,18 @@ def _env() -> dict:
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, repo)
 
-    import agent
-    import memory
-    import memory.stats as stats_mod
-    from memory import living, mind, procedures, space, space_eval
     from plugins import _db, _shared
 
+    import agent  # noqa: F401
+    import memory  # noqa: F401
+    import memory.stats as stats_mod  # noqa: F401
+    from memory import living, mind, procedures, space, space_eval  # noqa: F401
+    from memory import graph, hesitation, lexical, reasoning, sharing, subjects, time_extract  # noqa: F401
+    from memory import pack as pack_mod  # noqa: F401
+    from memory import context as context_mod, controller as consistency, world as world_mod  # noqa: F401
+    import tools as tools_mod  # noqa: F401
+    from agent import persona as persona_mod  # noqa: F401
 
-
-    from memory import graph, hesitation, lexical, reasoning, sharing, subjects, time_extract
-    from memory import pack as pack_mod
-    from memory import context as context_mod, controller as consistency, world as world_mod
-    import tools as tools_mod
-    from agent import persona as persona_mod
     # 测试隔离：无论前面哪个测试模块先跑，都重定向配置并强制绑定本测试临时库
     _shared.CONFIG_PATH = os.environ["CONFIG_PATH"]
     _shared.reload_config()
@@ -356,7 +355,7 @@ def test_03_time_subjects():
     )
 
     # ---- 多主体记忆（v2.2）----
-    from memory import context as context_mod, controller as consistency, subjects, world as world_mod
+    from memory import context as context_mod, controller as consistency, subjects
     _check("subjects-registered", "仲町阿拉蕾" in subjects.registered(), subjects.registered())
     _check(
         "subjects-detect",
@@ -417,7 +416,6 @@ def test_04_packs_floorplan_emotion():
     e = _env()
     space, _db, reasoning = e["space"], e["_db"], e["reasoning"]
     # ---- Persona Pack（v2.2 去人设化）----
-    from agent import persona as persona_mod
     from memory import pack as pack_mod
     _check("pack-active", pack_mod.active() == "yuno", pack_mod.active())
 

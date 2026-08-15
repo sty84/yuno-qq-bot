@@ -9,9 +9,8 @@
   /mbti 结果     查看当前结果
 """
 
-import json
 
-from plugins import _db, _shared
+from plugins import _db
 
 NAME = "MBTI"
 HELP = "/mbti 开始/继续 MBTI 测试｜/mbti A|B 回答｜/mbti 重置｜/mbti 结果"

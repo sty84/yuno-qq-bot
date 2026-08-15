@@ -4,13 +4,12 @@ from memory._llmutil import parse_json_object
 import logging
 import re
 import os
-import json
 from datetime import datetime
 
 _log = logging.getLogger(__name__)
 
 from plugins import _db, _shared
-from memory import analysis, embedder, extract, graph, lexical, policy, reasoning, topic, trace, world
+from memory import analysis, embedder, extract, graph, lexical, policy, topic, trace, world
 
 
 _GROUND_NOISE = ("是", "的", "了", "我", "你", "他", "她", "它", "只", "有", "在", "很",

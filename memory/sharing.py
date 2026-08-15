@@ -134,7 +134,6 @@ def emotion_bonus() -> float:
 def _stage_mult(scope) -> float:
     """关系门槛：熟悉度 → 分享欲折算系数。"""
     try:
-        from memory import relationship as rel_mod
         row = _db.relationship_get(scope)
         if row:
             fam = float(row.get("familiarity", 0.0))

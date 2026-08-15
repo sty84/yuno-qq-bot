@@ -208,7 +208,6 @@ def semantic_annotate(reply, evidence=None, banned=None, user_text=""):
         "即便整体围绕真实记忆（如'预算10万'是真的），这些增量细节也标为'推断'，不要标为'记忆'。"
     )
     try:
-        import json
         from plugins import _shared
         resp = _shared.deepseek_chat(
             messages=[{"role": "user", "content": prompt}],

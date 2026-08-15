@@ -1785,7 +1785,6 @@ def cmd_reply_check(scope: str = "", limit: int = 0, save: bool = False, score: 
     --score（v2.3 P1-1）：LLM rubric 四维自动判分（准确/合理/人设/防编造 0-2），
     结果写回 history 的 results[].scores，摘要含平均分——回复质量可量化、可跨轮对比。"""
     import json as _json
-    import pathlib as _pl
 
     probes_path = ROOT / "data" / "reply_probes.json"
     if not probes_path.exists():

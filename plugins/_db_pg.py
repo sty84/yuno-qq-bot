@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 
 try:
     import psycopg2
-    from psycopg2.extras import RealDictCursor, execute_values
+    from psycopg2.extras import RealDictCursor
 except ImportError:
     psycopg2 = None
     RealDictCursor = None
@@ -1941,7 +1941,7 @@ def restore_all(data, replace=False) -> dict:
                         page_size=500,
                     )
                 counts[t] = len(rows)
-            except Exception as e:
+            except Exception:
                 counts[t] = -1
         _maybe_commit()
         cur.close()

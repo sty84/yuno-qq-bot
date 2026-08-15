@@ -53,9 +53,9 @@ def test_webapp_root_served():
 def test_webapp_import_side_effect_safe():
     """import webapp 不应破坏 embedder 配置（_apply_light_config 只在无显式设置时生效）。"""
     import plugins._shared as _shared
-    before = _shared.CONFIG.get("memory", {}).get("embedder", {}).get("provider")
+    _shared.CONFIG.get("memory", {}).get("embedder", {}).get("provider")
     import webapp
-    after = _shared.CONFIG.get("memory", {}).get("embedder", {}).get("provider")
+    _shared.CONFIG.get("memory", {}).get("embedder", {}).get("provider")
     # 默认场景（无 YUNO_WEB_EMBEDDER）：会被置为 none——这是设计行为，仅断言不抛异常
     assert webapp.app is not None
 
@@ -338,4 +338,47 @@ def test_web_login_session(monkeypatch):
     finally:
         monkeypatch.delenv("YUNO_WEB_TOKEN", raising=False)
         monkeypatch.delenv("YUNO_WEB_PASSWORD", raising=False)
+        importlib.reload(webapp)
+
+
+def test_web_readonly_role_and_csrf(monkeypatch):
+    """只读 token 可 GET 不可 POST；跨域 POST 被 CSRF 拦截。"""
+    import importlib
+    import webapp
+    monkeypatch.setenv("YUNO_WEB_TOKEN", "web-secret")
+    monkeypatch.setenv("YUNO_WEB_PASSWORD", "admin123")
+    monkeypatch.setenv("YUNO_WEB_READONLY_PASSWORD", "read123")
+    reloaded = importlib.reload(webapp)
+    try:
+        from starlette.testclient import TestClient
+        client = TestClient(reloaded.app)
+        # 只读登录
+        ro = client.post("/api/auth/login", json={"password": "read123"})
+        assert ro.status_code == 200 and ro.json()["role"] == "readonly"
+        ro_token = ro.json()["token"]
+        assert client.get("/api/health", headers={"Authorization": f"Bearer {ro_token}"}).status_code == 200
+        # 只读不能 POST
+        r = client.post("/api/tools", json={"name": "appointment-clean"}, headers={"Authorization": f"Bearer {ro_token}"})
+        assert r.status_code == 403, r.status_code
+        # 管理员登录
+        ad = client.post("/api/auth/login", json={"password": "admin123"})
+        ad_token = ad.json()["token"]
+        # 跨域 POST 被拒绝
+        r2 = client.post(
+            "/api/tools",
+            json={"name": "appointment-clean"},
+            headers={"Authorization": f"Bearer {ad_token}", "Origin": "https://evil.example"},
+        )
+        assert r2.status_code == 403, r2.status_code
+        # 同源/无 Origin 的管理员 POST 放行（appointment-clean 是安全操作）
+        r3 = client.post(
+            "/api/tools",
+            json={"name": "appointment-clean"},
+            headers={"Authorization": f"Bearer {ad_token}"},
+        )
+        assert r3.status_code == 200, r3.status_code
+    finally:
+        monkeypatch.delenv("YUNO_WEB_TOKEN", raising=False)
+        monkeypatch.delenv("YUNO_WEB_PASSWORD", raising=False)
+        monkeypatch.delenv("YUNO_WEB_READONLY_PASSWORD", raising=False)
         importlib.reload(webapp)

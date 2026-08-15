@@ -10,7 +10,6 @@ discard_cap, rewrite_prob, hold_prob}。
 """
 
 from memory._llmutil import parse_json_object
-import json
 import random
 from plugins import _shared
 

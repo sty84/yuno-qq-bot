@@ -13,7 +13,7 @@ import os
 import random
 import urllib.parse
 import urllib.request
-from datetime import date, datetime
+from datetime import datetime
 
 from plugins import _db, _shared
 

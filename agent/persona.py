@@ -9,7 +9,6 @@ persona.md 按 `# 段落` 拆成结构化字段（身份/性格/喜好/说话风
 import re
 import os
 import pathlib
-from datetime import datetime
 
 from plugins import _db, _shared
 from memory import ai_memory_rows, controller as memory_controller

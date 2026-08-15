@@ -7,7 +7,6 @@
 """
 
 from memory._llmutil import parse_json_object
-import json
 import time
 from datetime import datetime
 
