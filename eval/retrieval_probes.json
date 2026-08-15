@@ -1,0 +1,167 @@
+{
+  "说明": "检索命中率评测集（扩充版）：原 12 条 + 时间/空间/指代 8 条",
+  "items": [
+    {
+      "query": "我是谁，在乐队里负责什么",
+      "expected": [
+        "用户是乐队的经纪人助理"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "身份"
+    },
+    {
+      "query": "我的角色是什么",
+      "expected": [
+        "用户是乐队的经纪人助理"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "身份"
+    },
+    {
+      "query": "月底演出定在哪天",
+      "expected": [
+        "用户月底30号周日有一场演出"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "日程"
+    },
+    {
+      "query": "演出是周几",
+      "expected": [
+        "用户月底30号周日有一场演出"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "日程"
+    },
+    {
+      "query": "31号是星期几",
+      "expected": [
+        "31号是周一"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "日程"
+    },
+    {
+      "query": "我家猫叫什么",
+      "expected": [
+        "煤球是猫",
+        "用户养了一只叫煤球的橘猫"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "偏好"
+    },
+    {
+      "query": "猫是什么品种",
+      "expected": [
+        "用户养了一只叫煤球的橘猫"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "偏好"
+    },
+    {
+      "query": "猫什么时候接回家的",
+      "expected": [
+        "接回家时间是上周",
+        "用户养了一只叫煤球的橘猫"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "偏好"
+    },
+    {
+      "query": "设备预算批了多少",
+      "expected": [
+        "用户预算10万，买设备花3万"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "事务"
+    },
+    {
+      "query": "买设备花了多少钱",
+      "expected": [
+        "用户预算10万，买设备花3万"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "事务"
+    },
+    {
+      "query": "我的白巧克力放哪了",
+      "expected": [
+        "用户把白巧克力放冰箱里了"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "空间"
+    },
+    {
+      "query": "我喜欢听什么声音",
+      "expected": [
+        "用户喜欢单纯享受雨声"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "偏好"
+    },
+    {
+      "query": "上个月出差去了哪",
+      "expected": [
+        "上个月去了北京出差"
+      ],
+      "scope": "ai",
+      "category": "时间"
+    },
+    {
+      "query": "上周三干了什么",
+      "expected": [
+        "上周三买了只猫"
+      ],
+      "scope": "ai",
+      "category": "时间"
+    },
+    {
+      "query": "这个月月初去了哪里",
+      "expected": [
+        "月初去了趟深圳出差"
+      ],
+      "scope": "ai",
+      "category": "时间"
+    },
+    {
+      "query": "白巧克力在卧室哪里",
+      "expected": [
+        "[地点：卧室] 把白巧克力放到了卧室的床头柜"
+      ],
+      "scope": "ai",
+      "category": "空间"
+    },
+    {
+      "query": "排练室到了没有",
+      "expected": [
+        "[地点：排练室] 到了排练室"
+      ],
+      "scope": "ai",
+      "category": "空间"
+    },
+    {
+      "query": "上次说的出差",
+      "expected": [
+        "上个月去了北京出差"
+      ],
+      "scope": "ai",
+      "category": "指代"
+    },
+    {
+      "query": "那把伞的事",
+      "expected": [
+        "仲町阿拉蕾上次在排练室见过那把伞"
+      ],
+      "scope": "npc:仲町阿拉蕾",
+      "category": "指代"
+    },
+    {
+      "query": "牛奶去哪了",
+      "expected": [
+        "牛奶找不到了"
+      ],
+      "scope": "ai",
+      "category": "空间"
+    }
+  ]
+}

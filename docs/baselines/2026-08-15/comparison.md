@@ -35,3 +35,12 @@ python tools.py evidence-gate-eval > docs/baselines/2026-08-15/after_evidence_ga
 # 检索 after
 python tools.py memory-eval --file data/eval/retrieval_probes.json > docs/baselines/2026-08-15/after_retrieval.json
 ```
+
+## 扩充检索评测集后的当前结果
+
+- 使用 `eval/retrieval_probes.json`（20 条）
+- recall@k = 1.0
+- MRR = 0.785
+- NDCG = 0.84
+
+说明：在原有 12 条基础上增加了时间/空间/指代覆盖，仍然全部命中，MRR 略降属于评测集变难后的正常变化。

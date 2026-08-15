@@ -54,3 +54,20 @@ python tools.py memory-eval --file data/eval/retrieval_probes.json --save > docs
 
 - 门控评测集从 26 条扩充到 33 条，补充了来自 `data/reply_eval_history.jsonl` 的真实回复。
 - 同时修复了一个真实误拦：回复中明确否认黑名单词（如“阿拉蕾是雪貂？我印象里没这回事”）时不再被黑名单直接拦截。
+
+## 扩充检索评测集
+
+新增 `eval/retrieval_probes.json`（20 条），在原 12 条基础上补充：
+
+- 时间：3 条
+- 空间：4 条
+- 指代：2 条
+
+结果：
+
+- probes: 20
+- recall_at_k: 1.0
+- mrr: 0.785
+- ndcg: 0.84
+
+详细结果见 `retrieval_expanded_baseline.json`。
