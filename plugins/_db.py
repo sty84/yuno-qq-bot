@@ -3647,3 +3647,12 @@ def _stats_err(e):
         _st.bump_err("_db", e)
     except Exception:
         pass
+
+
+# ===== PostgreSQL 后端切换（可选）=====
+# 设置 YUNO_DB_BACKEND=postgresql 时，将本模块的所有接口委托给 _db_pg。
+if os.getenv("YUNO_DB_BACKEND", "").strip().lower() == "postgresql":
+    from plugins import _db_pg as _pg_backend
+    for _name in dir(_pg_backend):
+        if not _name.startswith("__"):
+            globals()[_name] = getattr(_pg_backend, _name)

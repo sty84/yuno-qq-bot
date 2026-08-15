@@ -1757,3 +1757,613 @@ def restore_all(data, replace=False) -> dict:
         _maybe_commit()
         cur.close()
     return counts
+
+
+# ===== facts =====
+def facts_replace(scene, key, facts, updated_at=""):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("DELETE FROM facts WHERE scene=%s AND key=%s", (scene, key))
+        for i, fact in enumerate(facts):
+            cur.execute(
+                "INSERT INTO facts(scene,key,idx,fact,updated_at) VALUES(%s,%s,%s,%s,%s)",
+                (scene, key, i, str(fact), updated_at),
+            )
+        _maybe_commit()
+        cur.close()
+
+
+def facts_get(scene, key):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("SELECT fact FROM facts WHERE scene=%s AND key=%s ORDER BY idx", (scene, key))
+        rows = [r[0] for r in cur.fetchall()]
+        cur.close()
+        return rows
+
+
+def facts_updated_at(scene, key):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("SELECT MAX(updated_at) FROM facts WHERE scene=%s AND key=%s", (scene, key))
+        row = cur.fetchone()
+        cur.close()
+        return row[0] or ""
+
+
+# ===== kv raw/cas =====
+def kv_get_raw(namespace, key, default=None):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("SELECT value FROM kv WHERE namespace=%s AND key=%s", (namespace, key))
+        row = cur.fetchone()
+        cur.close()
+        return row[0] if row else default
+
+
+def kv_cas(namespace, key, old_raw, new_raw):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("SELECT value FROM kv WHERE namespace=%s AND key=%s", (namespace, key))
+        row = cur.fetchone()
+        if row is None or row[0] != old_raw:
+            cur.close()
+            return False
+        cur.execute(
+            "UPDATE kv SET value=%s WHERE namespace=%s AND key=%s AND value=%s",
+            (new_raw, namespace, key, old_raw),
+        )
+        _maybe_commit()
+        cur.close()
+        return True
+
+
+# ===== item events =====
+def item_event_add_many(rows):
+    if not rows:
+        return
+    with _lock:
+        cur = _connect().cursor()
+        for r in rows:
+            cur.execute(
+                "INSERT INTO item_events(item,ts,event,from_place,to_place,cause,seen_by) "
+                "VALUES(%s,%s,%s,%s,%s,%s,%s)",
+                (str(r.get("item", ""))[:60], str(r.get("ts", "")), str(r.get("event", ""))[:20],
+                 str(r.get("from_place", ""))[:80], str(r.get("to_place", ""))[:80],
+                 str(r.get("cause", ""))[:80], str(r.get("seen_by", ""))[:20]),
+            )
+        _maybe_commit()
+        cur.close()
+
+
+def item_position_at(item, ts):
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            "SELECT * FROM item_events WHERE item=%s AND ts<=%s "
+            "AND event IN ('move','give','see','find','lost') "
+            "ORDER BY ts DESC, id DESC LIMIT 1",
+            (str(item)[:60], str(ts)),
+        )
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            return None
+        r = dict(row)
+        to_place = str(r.get("to_place") or "")
+        room, container = "", ""
+        if "/" in to_place:
+            room, container = to_place.split("/", 1)
+        elif to_place:
+            room = to_place
+        return {
+            "item": r["item"], "ts": r["ts"], "event": r["event"],
+            "room": room, "container": container,
+            "known": r["event"] != "lost",
+            "cause": r.get("cause", ""),
+        }
+
+
+# ===== bindings / scores / nicknames / state =====
+def binding_set(uid, gid, mid):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute(
+            "INSERT INTO bindings(user_openid,group_id,member_openid) VALUES(%s,%s,%s) "
+            "ON CONFLICT(user_openid,group_id) DO UPDATE SET member_openid=EXCLUDED.member_openid",
+            (uid, gid, mid),
+        )
+        _maybe_commit()
+        cur.close()
+
+
+def binding_delete_user_group(uid, gid):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("DELETE FROM bindings WHERE user_openid=%s AND group_id=%s", (uid, gid))
+        _maybe_commit()
+        cur.close()
+
+
+def binding_delete_member(gid, mid):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("DELETE FROM bindings WHERE group_id=%s AND member_openid=%s", (gid, mid))
+        _maybe_commit()
+        cur.close()
+
+
+def binding_find_user_for_member(gid, mid):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("SELECT user_openid FROM bindings WHERE group_id=%s AND member_openid=%s", (gid, mid))
+        row = cur.fetchone()
+        cur.close()
+        return row[0] if row else None
+
+
+def binding_groups_for_user(uid):
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT group_id, member_openid FROM bindings WHERE user_openid=%s", (uid,))
+        rows = cur.fetchall()
+        cur.close()
+        return {r["group_id"]: r["member_openid"] for r in rows}
+
+
+def bindings_all():
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM bindings")
+        rows = cur.fetchall()
+        cur.close()
+        result = {}
+        for r in rows:
+            result.setdefault(r["user_openid"], {})[r["group_id"]] = r["member_openid"]
+        return result
+
+
+def score_add(player, game, delta=1):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute(
+            "INSERT INTO scores(player,game,score) VALUES(%s,%s,%s) "
+            "ON CONFLICT(player,game) DO UPDATE SET score=scores.score+EXCLUDED.score",
+            (player, game, int(delta)),
+        )
+        _maybe_commit()
+        cur.close()
+
+
+def scores_all():
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM scores")
+        rows = cur.fetchall()
+        cur.close()
+        result = {}
+        for r in rows:
+            result.setdefault(r["player"], {})[r["game"]] = r["score"]
+        return result
+
+
+def nickname_set(player, nickname):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute(
+            "INSERT INTO nicknames(player,nickname) VALUES(%s,%s) "
+            "ON CONFLICT(player) DO UPDATE SET nickname=EXCLUDED.nickname",
+            (player, nickname),
+        )
+        _maybe_commit()
+        cur.close()
+
+
+def nickname_get(player):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("SELECT nickname FROM nicknames WHERE player=%s", (player,))
+        row = cur.fetchone()
+        cur.close()
+        return row[0] if row else None
+
+
+def state_get():
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT k,v FROM state")
+        rows = cur.fetchall()
+        cur.close()
+        result = {}
+        for r in rows:
+            try:
+                result[r["k"]] = json.loads(r["v"])
+            except Exception:
+                result[r["k"]] = r["v"]
+        return result
+
+
+def state_set(data):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("DELETE FROM state")
+        for k, v in data.items():
+            cur.execute("INSERT INTO state(k,v) VALUES(%s,%s)", (k, json.dumps(v, ensure_ascii=False)))
+        _maybe_commit()
+        cur.close()
+
+
+# ===== belief log =====
+def belief_log_add(kind, content, action, confidence=None, note="", old_content=""):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute(
+            "INSERT INTO belief_log(kind,content,action,confidence,note,old_content,ts) VALUES(%s,%s,%s,%s,%s,%s,%s)",
+            (kind, content, action, confidence, note, old_content, datetime.now().isoformat(timespec="seconds")),
+        )
+        _maybe_commit()
+        cur.close()
+
+
+def belief_log_rows(limit=20):
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM belief_log ORDER BY id DESC LIMIT %s", (max(1, int(limit)),))
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        return rows
+
+
+def belief_log_get(log_id):
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM belief_log WHERE id=%s", (int(log_id),))
+        row = cur.fetchone()
+        cur.close()
+        return dict(row) if row else None
+
+
+# ===== expr / hesitation =====
+def expr_log_add(raw_expression, normalized_meaning="", possible_intents=None, confidence=0.5, context=""):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute(
+            "INSERT INTO language_context(raw_expression,normalized_meaning,possible_intents,confidence,context,created_time) "
+            "VALUES(%s,%s,%s,%s,%s,%s)",
+            (str(raw_expression), str(normalized_meaning), str(possible_intents or "[]"),
+             float(confidence), str(context), datetime.now().isoformat(timespec="seconds")),
+        )
+        _maybe_commit()
+        cur.close()
+
+
+def expr_log_rows(limit=50):
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM language_context ORDER BY id DESC LIMIT %s", (max(1, int(limit)),))
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        return rows
+
+
+def expr_profile_get(scope):
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM user_expression_profile WHERE scope=%s", (scope,))
+        row = cur.fetchone()
+        cur.close()
+        return dict(row) if row else None
+
+
+def expr_profile_upsert(scope, slang_frequency=0.0, irony_usage=0.0, emoji_usage=0.0,
+                        serious_mode_switch=0, humor_style="unknown", communication_style="unknown",
+                        formality_level=0.5, updated_at=""):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute(
+            "INSERT INTO user_expression_profile(scope,slang_frequency,irony_usage,emoji_usage,serious_mode_switch,"
+            "humor_style,communication_style,formality_level,updated_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            "ON CONFLICT(scope) DO UPDATE SET slang_frequency=EXCLUDED.slang_frequency, "
+            "irony_usage=EXCLUDED.irony_usage, emoji_usage=EXCLUDED.emoji_usage, "
+            "serious_mode_switch=EXCLUDED.serious_mode_switch, humor_style=EXCLUDED.humor_style, "
+            "communication_style=EXCLUDED.communication_style, formality_level=EXCLUDED.formality_level, "
+            "updated_at=EXCLUDED.updated_at",
+            (scope, float(slang_frequency), float(irony_usage), float(emoji_usage), int(serious_mode_switch),
+             str(humor_style), str(communication_style), float(formality_level),
+             updated_at or datetime.now().isoformat(timespec="seconds")),
+        )
+        _maybe_commit()
+        cur.close()
+
+
+def hesitation_log_add(ts, scope, kind, action, reason, delay_s=0, monologue=""):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute(
+            "INSERT INTO hesitation_log(ts,scope,kind,action,reason,delay_s,monologue) VALUES(%s,%s,%s,%s,%s,%s,%s)",
+            (str(ts), str(scope), str(kind), str(action), str(reason), int(delay_s), str(monologue)),
+        )
+        _maybe_commit()
+        cur.close()
+
+
+def hesitation_log_rows(limit=50):
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM hesitation_log ORDER BY id DESC LIMIT %s", (max(1, int(limit)),))
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        return rows
+
+
+# ===== event topic / topic invalidate =====
+def event_set_topic(event_id, topic_id):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("UPDATE events SET topic_id=%s WHERE id=%s", (int(topic_id), int(event_id)))
+        _maybe_commit()
+        cur.close()
+
+
+def topic_param_invalidate(value):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("UPDATE topic_params SET confidence=LEAST(confidence, 0.3) WHERE value=%s", (str(value),))
+        _maybe_commit()
+        cur.close()
+
+
+# ===== vec =====
+def vec_dumps(vec):
+    return json.dumps(vec, ensure_ascii=False) if vec else None
+
+
+def vec_loads(raw):
+    try:
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
+
+
+def vec_clear():
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("DELETE FROM vec_index")
+        cur.execute("DELETE FROM vec_centroids")
+        _maybe_commit()
+        cur.close()
+
+
+def vec_centroids_set(centroids):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("DELETE FROM vec_centroids")
+        for i, (emb, n) in enumerate(centroids):
+            cur.execute(
+                "INSERT INTO vec_centroids(id,dim,embedding,n) VALUES(%s,%s,%s,%s)",
+                (i, len(emb), vec_dumps(emb), int(n)),
+            )
+        _maybe_commit()
+        cur.close()
+
+
+def vec_centroids_get() -> list:
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT id,dim,embedding,n FROM vec_centroids ORDER BY id")
+        rows = cur.fetchall()
+        cur.close()
+        out = []
+        for r in rows:
+            emb = vec_loads(r["embedding"])
+            if emb:
+                out.append({"id": r["id"], "dim": r["dim"], "embedding": emb, "n": r["n"]})
+        return out
+
+
+def vec_index_replace(rows):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("DELETE FROM vec_index")
+        for sc, k, f, cid, emb in rows:
+            cur.execute(
+                "INSERT INTO vec_index(scope,key,fact,centroid_id,embedding) VALUES(%s,%s,%s,%s,%s)",
+                (sc, k, f, int(cid), vec_dumps(emb)),
+            )
+        _maybe_commit()
+        cur.close()
+
+
+def vec_index_upsert(scope, key, fact, centroid_id, embedding):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("DELETE FROM vec_index WHERE scope=%s AND key=%s AND fact=%s", (scope, key, fact))
+        cur.execute(
+            "INSERT INTO vec_index(scope,key,fact,centroid_id,embedding) VALUES(%s,%s,%s,%s,%s)",
+            (scope, key, fact, int(centroid_id), vec_dumps(embedding)),
+        )
+        _maybe_commit()
+        cur.close()
+
+
+def vec_index_count() -> int:
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("SELECT COUNT(*) FROM vec_index")
+        row = cur.fetchone()
+        cur.close()
+        return int(row[0]) if row else 0
+
+
+def vec_index_by_centroid(centroid_ids) -> list:
+    if not centroid_ids:
+        return []
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        marks = ",".join(["%s"] * len(centroid_ids))
+        cur.execute(f"SELECT * FROM vec_index WHERE centroid_id IN ({marks})", list(centroid_ids))
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        return rows
+
+
+# ===== memory misc =====
+def memory_replace_preserve(scope, key, facts, updated_at=""):
+    """保留现有 confidence/source 等，只替换 fact 集合。"""
+    existing = {r["fact"]: r for r in memory_rows(scope, key)}
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("DELETE FROM memories WHERE scope=%s AND key=%s", (scope, key or ""))
+        for fact in facts:
+            old = existing.get(str(fact))
+            if old:
+                memory_add(
+                    scope, key or "", str(fact), updated_at or old.get("updated_at", ""),
+                    old.get("embedding"), float(old.get("confidence", 0.7)), old.get("source", ""),
+                    old.get("audience", ""), old.get("speaker", ""), old.get("mclass", "short"),
+                    float(old.get("arousal", 0.0)), float(old.get("valence", 0.0)),
+                    float(old.get("privacy", 0.0)), old.get("valid_from", ""), old.get("valid_to", ""),
+                    old.get("status", "active"),
+                )
+            else:
+                memory_add(scope, key or "", str(fact), updated_at)
+        _maybe_commit()
+        cur.close()
+
+
+def memory_update_embedding(scope, key, fact, embedding):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute(
+            "UPDATE memories SET embedding=%s WHERE scope=%s AND key=%s AND fact=%s",
+            (vec_dumps(embedding), scope, key or "", str(fact)),
+        )
+        _maybe_commit()
+        cur.close()
+
+
+# ===== bm25 / lexicon (简化) =====
+def bm25_clear():
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("DELETE FROM bm25_terms")
+        cur.execute("DELETE FROM bm25_docs")
+        _maybe_commit()
+        cur.close()
+
+
+def bm25_stats():
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("SELECT COUNT(*) AS n, COALESCE(AVG(doc_len),1) AS avgdl FROM bm25_docs")
+        row = cur.fetchone()
+        cur.close()
+        return {"n": int(row[0]) if row else 0, "avgdl": float(row[1]) if row else 1.0}
+
+
+def bm25_upsert(scope, key, tokenized):
+    with _lock:
+        cur = _connect().cursor()
+        fact = " ".join(tokenized or [])
+        cur.execute(
+            "INSERT INTO bm25_docs(scope,key,fact,doc_len) VALUES(%s,%s,%s,%s) "
+            "ON CONFLICT(scope,key,fact) DO UPDATE SET doc_len=EXCLUDED.doc_len",
+            (scope, key or "", fact, len(tokenized or [])),
+        )
+        _maybe_commit()
+        cur.close()
+
+
+def bm25_sync(scope, key, tokenized):
+    bm25_upsert(scope, key, tokenized)
+
+
+def bm25_postings(terms, scopes):
+    if not terms:
+        return []
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        marks = ",".join(["%s"] * len(terms))
+        sql = f"SELECT term,scope,key,fact,tf FROM bm25_terms WHERE term IN ({marks})"
+        params = list(terms)
+        if scopes:
+            s_marks = ",".join(["%s"] * len(scopes))
+            sql += f" AND scope IN ({s_marks})"
+            params += list(scopes)
+        cur.execute(sql, params)
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        return rows
+
+
+def bm25_doc_lens(keys):
+    if not keys:
+        return {}
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        out = {}
+        for i in range(0, len(keys), 200):
+            chunk = keys[i:i+200]
+            marks = ",".join(["(?,?,?)"] * len(chunk))
+            params = []
+            for sc,k,f in chunk:
+                params.extend([sc, k or "", str(f)])
+            # PG 使用 %s
+            marks = ",".join(["%s,%s,%s"] * len(chunk))
+            flat = []
+            for sc,k,f in chunk:
+                flat.extend([sc, k or "", str(f)])
+            cur.execute(
+                f"SELECT scope,key,fact,doc_len FROM bm25_docs WHERE (scope,key,fact) IN ({marks})",
+                flat,
+            )
+            for r in cur.fetchall():
+                out[(r["scope"], r["key"], r["fact"])] = r["doc_len"]
+        cur.close()
+        return out
+
+
+def lexicon_sync(scope, key):
+    # 词法索引在 PG 里可后续用 pg_trgm；当前保留空实现避免切换报错
+    return None
+
+
+def lexicon_rebuild() -> int:
+    return 0
+
+
+def lexicon_search(query, scopes, limit=10):
+    return []
+
+
+def fts_available() -> bool:
+    return False
+
+
+def set_audit_max(n):
+    return None
+
+
+def query_log_followup(query):
+    return None
+
+
+def purge_scope(scope, subsystems=False, confirm=None):
+    if confirm != scope:
+        return
+    with _lock:
+        cur = _connect().cursor()
+        for t in ("memories", "memory_meta", "memory_attrs", "events", "event_relations",
+                  "topics", "topic_params", "sessions", "goals", "consultations",
+                  "relationships", "feedback_log", "memory_history", "query_log",
+                  "memory_trace", "state_invalidations", "notifications", "conv_log"):
+            try:
+                cur.execute(f'DELETE FROM "{t}" WHERE scope=%s', (scope,))
+            except Exception:
+                pass
+        _maybe_commit()
+        cur.close()
+
+
+def backup_to(path):
+    raise NotImplementedError("PostgreSQL 备份请使用 pg_dump / pg_basebackup")
