@@ -47,13 +47,13 @@ def test_daily_reflect_persists_insights(monkeypatch):
         def __init__(self, content):
             self.choices = [types.SimpleNamespace(message=types.SimpleNamespace(content=content))]
 
-    monkeypatch.setattr(_shared, "deepseek_chat", lambda **kwargs: _FakeResp("用户偏好稳定\n第二条洞察也很重要\n"))
+    monkeypatch.setattr(_shared, "deepseek_chat", lambda **kwargs: _FakeResp("用户偏好稳定\n第二条用户洞察也很重要\n"))
     n = advisor.daily_reflect(limit=10)
     assert n == 2, n
     rows = _db.memory_rows("ai", "reflection")
     texts = [r["fact"] for r in rows]
     assert "用户偏好稳定" in texts
-    assert "第二条洞察也很重要" in texts
+    assert "第二条用户洞察也很重要" in texts
 
 
 def test_assemble_context_evidence_out():
@@ -119,6 +119,14 @@ def test_conflict_scan_detects_like_dislike():
     _db.memory_add("c2c:cf", "", "用户讨厌猫", "2026-01-01T00:00:00", None, 0.7, "user")
     _report, conflicts = ctl.conflict_scan("c2c:cf")
     assert len(conflicts) == 1, conflicts
+
+
+def test_reflection_quality_rejects_generic():
+    _db, _shared = _setup("yuno_reflq_")
+    from memory import advisor
+    evs = [{"title": "用户聊了项目进展"}]
+    assert advisor._reflection_quality("继续加油", evs, []) is False
+    assert advisor._reflection_quality("用户偏好稳定", evs, []) is True
 
 
 def test_hesitation_safe_rule_skips_llm():

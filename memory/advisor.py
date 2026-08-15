@@ -225,6 +225,33 @@ def consult_turn(scope, text) -> str:
 
 
 # ===== 自我反思 =====
+_GENERIC_REFLECTION = (
+    "继续加油", "继续保持", "关系不错", "聊得很好", "今天不错", "一切顺利",
+    "越来越好", "要努力", "保持现状", "没什么特别", "平平淡淡", "心情不错", "挺好的",
+)
+
+
+def _reflection_quality(line, evs, rels) -> bool:
+    """反思质量过滤：拒绝空泛套话，保留有具体锚点或明确主体/内容的洞察。"""
+    t = str(line or "").strip()
+    if len(t) < 6 or len(t) > 80:
+        return False
+    if any(g in t for g in _GENERIC_REFLECTION):
+        return False
+    if re.search(r"\d", t):
+        return True
+    if any(w in t for w in ("用户", "我", "她", "他", "我们", "你")) and len(t) >= 6:
+        return True
+    anchors = set()
+    for ev in evs:
+        anchors.update(extract.fact_keywords(ev.get("title") or ""))
+    for r in rels:
+        anchors.update(extract.fact_keywords(str(r.get("scope") or "")))
+    if extract.fact_keywords(t) & anchors:
+        return True
+    return False
+
+
 def daily_reflect(limit=20) -> int:
     """把近期事件/关系/目标整理成洞察，沉淀为 AI 记忆（reflection）。"""
     evs = _db.event_rows(limit=limit)
@@ -254,6 +281,7 @@ def daily_reflect(limit=20) -> int:
             for l in (resp.choices[0].message.content or "").splitlines()
             if l.strip()
         ]
+        lines = [l for l in lines if _reflection_quality(l, evs, rels)][:3]
     except Exception as e:
         _stats_err(e)
         return 0
