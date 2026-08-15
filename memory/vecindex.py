@@ -74,6 +74,12 @@ def build(nlist=None, scope=None) -> dict:
     _db.vec_index_replace(
         [(r["scope"], r["key"], r["fact"], assign[i], vectors[i]) for i, r in enumerate(rows)]
     )
+    try:
+        _db.pgvector_build(
+            [(r["scope"], r["key"], r["fact"], vectors[i]) for i, r in enumerate(rows)]
+        )
+    except Exception as e:
+        _stats_err(e)
     return {"n": len(rows), "nlist": len(centroids), "dim": dim}
 
 
@@ -103,7 +109,13 @@ def backend_name() -> str:
 
 
 def search(query_vec, scopes, top_k=5, nprobe=None) -> list:
-    """nprobe 个最近质心内做余弦打分，返回 [{scope,key,fact,score}]。"""
+    """优先 pgvector 原生检索；不可用时回退自研 IVF。"""
+    try:
+        pg_rows = _db.pgvector_search(query_vec, scopes, top_k=top_k)
+        if pg_rows:
+            return pg_rows
+    except Exception as e:
+        _stats_err(e)
     centroids = _db.vec_centroids_get()
     if not centroids:
         return []

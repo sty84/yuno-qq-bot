@@ -45,3 +45,19 @@ def test_pg_core_read_write():
         assert db.conv_rows(scope=scope)
     finally:
         db.memory_clear(scope)
+
+
+def test_pgvector_optional():
+    """pgvector 可用时验证原生检索；不可用时跳过（不影响默认测试）。"""
+    from plugins import _db_pg
+    if not _db_pg.pgvector_available():
+        pytest.skip("pgvector 扩展未安装")
+    # 简单插入一条向量并检索
+    scope = "c2c:pgvector_test"
+    _db_pg.memory_clear(scope)
+    try:
+        _db_pg.pgvector_build([(scope, "", "测试向量", [1.0, 0.0, 0.0])])
+        rows = _db_pg.pgvector_search([1.0, 0.0, 0.0], [scope], top_k=1)
+        assert rows and rows[0]["fact"] == "测试向量"
+    finally:
+        _db_pg.memory_clear(scope)

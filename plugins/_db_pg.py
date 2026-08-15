@@ -70,6 +70,18 @@ def init(data_dir=None, force=False):
             _conn.commit()
     except Exception:
         _conn.rollback()
+    # pgvector 可选：可用则建 vec_pg 表，不可用不阻塞
+    try:
+        with _conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS vec_pg("
+                "scope TEXT NOT NULL, key TEXT NOT NULL DEFAULT '', fact TEXT NOT NULL, "
+                "embedding vector, PRIMARY KEY(scope,key,fact))"
+            )
+            _conn.commit()
+    except Exception:
+        _conn.rollback()
 
 
 def _connect():
@@ -504,6 +516,55 @@ def notif_pending(limit=20):
             "ORDER BY id LIMIT %s",
             (datetime.now().isoformat(timespec="seconds"), limit),
         )
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        return rows
+
+
+# ===== pgvector 可选支持 =====
+def pgvector_available() -> bool:
+    """检测 PostgreSQL 是否安装并启用了 pgvector 扩展。"""
+    try:
+        with _connect().cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_extension WHERE extname='vector'")
+            return cur.fetchone() is not None
+    except Exception:
+        return False
+
+
+def pgvector_build(rows):
+    """把 (scope,key,fact,embedding) 写入 vec_pg 表（pgvector 原生向量列）。"""
+    if not pgvector_available():
+        return False
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute("DELETE FROM vec_pg")
+        for sc, k, f, emb in rows:
+            cur.execute(
+                "INSERT INTO vec_pg(scope,key,fact,embedding) VALUES(%s,%s,%s,%s) "
+                "ON CONFLICT(scope,key,fact) DO UPDATE SET embedding=EXCLUDED.embedding",
+                (sc, k or "", str(f), emb),
+            )
+        _maybe_commit()
+        cur.close()
+    return True
+
+
+def pgvector_search(query_vec, scopes, top_k=5):
+    """使用 pgvector 余弦距离检索；返回 [{scope,key,fact,score}]。"""
+    if not pgvector_available():
+        return []
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        sql = "SELECT scope,key,fact, 1 - (embedding <=> %s::vector) AS score FROM vec_pg"
+        params = [query_vec]
+        if scopes:
+            marks = ",".join(["%s"] * len(scopes))
+            sql += f" WHERE scope IN ({marks})"
+            params += list(scopes)
+        sql += " ORDER BY embedding <=> %s::vector LIMIT %s"
+        params += [query_vec, max(1, int(top_k))]
+        cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
         return rows
