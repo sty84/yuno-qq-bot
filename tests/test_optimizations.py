@@ -116,6 +116,33 @@ def test_record_negative_feedback_scope_alignment():
     assert reasoning._route_cache["lexical"]["hits"] == 2
 
 
+def test_retrieval_contextvar_isolation_between_threads():
+    _db, _shared = _setup("yuno_ctx_")
+    from memory import reasoning
+    import threading
+
+    scope_a = "c2c:ctx_a"
+    scope_b = "c2c:ctx_b"
+    _db.memory_add(scope_a, "", "用户喜欢猫", "2026-01-01T00:00:00", None, 0.7, "user")
+    _db.memory_add(scope_b, "", "用户喜欢狗", "2026-01-01T00:00:00", None, 0.7, "user")
+
+    reasoning.retrieve("用户喜欢什么", [scope_a], top_k=3, min_score=0.0)
+    main_before = set(reasoning.current_details().keys())
+    assert "用户喜欢猫" in main_before
+
+    def worker():
+        reasoning.retrieve("用户喜欢什么", [scope_b], top_k=3, min_score=0.0)
+        worker_keys = set(reasoning.current_details().keys())
+        assert "用户喜欢狗" in worker_keys
+        assert "用户喜欢猫" not in worker_keys, "worker 不应看到 main 的检索明细"
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+    main_after = set(reasoning.current_details().keys())
+    assert main_after == main_before, (main_before, main_after)
+
+
 def test_schema_migration_and_scope_meta():
     _db, _shared = _setup("yuno_schema_")
     assert _db._schema_version() == _db.SCHEMA_VERSION
