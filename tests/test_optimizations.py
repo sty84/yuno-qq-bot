@@ -112,6 +112,15 @@ def test_record_negative_feedback_scope_alignment():
     assert reasoning._route_cache["lexical"]["hits"] == 2
 
 
+def test_conflict_scan_detects_like_dislike():
+    _db, _shared = _setup("yuno_cf_")
+    from memory import controller as ctl
+    _db.memory_add("c2c:cf", "", "用户喜欢猫", "2026-01-01T00:00:00", None, 0.7, "user")
+    _db.memory_add("c2c:cf", "", "用户讨厌猫", "2026-01-01T00:00:00", None, 0.7, "user")
+    _report, conflicts = ctl.conflict_scan("c2c:cf")
+    assert len(conflicts) == 1, conflicts
+
+
 def test_hesitation_safe_rule_skips_llm():
     _db, _shared = _setup("yuno_hes_")
     from memory import hesitation

@@ -117,6 +117,9 @@ def _maybe_embed(facts):
 # ===== 存量矛盾扫描（v2.3 P0-2）=====
 # 主语字符类排除"不"（防贪婪把"煤球不"吃进主语）；宾语允许含"不"
 _ATTR_RE = re.compile(r"([\u4e00-\u9fffA-Za-z0-9]{1,8}?)(不是|是)([\u4e00-\u9fffA-Za-z0-9]{1,12})")
+_LIKE_RE = re.compile(r"([\u4e00-\u9fffA-Za-z0-9]{1,8}?)(不喜欢|讨厌|喜欢|爱吃|爱喝)([\u4e00-\u9fffA-Za-z0-9]{1,12})")
+_GO_RE = re.compile(r"([\u4e00-\u9fffA-Za-z0-9]{1,8}?)(没去过|去过)([\u4e00-\u9fffA-Za-z0-9]{1,12})")
+_PET_RE = re.compile(r"([\u4e00-\u9fffA-Za-z0-9]{1,8}?)(没养|养了)([\u4e00-\u9fffA-Za-z0-9]{1,12})")
 # 无语义量宾语才跳过（"是人/是东西"）；"猫/狗/队友"是具体类别，必须参与冲突判定——
 # "煤球是猫 vs 煤球是狗"正是最典型的矛盾形态
 _ATTR_TRIVIAL = ("人", "东西", "事物", "机器人", "AI", "软件")
@@ -126,26 +129,46 @@ _ATTR_FAKE_SUBJ = ("反正", "其实", "真的", "确实", "原来", "大概", "
 
 
 def _attr_pairs(fact) -> list:
-    """提取事实的 (主语, 宾语, 是否否定) 属性对：'阿拉蕾是雪貂'→('阿拉蕾','雪貂',False)。
-    只认"X是Y/X不是Y"紧凑结构，主语≤8 字宾语≤12 字；琐碎宾语（是人/是东西）跳过。"""
+    """提取事实的 (主语, 谓词组, 宾语, 是否否定) 属性对。
+    支持：X是Y / X不是Y；X喜欢/讨厌Y；X去过/没去过Y；X养了/没养Y。
+    主语≤8 字宾语≤12 字；琐碎宾语（是人/是东西）跳过。"""
     out = []
     for m in _ATTR_RE.finditer(str(fact or "")):
         subj, neg, obj = m.group(1), m.group(2) == "不是", m.group(3)
         if subj in _GROUND_NOISE or obj in _ATTR_TRIVIAL or subj in _ATTR_FAKE_SUBJ:
             continue
         if len(subj) >= 2 or subj in ("我", "你", "它", "她", "他"):
-            out.append((subj, obj, neg))
+            out.append((subj, "is", obj, neg))
+    for m in _LIKE_RE.finditer(str(fact or "")):
+        subj, verb, obj = m.group(1), m.group(2), m.group(3)
+        if subj in _GROUND_NOISE or obj in _ATTR_TRIVIAL or subj in _ATTR_FAKE_SUBJ:
+            continue
+        if len(subj) >= 2 or subj in ("我", "你", "它", "她", "他"):
+            out.append((subj, "like", obj, verb in ("不喜欢", "讨厌")))
+    for m in _GO_RE.finditer(str(fact or "")):
+        subj, verb, obj = m.group(1), m.group(2), m.group(3)
+        if subj in _GROUND_NOISE or obj in _ATTR_TRIVIAL or subj in _ATTR_FAKE_SUBJ:
+            continue
+        if len(subj) >= 2 or subj in ("我", "你", "它", "她", "他"):
+            out.append((subj, "go", obj, verb == "没去过"))
+    for m in _PET_RE.finditer(str(fact or "")):
+        subj, verb, obj = m.group(1), m.group(2), m.group(3)
+        if subj in _GROUND_NOISE or obj in _ATTR_TRIVIAL or subj in _ATTR_FAKE_SUBJ:
+            continue
+        if len(subj) >= 2 or subj in ("我", "你", "它", "她", "他"):
+            out.append((subj, "pet", obj, verb == "没养"))
     return out
 
 
 def _attrs_conflict(a, b) -> bool:
-    """两个属性对是否矛盾：同主语、宾语不同、无包含关系、否定性不一致即冲突。
-    '阿拉蕾是雪貂' vs '阿拉蕾是队友' → 冲突；'煤球是猫' vs '煤球是橘猫' → 包含，不冲突。"""
-    if a[0] != b[0]:
+    """两个属性对是否矛盾：同主语、同谓词组，宾语不同或无包含关系、否定性不一致即冲突。
+    '阿拉蕾是雪貂' vs '阿拉蕾是队友' → 冲突；'煤球是猫' vs '煤球是橘猫' → 包含，不冲突；
+    '用户喜欢猫' vs '用户讨厌猫' → 冲突。"""
+    if a[0] != b[0] or a[1] != b[1]:
         return False
-    oa, ob, na, nb = a[1], b[1], a[2], b[2]
+    oa, ob, na, nb = a[2], b[2], a[3], b[3]
     if oa == ob:
-        return False
+        return na != nb  # 同对象但肯定/否定不一致 → 冲突
     if oa in ob or ob in oa:
         return False  # 上下位（猫⊂橘猫）是细化不是矛盾
     return True
@@ -160,16 +183,16 @@ def conflict_scan(scope="", apply=False):
     rows = [r for r in rows if (r.get("status") or "") in ("", "active")]
     pairs = []
     for r in rows:
-        for subj, obj, neg in _attr_pairs(r["fact"]):
-            pairs.append((r, subj, obj, neg))
+        for subj, group, obj, neg in _attr_pairs(r["fact"]):
+            pairs.append((r, subj, group, obj, neg))
     conflicts = []
     for i in range(len(pairs)):
         for j in range(i + 1, len(pairs)):
-            r1, s1, o1, n1 = pairs[i]
-            r2, s2, o2, n2 = pairs[j]
+            r1, s1, g1, o1, n1 = pairs[i]
+            r2, s2, g2, o2, n2 = pairs[j]
             if r1["fact"] == r2["fact"] or r1["scope"] != r2["scope"]:
                 continue
-            if _attrs_conflict((s1, o1, n1), (s2, o2, n2)):
+            if _attrs_conflict((s1, g1, o1, n1), (s2, g2, o2, n2)):
                 conflicts.append({
                     "subject": s1, "a": o1, "b": o2,
                     "fact1": r1["fact"], "fact2": r2["fact"],

@@ -1457,12 +1457,12 @@ def test_14_conflict_scan():
     _db = e["_db"]
     from memory import controller as ctl
     # 单元：属性对 + 冲突判定
-    _check("attr-pairs", ("阿拉蕾", "雪貂", False) in ctl._attr_pairs("阿拉蕾是雪貂"), ctl._attr_pairs("阿拉蕾是雪貂"))
-    _check("attr-neg", ("煤球", "狗", True) in ctl._attr_pairs("煤球不是狗"), ctl._attr_pairs("煤球不是狗"))
+    _check("attr-pairs", ("阿拉蕾", "is", "雪貂", False) in ctl._attr_pairs("阿拉蕾是雪貂"), ctl._attr_pairs("阿拉蕾是雪貂"))
+    _check("attr-neg", ("煤球", "is", "狗", True) in ctl._attr_pairs("煤球不是狗"), ctl._attr_pairs("煤球不是狗"))
     _check("attr-trivial-skip", ctl._attr_pairs("阿拉蕾是人") == [], ctl._attr_pairs("阿拉蕾是人"))
-    _check("conflict-basic", ctl._attrs_conflict(("阿拉蕾", "雪貂", False), ("阿拉蕾", "队友", False)) is True)
-    _check("conflict-hyponym", ctl._attrs_conflict(("煤球", "猫", False), ("煤球", "橘猫", False)) is False)
-    _check("conflict-neg", ctl._attrs_conflict(("煤球", "狗", False), ("煤球", "狗", True)) is False)  # 同宾语不冲突
+    _check("conflict-basic", ctl._attrs_conflict(("阿拉蕾", "is", "雪貂", False), ("阿拉蕾", "is", "队友", False)) is True)
+    _check("conflict-hyponym", ctl._attrs_conflict(("煤球", "is", "猫", False), ("煤球", "is", "橘猫", False)) is False)
+    _check("conflict-neg", ctl._attrs_conflict(("煤球", "is", "狗", False), ("煤球", "is", "狗", True)) is True)  # 同对象肯定/否定冲突
     # 端到端：造两条矛盾 + 一条不矛盾
     _db.memory_add("c2c:cf", "", "阿拉蕾是雪貂", "2026-08-16T10:00:00", None, 0.5, "user")
     _db.memory_add("c2c:cf", "", "阿拉蕾是队友", "2026-08-16T10:00:00", None, 0.8, "user")
