@@ -1,0 +1,2 @@
+# PostgreSQL 迁移/适配所需（可选，默认 SQLite 不需要）
+psycopg2-binary>=2.9
