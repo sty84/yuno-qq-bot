@@ -167,3 +167,25 @@ def report(force=False) -> dict:
     }
     _report_cache.update({"ts": now, "data": data})
     return data
+
+
+def adjustments() -> dict:
+    """对话评分的可执行建议（仍不自动调参，只给方向）。
+    当某维度均值偏低时，给出该去查/该调哪类模块的建议。"""
+    data = report()
+    avg = data.get("dimension_averages", {})
+    suggestions = {}
+    mapping = {
+        "remember": "检索/重排/查询改写",
+        "natural": "表达/犹豫层/人设",
+        "emotional": "情绪 VAD/议题 mood",
+        "proactive": "分享/约定/revive",
+        "boundary": "证据门控/隐私",
+    }
+    for dim, area in mapping.items():
+        if float(avg.get(dim, 5)) < 3:
+            suggestions[dim] = area
+    return {
+        "auto_adjust": False,
+        "suggestions": suggestions,
+    }

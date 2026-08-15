@@ -658,9 +658,11 @@ def cmd_memory_conv_review(
 
 
 def cmd_memory_conv_report() -> str:
-    """查看对话五维诊断（v33）：维度均值 + 低分归因方向。"""
+    """查看对话五维诊断（v33）：维度均值 + 低分归因方向 + 可执行建议。"""
     import memory
-    return json.dumps(memory.conv_report(force=True), ensure_ascii=False, indent=2)
+    data = memory.conv_report(force=True)
+    data["suggested_adjustments"] = memory.conv_adjustments()
+    return json.dumps(data, ensure_ascii=False, indent=2)
 
 
 def cmd_data_dump_json(out: str) -> str:

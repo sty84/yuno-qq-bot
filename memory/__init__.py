@@ -101,6 +101,7 @@ conv_queue = convreview.queue
 conv_markdown = convreview.render_markdown
 conv_score = convreview.score
 conv_report = convreview.report
+conv_adjustments = convreview.adjustments
 user_tz = tz.user_tz
 tz_detect = tz.detect
 appointment_extract = appointment.extract
