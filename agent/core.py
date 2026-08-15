@@ -174,7 +174,7 @@ def _time_fragment_hint(mem_ctx):
     )
 
 
-def ask(
+def _ask_impl(
     text,
     history=None,
     extra_context="",
@@ -186,10 +186,11 @@ def ask(
     system=None,
     llm=None,
 ):
-    """Agent 主入口：分析 → 记忆上下文 → 人格合成 → LLM → （可选）学习。
+    """旧核心实现：分析 → 记忆上下文 → 人格合成 → LLM → （可选）学习。
 
-    返回 (reply, meta)。llm(text, extra_context, history, system) -> str，
-    默认走 DeepSeek；learn=True 时自行 ingest（适合 Hermes/API 等无插件场景，
+    由 CognitiveArchitecture.run 通过 responder 回调调用；返回 (reply, meta)。
+    llm(text, extra_context, history, system) -> str，默认走 DeepSeek；
+    learn=True 时自行 ingest（适合 Hermes/API 等无插件场景，
     QQ 前台由 plugins/memory.py 的 after_chat 学习，传 learn=False 避免重复）。"""
     meta = {"analysis": analyze(text or "")}
     try:
@@ -210,14 +211,6 @@ def ask(
         from memory import bandit as bandit_mod
         if scopes:
             bandit_mod.update(scopes[0], bandit_mod.reward_from_message(text, meta["analysis"]))
-    except Exception as e:
-        _stats_err(e)
-        pass
-    try:
-        # 认知架构标准化（可选）：输出统一 CognitiveTurn，便于 Web/诊断/后续迁移
-        if scopes and _mind_cfg("cognitive_arch", False):
-            from memory.interfaces import default_architecture
-            meta["cognitive_arch"] = default_architecture().run_to_dict(text, scopes[0])
     except Exception as e:
         _stats_err(e)
         pass
@@ -675,6 +668,45 @@ def ask(
         except Exception as e:
             _stats_err(e)
     return reply, meta
+
+
+def ask(
+    text,
+    history=None,
+    extra_context="",
+    scopes=None,
+    learn=False,
+    learn_scope=None,
+    learn_key="",
+    facts=None,
+    system=None,
+    llm=None,
+):
+    """Agent 主入口：统一从 CognitiveArchitecture.run 进入。
+
+    由 CognitiveArchitecture 作为唯一入口；responder 模式直接复用旧核心
+    _ask_impl 执行实际流程，避免迁移期间重复决策/记忆检索导致状态回归。
+    返回 (reply, meta)。
+    """
+    from memory.interfaces import CognitiveArchitecture
+
+    arch = CognitiveArchitecture(responder=_ask_impl)
+    turn = arch.run(
+        text,
+        scope=scopes[0] if scopes else "",
+        context=extra_context,
+        history=history,
+        extra_context=extra_context,
+        scopes=scopes,
+        learn=learn,
+        learn_scope=learn_scope,
+        learn_key=learn_key,
+        facts=facts,
+        system=system,
+        llm=llm,
+    )
+    meta = dict(turn.meta or {})
+    return turn.reply, meta
 
 
 def learn(text, reply, scope, key, facts=None) -> dict:

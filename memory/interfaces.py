@@ -95,10 +95,22 @@ class CognitiveArchitecture:
         self.responder = responder
 
     def run(self, query: str, scope: str = "", context: str = "", *args, **kwargs) -> CognitiveTurn:
+        # responder 模式：旧核心（如 agent.core._ask_impl）作为实际执行体，
+        # 避免在迁移期间重复执行决策/记忆检索导致查询日志与状态顺序回归。
+        if self.responder is not None:
+            reply, meta = self.responder(query, *args, **kwargs)
+            return CognitiveTurn(
+                query=query,
+                scope=scope,
+                reply=reply,
+                meta=meta,
+                action={"action": "reply", "text": query},
+            )
+
         decision = self.decision.decide(query, scope, context)
         hits = self.memory.search(query, [scope] if scope else [], top_k=5)
         action = self.action.execute(decision.get("options", [{}])[0].get("action", "reply") if decision.get("options") else "reply", text=query)
-        turn = CognitiveTurn(
+        return CognitiveTurn(
             query=query,
             scope=scope,
             situation=decision.get("situation", {}),
@@ -108,11 +120,6 @@ class CognitiveArchitecture:
             options=decision.get("options", []),
             action=action,
         )
-        if self.responder is not None:
-            reply, meta = self.responder(query, *args, **kwargs)
-            turn.reply = reply
-            turn.meta = meta
-        return turn
 
     def run_to_dict(self, query: str, scope: str = "", context: str = "") -> dict:
         turn = self.run(query, scope, context)
