@@ -58,7 +58,8 @@
   </style>
 </head>
 <body>
-  <div class="app">
+  <canvas id="bg-canvas" style="position:fixed;inset:0;z-index:0;pointer-events:none;"></canvas>
+  <div class="app" style="position:relative;z-index:1;">
   <aside class="sidebar">
     <div class="brand">Yuno Ops Web</div>
     <div class="tabs" id="tabs">
@@ -949,5 +950,6 @@
     loadDash().catch(e => $('dash-cards').innerHTML = '<div class="red">加载失败：' + e.message + '</div>');
     setInterval(() => { if (!document.hidden) loadDash().catch(() => {}); }, 15000);
   </script>
+  <script src="/static/wave-bg.js"></script>
 </body>
 </html>

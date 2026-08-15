@@ -22,7 +22,8 @@
   </style>
 </head>
 <body>
-  <div class="wrap">
+  <canvas id="bg-canvas" style="position:fixed;inset:0;z-index:0;pointer-events:none;"></canvas>
+  <div class="wrap" style="position:relative;z-index:1;">
     <h1>Yuno 公开状态</h1>
     <div class="cards" id="cards">加载中…</div>
     <div class="muted" id="updated"></div>
@@ -99,5 +100,6 @@
         document.getElementById('trendChart').textContent = '趋势加载失败：' + e;
       });
   </script>
+  <script src="/static/wave-bg.js"></script>
 </body>
 </html>
