@@ -51,6 +51,14 @@ def init(data_dir=None, force=False):
     _conn = psycopg2.connect(dsn())
     _conn.autocommit = False
     _ensure_schema_migrations()
+    with _conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM schema_migrations")
+        if cur.fetchone()[0] == 0:
+            cur.execute(
+                "INSERT INTO schema_migrations(version,applied_at) VALUES(%s,%s)",
+                (SCHEMA_VERSION, datetime.now().isoformat(timespec="seconds")),
+            )
+            _conn.commit()
 
 
 def _connect():
@@ -2427,4 +2435,21 @@ def purge_scope(scope, subsystems=False, confirm=None):
 
 
 def backup_to(path):
-    raise NotImplementedError("PostgreSQL 备份请使用 pg_dump / pg_basebackup")
+    """使用 pg_dump 备份 PostgreSQL 到自定义格式文件。"""
+    import subprocess
+    env = os.environ.copy()
+    env["PGPASSWORD"] = os.getenv("YUNO_PG_PASSWORD", "yuno")
+    subprocess.run(
+        [
+            "pg_dump",
+            "-h", os.getenv("YUNO_PG_HOST", "127.0.0.1"),
+            "-p", os.getenv("YUNO_PG_PORT", "5432"),
+            "-U", os.getenv("YUNO_PG_USER", "esp"),
+            "-d", os.getenv("YUNO_PG_DB", "yuno"),
+            "-Fc",
+            "-f", str(path),
+        ],
+        check=True,
+        env=env,
+    )
+    return str(path)

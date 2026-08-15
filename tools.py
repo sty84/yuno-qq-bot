@@ -76,22 +76,28 @@ def cmd_health(notify: bool):
 
 # ===== backup =====
 def cmd_backup(keep: int = 7) -> str:
+    import os
     _capability, _db, _shared = _plugins()
-    src = _shared.DATA_DIR / "bot.db"
-    if not src.exists():
-        return "bot.db 不存在，跳过备份。"
     backup_dir = _shared.DATA_DIR / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
-    dest = backup_dir / f"bot-{datetime.now():%Y%m%d-%H%M%S}.db"
-    src_conn = sqlite3.connect(str(src))
-    dst_conn = sqlite3.connect(str(dest))
-    try:
-        with dst_conn:
-            src_conn.backup(dst_conn)
-    finally:
-        src_conn.close()
-        dst_conn.close()
-    for old in sorted(backup_dir.glob("bot-*.db"), reverse=True)[keep:]:
+    backend = os.getenv("YUNO_DB_BACKEND", "postgresql").strip().lower()
+    if backend == "sqlite":
+        src = _shared.DATA_DIR / "bot.db"
+        if not src.exists():
+            return "bot.db 不存在，跳过备份。"
+        dest = backup_dir / f"bot-{datetime.now():%Y%m%d-%H%M%S}.db"
+        src_conn = sqlite3.connect(str(src))
+        dst_conn = sqlite3.connect(str(dest))
+        try:
+            with dst_conn:
+                src_conn.backup(dst_conn)
+        finally:
+            src_conn.close()
+            dst_conn.close()
+    else:
+        dest = backup_dir / f"bot-{datetime.now():%Y%m%d-%H%M%S}.dump"
+        _db.backup_to(dest)
+    for old in sorted(backup_dir.glob("bot-*"), reverse=True)[keep:]:
         old.unlink(missing_ok=True)
     return f"备份完成：{dest}"
 
