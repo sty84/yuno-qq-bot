@@ -151,7 +151,7 @@ def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, r
                 label = f"我记得你好像提过……{label}？"
             tag = _scope_tag(sc)
             src_label = _source_label(src_map.get(f, ""))
-            _ch = reasoning._last_details.get(f, {}).get("channels", [])
+            _ch = reasoning.current_details().get(f, {}).get("channels", [])
             ch_label = (" ·[" + "/".join(_ch) + "]") if _ch else ""
             lines.append("- " + tag + label + ch_label + src_label)
             shown += 1

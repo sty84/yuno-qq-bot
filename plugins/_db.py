@@ -19,6 +19,7 @@ _conn = None
 _lock = threading.RLock()
 _migrated = False
 AUDIT_MAX = 5000
+SCHEMA_VERSION = 1
 
 
 def set_audit_max(n):
@@ -83,6 +84,7 @@ def init(data_dir, force=False):
     # WAL 模式下 synchronous=NORMAL 安全且大幅降低提交延迟（性能优化）
     _conn.execute("PRAGMA synchronous=NORMAL")
     _create_tables()
+    _migrate_schema()
     if force:
         _migrated = False
     if not _migrated:
@@ -90,6 +92,51 @@ def init(data_dir, force=False):
         _migrated = True
     _migrate_facts_to_memories()
     _migrate_ai_to_unified()
+
+
+def _schema_version():
+    return int(_connect().execute("PRAGMA user_version").fetchone()[0])
+
+
+def _set_schema_version(v):
+    _connect().execute(f"PRAGMA user_version={int(v)}")
+    _maybe_commit()
+
+
+def _migrate_schema():
+    """数据库 schema 版本迁移：从 PRAGMA user_version 逐步升级到 SCHEMA_VERSION。
+    新表/新索引只增不删，老库可安全升级。"""
+    with _lock:
+        current = _schema_version()
+        if current >= SCHEMA_VERSION:
+            return
+        migrations = {
+            1: [
+                # 多用户/多 NPC 基础元数据
+                "CREATE TABLE IF NOT EXISTS scope_meta("
+                "scope TEXT PRIMARY KEY,"
+                "kind TEXT NOT NULL DEFAULT 'user',"
+                "agent_id TEXT NOT NULL DEFAULT '',"
+                "enabled INTEGER NOT NULL DEFAULT 1,"
+                "created_at TEXT,"
+                "updated_at TEXT)",
+                # 常用检索/治理索引
+                "CREATE INDEX IF NOT EXISTS idx_memories_scope_key_fact ON memories(scope,key,fact)",
+                "CREATE INDEX IF NOT EXISTS idx_memory_meta_scope_key_fact ON memory_meta(scope,key,fact)",
+                "CREATE INDEX IF NOT EXISTS idx_events_scope_title ON events(scope,key,title)",
+                "CREATE INDEX IF NOT EXISTS idx_conv_log_scope_ts ON conv_log(scope,ts)",
+                "CREATE INDEX IF NOT EXISTS idx_trace_scope_ts ON memory_trace(scope,ts)",
+            ],
+        }
+        for version in range(current + 1, SCHEMA_VERSION + 1):
+            for stmt in migrations.get(version, []):
+                try:
+                    _connect().execute(stmt)
+                    _maybe_commit()
+                except Exception as e:
+                    # 已存在/重复执行不阻断升级
+                    print(f"schema migration {version} skip: {e}")
+            _set_schema_version(version)
 
 
 def _connect():
@@ -136,6 +183,13 @@ def _create_tables():
                 user_openid TEXT NOT NULL, group_id TEXT NOT NULL,
                 member_openid TEXT NOT NULL,
                 PRIMARY KEY(user_openid,group_id));
+            CREATE TABLE IF NOT EXISTS scope_meta(
+                scope TEXT PRIMARY KEY,
+                kind TEXT NOT NULL DEFAULT 'user',
+                agent_id TEXT NOT NULL DEFAULT '',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT,
+                updated_at TEXT);
             CREATE TABLE IF NOT EXISTS scores(
                 player TEXT NOT NULL, game TEXT NOT NULL,
                 score INTEGER NOT NULL DEFAULT 0,

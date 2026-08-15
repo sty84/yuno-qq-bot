@@ -3,6 +3,7 @@
 每个算法独立产出有序候选，再用 Reciprocal Rank Fusion 融合（可配置权重），
 最后叠加 Memory Policy（重要度/时效）与可信度。换新算法 = 往 _ranked_lists 加一个分支。"""
 
+import contextvars
 import re
 import time
 from collections import OrderedDict
@@ -185,12 +186,16 @@ def _record_route(lists, hits):
 def record_negative_feedback(fact, scope=None) -> bool:
     """真实负反馈：用户纠正/否认了某条已召回记忆时，降低对应检索通道的命中计数。
     用于缓解“把被召回当成召回正确”的自反馈偏差。
-    传入 scope 时会做对齐保护：只惩罚最近一次该 scope 检索确实命中的记忆。"""
+    传入 scope 时会做对齐保护：只惩罚最近一次该 scope 检索确实命中的记忆。
+    优先使用当前请求上下文中的检索明细，避免并发串用。"""
     if not fact:
         return False
+    ctx = _retrieval_ctx.get()
+    ctx_details = ctx.get("last_details", {}) if ctx else {}
+    ctx_retrieval = ctx.get("last_retrieval", {}) if ctx else {}
     detail = None
     if scope is not None:
-        entry = _last_retrieval.get(scope)
+        entry = ctx_retrieval.get(scope) or _last_retrieval.get(scope)
         if not entry:
             return False
         if time.time() - entry["ts"] > _RETRIEVAL_FEEDBACK_WINDOW:
@@ -199,7 +204,7 @@ def record_negative_feedback(fact, scope=None) -> bool:
             return False
         detail = entry["details"].get(fact)
     if detail is None:
-        detail = _last_details.get(fact)
+        detail = ctx_details.get(fact) or _last_details.get(fact)
     if not detail:
         return False
     stats = _route_stats()
@@ -354,6 +359,22 @@ _RESULT_CACHE_MAX = 16
 _last_details = {}
 _last_retrieval = {}
 _RETRIEVAL_FEEDBACK_WINDOW = 600.0
+_retrieval_ctx = contextvars.ContextVar("reasoning_retrieval", default={})
+
+
+def _ctx() -> dict:
+    """当前请求/线程的检索上下文，避免多用户/多 NPC 并发串用全局明细。"""
+    d = _retrieval_ctx.get()
+    if not d:
+        d = {"last_details": {}, "last_retrieval": {}}
+        _retrieval_ctx.set(d)
+    return d
+
+
+def current_details() -> dict:
+    """当前上下文中的检索通道明细；无上下文时回退全局（兼容测试/旧调用）。"""
+    ctx = _retrieval_ctx.get()
+    return ctx.get("last_details", {}) if ctx else _last_details
 
 
 def _cache_cfg() -> dict:
@@ -375,12 +396,17 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
             _last_details.clear()
             _last_details.update(_cached[2])
             _now = time.time()
+            _retrieval_map = {}
             for _sc in all_scopes:
-                _last_retrieval[_sc] = {
+                _retrieval_map[_sc] = {
                     "ts": _now,
                     "facts": {f for f, _s, _sc2 in _cached[1]},
                     "details": _cached[2],
                 }
+            _last_retrieval.clear()
+            _last_retrieval.update(_retrieval_map)
+            _ctx()["last_details"] = dict(_cached[2])
+            _ctx()["last_retrieval"] = _retrieval_map
             return list(_cached[1])
     loc_mark = f"[地点：{location}]" if location else ""
 
@@ -556,14 +582,19 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
         }
     _record_route(lists, hits)
     _now = time.time()
+    _details_snapshot = {f: dict(d) for f, d in _last_details.items()}
+    _retrieval_map = {}
     for _sc in all_scopes:
-        _last_retrieval[_sc] = {
+        _retrieval_map[_sc] = {
             "ts": _now,
             "facts": {f for f, _s, _sc2 in hits},
-            "details": {f: dict(d) for f, d in _last_details.items()},
+            "details": _details_snapshot,
         }
+    _last_retrieval.clear()
+    _last_retrieval.update(_retrieval_map)
+    _ctx()["last_details"] = _details_snapshot
+    _ctx()["last_retrieval"] = _retrieval_map
     if use_cache:
-        _details_snapshot = {f: dict(d) for f, d in _last_details.items()}
         _result_cache[cache_key] = (time.time(), hits, _details_snapshot)
         _result_cache.move_to_end(cache_key)
         while len(_result_cache) > _RESULT_CACHE_MAX:
@@ -578,8 +609,9 @@ def retrieve_detailed(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=
         query_text, scopes, top_k, min_score, extra_scopes,
         use_cache=False, location=location, window=window,
     )
+    _details = current_details()
     return [
-        {"fact": f, "scope": sc, "score": s, **_last_details.get(f, {})}
+        {"fact": f, "scope": sc, "score": s, **_details.get(f, {})}
         for f, s, sc in hits
     ]
 
