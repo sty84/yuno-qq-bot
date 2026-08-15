@@ -143,6 +143,23 @@ def test_retrieval_contextvar_isolation_between_threads():
     assert main_after == main_before, (main_before, main_after)
 
 
+def test_mbti_plugin_flow():
+    _db, _shared = _setup("yuno_mbti_")
+    from plugins import mbti
+    class Ctx:
+        chat_key = "c2c:mbtitest"
+    _db.kv_set("mbti", "c2c:mbtitest", None)
+    assert "已重置" in mbti.handle("/mbti 重置", Ctx())
+    first = mbti.handle("/mbti", Ctx())
+    assert "第 1/8 题" in first
+    for ans in ["A", "B", "A", "B", "A", "B", "A", "B"]:
+        r = mbti.handle(f"/mbti {ans}", Ctx())
+        assert r
+    final = mbti.handle("/mbti 结果", Ctx())
+    assert "MBTI" in final
+    _db.kv_set("mbti", "c2c:mbtitest", None)
+
+
 def test_schema_migration_and_scope_meta():
     _db, _shared = _setup("yuno_schema_")
     assert _db._schema_version() == _db.SCHEMA_VERSION
