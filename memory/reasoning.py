@@ -357,6 +357,8 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
         _cached = _result_cache.get(cache_key)
         if _cached and time.time() - _cached[0] < cc["ttl"]:
             _result_cache.move_to_end(cache_key)
+            _last_details.clear()
+            _last_details.update(_cached[2])
             return list(_cached[1])
     all_scopes = list(scopes) + list(extra_scopes or [])
     loc_mark = f"[地点：{location}]" if location else ""
@@ -533,7 +535,8 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
         }
     _record_route(lists, hits)
     if use_cache:
-        _result_cache[cache_key] = (time.time(), hits)
+        _details_snapshot = {f: dict(d) for f, d in _last_details.items()}
+        _result_cache[cache_key] = (time.time(), hits, _details_snapshot)
         _result_cache.move_to_end(cache_key)
         while len(_result_cache) > _RESULT_CACHE_MAX:
             _result_cache.popitem(last=False)
