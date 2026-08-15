@@ -120,10 +120,23 @@
     }
     h1 { background: linear-gradient(90deg, var(--accent), var(--accent2), var(--accent3));
          -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+    .bg-bands { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+    .bg-bands i { position: absolute; display: block; border-radius: 50%; filter: blur(80px); opacity: .5; will-change: transform; }
+    .bg-bands i:nth-child(1) { width: 55vw; height: 55vw; top: -12%; left: -8%; background: radial-gradient(circle, #f472b6, transparent 70%); animation: drift1 24s ease-in-out infinite alternate; }
+    .bg-bands i:nth-child(2) { width: 45vw; height: 45vw; top: 10%; right: -10%; background: radial-gradient(circle, #a78bfa, transparent 70%); animation: drift2 28s ease-in-out infinite alternate; }
+    .bg-bands i:nth-child(3) { width: 50vw; height: 50vw; bottom: -15%; left: 15%; background: radial-gradient(circle, #22d3ee, transparent 70%); animation: drift3 26s ease-in-out infinite alternate; }
+    .bg-bands i:nth-child(4) { width: 40vw; height: 40vw; top: 45%; left: -12%; background: radial-gradient(circle, #34d399, transparent 70%); animation: drift4 30s ease-in-out infinite alternate; }
+    .bg-bands i:nth-child(5) { width: 48vw; height: 48vw; bottom: 5%; right: 5%; background: radial-gradient(circle, #fbbf24, transparent 70%); animation: drift5 32s ease-in-out infinite alternate; }
+    @keyframes drift1 { from { transform: translate(0,0) scale(1); } to { transform: translate(10vw,6vh) scale(1.15); } }
+    @keyframes drift2 { from { transform: translate(0,0) scale(1); } to { transform: translate(-8vw,10vh) scale(1.1); } }
+    @keyframes drift3 { from { transform: translate(0,0) scale(1); } to { transform: translate(12vw,-6vh) scale(1.2); } }
+    @keyframes drift4 { from { transform: translate(0,0) scale(1); } to { transform: translate(-6vw,-8vh) scale(1.1); } }
+    @keyframes drift5 { from { transform: translate(0,0) scale(1); } to { transform: translate(-10vw,8vh) scale(1.15); } }
   </style>
 </head>
 <body>
-  <canvas id="bg-canvas" style="position:fixed;inset:0;z-index:0;pointer-events:none;"></canvas>
+  <div class="bg-bands" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
   <div class="app" style="position:relative;z-index:1;">
   <aside class="sidebar">
     <div class="brand">Yuno Ops Web</div>
@@ -1015,6 +1028,5 @@
     loadDash().catch(e => $('dash-cards').innerHTML = '<div class="red">加载失败：' + e.message + '</div>');
     setInterval(() => { if (!document.hidden) loadDash().catch(() => {}); }, 15000);
   </script>
-  <script src="/static/bg-bands.js"></script>
 </body>
 </html>
