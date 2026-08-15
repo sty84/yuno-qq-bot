@@ -745,6 +745,12 @@ def cmd_internal_db_prune(days: int = 30) -> str:
     return f"已清理 {n} 条内部测试记录（保留 {days} 天）"
 
 
+def cmd_memory_consolidate(scope: str = "", dry_run: bool = False) -> str:
+    """记忆整合：合并碎片 + 冲突处理 + 巩固/遗忘。"""
+    from memory import consolidator
+    return json.dumps(consolidator.run(scope=scope or None, apply=not dry_run), ensure_ascii=False, indent=2)
+
+
 def cmd_reflection_stats() -> str:
     """反思质量统计：最近 daily_reflect 产出/过滤/写入计数。"""
     import memory.stats as _st
@@ -1853,6 +1859,11 @@ def main() -> int:
     p = sub.add_parser("memory-embed", help="为缺少向量的记忆回填 embedding")
     p.add_argument("--batch", type=int, default=64)
     p.set_defaults(func=lambda a: _emit(cmd_memory_embed(a.batch)) or 0)
+
+    p = sub.add_parser("memory-consolidate", help="记忆整合：碎片合并+冲突处理+巩固/遗忘")
+    p.add_argument("--scope", default="", help="限定 scope")
+    p.add_argument("--dry-run", action="store_true", help="只报告不执行")
+    p.set_defaults(func=lambda a: _emit(cmd_memory_consolidate(a.scope, a.dry_run)) or 0)
 
     p = sub.add_parser("memory-grow", help="成长/维护：向量+事件图+巩固+修剪+词法索引")
     p.add_argument("--dry-run", action="store_true", help="只出统计不写库")

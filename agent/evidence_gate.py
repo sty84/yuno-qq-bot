@@ -130,6 +130,9 @@ def contains_unsupported_claim(reply, evidence=None, banned=None, user_text="", 
     # 不是声称"你说过X"——兜底句与 LLM 自然的否认表达都不该被拦
     if sm and re.search(r"没|没有|不记得|没印象|记不清", t[max(0, sm.start() - 6): sm.start()]):
         sm = None
+    # 整句含"没"且匹配本身也含"没"（如"我没跟你说过"）→ 是否认
+    if sm and "没" in sm.group(0) and re.search(r"没|没有", t):
+        sm = None
     # 意图疑问豁免："你不是说要走了吗/你不是说想换工作吗"是疑问不是声称；
     # 陈述式"你之前说想去京都"是声称，仍拦
     if sm and re.search(r"说(?:要|想|打算)", t) and t.rstrip().endswith(("吗", "？", "?")):

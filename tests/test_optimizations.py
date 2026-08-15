@@ -143,6 +143,18 @@ def test_retrieval_contextvar_isolation_between_threads():
     assert main_after == main_before, (main_before, main_after)
 
 
+def test_memory_consolidator():
+    _db, _shared = _setup("yuno_cons_")
+    from memory import consolidator
+    _db.memory_add("c2c:cons", "", "用户喜欢猫", "2026-01-01T00:00:00", None, 0.7, "user")
+    _db.memory_add("c2c:cons", "", "用户讨厌猫", "2026-01-01T00:00:00", None, 0.7, "user")
+    report = consolidator.run(scope="c2c:cons", apply=False)
+    assert "fragments_merged" in report
+    assert "conflicts" in report
+    assert "promoted" in report
+    assert "forgotten" in report
+
+
 def test_skill_library():
     _db, _shared = _setup("yuno_skill_")
     from memory import skills
