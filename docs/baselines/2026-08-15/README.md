@@ -13,8 +13,8 @@ python tools.py evidence-gate-eval
 
 结果：
 
-- total: 26
-- passed: 26
+- total: 33
+- passed: 33
 - failed: 0
 - accuracy: 1.0
 
@@ -49,3 +49,8 @@ python tools.py memory-eval --file data/eval/retrieval_probes.json --save
 python tools.py evidence-gate-eval > docs/baselines/2026-08-15/evidence_gate_baseline.json
 python tools.py memory-eval --file data/eval/retrieval_probes.json --save > docs/baselines/2026-08-15/retrieval_baseline.json
 ```
+
+## 更新说明
+
+- 门控评测集从 26 条扩充到 33 条，补充了来自 `data/reply_eval_history.jsonl` 的真实回复。
+- 同时修复了一个真实误拦：回复中明确否认黑名单词（如“阿拉蕾是雪貂？我印象里没这回事”）时不再被黑名单直接拦截。

@@ -95,8 +95,12 @@ def contains_unsupported_claim(reply, evidence=None, banned=None, user_text="", 
     t = str(reply or "").strip()
     if not t:
         return None
+    _DENY_IN_REPLY = re.compile(r"不是|没有|没这回事|才不是|怎么会|开玩笑|假的|不像|差远了|哪是|哪像|是人")
     for w in (banned or []):
         if w and w in t:
+            # 回复里明确否认黑名单词时，不应因为“提到了这个词”就被拦
+            if _DENY_IN_REPLY.search(t):
+                continue
             return f"黑名单:{w}"
     # 黑名单语义绕过（对话暴露的 bug）：用户消息含黑名单词（"阿拉蕾是不是雪貂"），
     # AI 不直说词（"你才知道啊？我还以为全团就瞒着我了"）但肯定是确认 → 同样拦。
@@ -117,6 +121,9 @@ def contains_unsupported_claim(reply, evidence=None, banned=None, user_text="", 
     sm = SOURCE_CLAIM_RE.search(t)
     if sm and ("听说" in t or "听我说" in t):
         sm = None  # 第三方传闻（"我听说…"）/祈使（"你听我说…"）不是"用户声称过"
+    # 追问来源/否认式表达不是来源声称："谁跟你说的""听谁说的""从哪听来的""没这回事"
+    if sm and re.search(r"谁跟你说的|听谁说的|从哪听来的|哪听来的|没这回事|没有这事", t):
+        sm = None
     # 否认句豁免（v2.3）："没听你说过/我没印象你提过"是"我没听你说过"的否认，
     # 不是声称"你说过X"——兜底句与 LLM 自然的否认表达都不该被拦
     if sm and re.search(r"没|没有|不记得|没印象|记不清", t[max(0, sm.start() - 6): sm.start()]):
