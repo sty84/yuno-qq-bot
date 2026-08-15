@@ -49,6 +49,20 @@ def run_for_pack(pack_name):
     from memory import pack as pack_mod
     from plugins import _db
 
+    # PG 模式下每个 subprocess 独立清空，避免不同 pack 互相污染
+    if os.getenv("YUNO_DB_BACKEND", "postgresql").strip().lower() == "postgresql":
+        conn = _db._connect()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename != 'schema_migrations'"
+            )
+            for t in [r[0] for r in cur.fetchall()]:
+                try:
+                    cur.execute(f'TRUNCATE "{t}" RESTART IDENTITY CASCADE')
+                except Exception:
+                    pass
+            conn.commit()
+
     checks = []
 
     def check(name, cond, extra=""):

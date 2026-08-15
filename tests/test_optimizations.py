@@ -163,9 +163,19 @@ def test_mbti_plugin_flow():
 def test_schema_migration_and_scope_meta():
     _db, _shared = _setup("yuno_schema_")
     assert _db._schema_version() == _db.SCHEMA_VERSION
-    row = _db._connect().execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='scope_meta'"
-    ).fetchone()
+    conn = _db._connect()
+    if hasattr(conn, "cursor"):
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='scope_meta'")
+        except Exception:
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scope_meta'")
+        row = cur.fetchone()
+        cur.close()
+    else:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='scope_meta'"
+        ).fetchone()
     assert row is not None
 
 

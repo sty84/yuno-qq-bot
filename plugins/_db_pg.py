@@ -540,23 +540,41 @@ def table_counts() -> dict:
 
 # ===== 补充：memory / meta / event =====
 def memory_replace(
-    scope, key, facts, updated_at="", embeddings=None, confidence=0.7,
-    source="user", audience="", speaker="", mclass="short", arousal=0.0,
-    valence=0.0, privacy=0.0, valid_from="", valid_to="", status="active",
+    scope, key, facts, updated_at="", embeddings=None, confidences=None,
+    sources=None, audience="", speaker="", mclass="short", arousal=0.0,
+    valence=0.0, privacy=0.0, audiences=None, speakers=None, mclasses=None,
+    arousals=None, valences=None, privacies=None, valid_from="", valid_to="",
+    status="active",
 ):
-    """整组替换某 scope/key 的记忆（保留传入列表顺序）。"""
+    """整组替换某 scope/key 的记忆（兼容 SQLite 全参数）。"""
     with _lock:
         cur = _connect().cursor()
         cur.execute("DELETE FROM memories WHERE scope=%s AND key=%s", (scope, key or ""))
-        for i, fact in enumerate(facts):
-            emb = (embeddings or {}).get(fact) if isinstance(embeddings, dict) else None
+        emb = embeddings or {}
+        conf = confidences or {}
+        srcs = sources or {}
+        aud_map = audiences or {}
+        spk_map = speakers or {}
+        cls_map = mclasses or {}
+        ar_map = arousals or {}
+        va_map = valences or {}
+        pr_map = privacies or {}
+        for fact in facts:
+            f = str(fact)
             memory_add(
-                scope, key or "", str(fact), updated_at, emb, confidence, source,
-                audience, speaker, mclass, arousal, valence, privacy,
-                valid_from, valid_to, status,
+                scope, key or "", f, updated_at,
+                emb.get(f) if isinstance(emb, dict) else None,
+                float(conf.get(f, 0.7)) if isinstance(conf, dict) else 0.7,
+                str(srcs.get(f, "")) if isinstance(srcs, dict) else "",
+                str(aud_map.get(f, audience)) if isinstance(aud_map, dict) else audience,
+                str(spk_map.get(f, speaker)) if isinstance(spk_map, dict) else speaker,
+                str(cls_map.get(f, mclass)) if isinstance(cls_map, dict) else mclass,
+                float(ar_map.get(f, arousal)) if isinstance(ar_map, dict) else arousal,
+                float(va_map.get(f, valence)) if isinstance(va_map, dict) else valence,
+                float(pr_map.get(f, privacy)) if isinstance(pr_map, dict) else privacy,
+                str(valid_from or updated_at), str(valid_to or ""), str(status) or "active",
             )
         cur.close()
-
 
 def memory_updated_at(scope, key=""):
     with _lock:
@@ -1172,8 +1190,8 @@ def query_log_add(query, scopes, top_k, hits):
         cur = _connect().cursor()
         cur.execute(
             "INSERT INTO query_log(ts,query,scopes,top_k,hits) VALUES(%s,%s,%s,%s,%s)",
-            (datetime.now().isoformat(timespec="seconds"), str(query), str(scopes or ""),
-             int(top_k or 0), str(hits or "[]")),
+            (datetime.now().isoformat(timespec="seconds"), str(query), json.dumps(scopes or [], ensure_ascii=False),
+             int(top_k or 0), json.dumps(hits or [], ensure_ascii=False)),
         )
         _maybe_commit()
         cur.close()
@@ -1476,12 +1494,17 @@ def procedure_clear():
 
 # ===== scenario scores =====
 def scenario_score_add(scenario_id, scope, scores, comment="", mode="manual"):
+    try:
+        vals = [float(v) for v in (scores or {}).values() if v is not None]
+        avg = round(sum(vals) / len(vals), 2) if vals else 0.0
+    except Exception:
+        avg = 0.0
     with _lock:
         cur = _connect().cursor()
         cur.execute(
             "INSERT INTO scenario_scores(ts,scenario_id,scope,mode,scores,comment,avg) VALUES(%s,%s,%s,%s,%s,%s,%s)",
             (datetime.now().isoformat(timespec="seconds"), str(scenario_id), str(scope), str(mode),
-             str(scores or "{}"), str(comment or ""), 0.0),
+             str(scores or "{}"), str(comment or ""), avg),
         )
         _maybe_commit()
         cur.close()
@@ -1503,8 +1526,14 @@ def space_state_get():
         cur.execute("SELECT * FROM space_state WHERE id=1")
         row = cur.fetchone()
         cur.close()
-        return dict(row) if row else None
-
+        if row is None:
+            return None
+        d = dict(row)
+        try:
+            d["path"] = json.loads(d.get("path") or "[]")
+        except Exception:
+            d["path"] = []
+        return d
 
 def space_state_set(st):
     with _lock:
@@ -1516,7 +1545,7 @@ def space_state_set(st):
             "to_room=EXCLUDED.to_room, path=EXCLUDED.path, depart_ts=EXCLUDED.depart_ts, arrive_ts=EXCLUDED.arrive_ts, "
             "updated_ts=EXCLUDED.updated_ts",
             (str(st.get("room", "客厅")), str(st.get("state", "在场")), str(st.get("from_room", "")),
-             str(st.get("to_room", "")), str(st.get("path", "[]")), str(st.get("depart_ts", "")),
+             str(st.get("to_room", "")), json.dumps(st.get("path", [])), str(st.get("depart_ts", "")),
              str(st.get("arrive_ts", "")), str(st.get("updated_ts", ""))),
         )
         _maybe_commit()
@@ -1616,33 +1645,43 @@ def item_events_prune(days=90) -> int:
 def item_activation_rows():
     with _lock:
         cur = _connect().cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM item_activation_state")
+        cur.execute("SELECT item, seen_ts, count FROM item_activation_state")
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
-        return rows
+        return {r["item"]: {"seen_ts": r["seen_ts"], "count": r["count"]} for r in rows}
 
 
 def item_activation_set(items):
+    if not items:
+        return
     with _lock:
         cur = _connect().cursor()
-        for item, seen_ts, count in items:
+        for k, v in items.items():
             cur.execute(
                 "INSERT INTO item_activation_state(item,seen_ts,count) VALUES(%s,%s,%s) "
                 "ON CONFLICT(item) DO UPDATE SET seen_ts=EXCLUDED.seen_ts, count=EXCLUDED.count",
-                (str(item), str(seen_ts), int(count)),
+                (str(k)[:60], str(v.get("seen_ts", "")), int(v.get("count", 0))),
             )
         _maybe_commit()
         cur.close()
 
-
 def item_search_rows():
     with _lock:
         cur = _connect().cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM item_search_state")
+        cur.execute("SELECT scope, name, queue, step, started_at FROM item_search_state")
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
-        return rows
-
+        out = {}
+        for r in rows:
+            try:
+                q = json.loads(r["queue"] or "[]")
+            except Exception:
+                q = []
+            out[r["scope"]] = {
+                "name": r["name"], "queue": q, "step": r["step"],
+                "started_at": r["started_at"],
+            }
+        return out
 
 def item_search_set(scope, data):
     with _lock:
@@ -1652,7 +1691,7 @@ def item_search_set(scope, data):
             "VALUES(%s,%s,%s,%s,%s,%s) "
             "ON CONFLICT(scope) DO UPDATE SET name=EXCLUDED.name, queue=EXCLUDED.queue, "
             "step=EXCLUDED.step, started_at=EXCLUDED.started_at, updated_ts=EXCLUDED.updated_ts",
-            (str(scope), str(data.get("name", "")), str(data.get("queue", "[]")),
+            (str(scope), str(data.get("name", "")), json.dumps(data.get("queue", [])),
              int(data.get("step", 0)), str(data.get("started_at", "")), str(data.get("updated_ts", ""))),
         )
         _maybe_commit()
@@ -1670,11 +1709,10 @@ def item_search_delete(scope):
 def mind_intention_rows():
     with _lock:
         cur = _connect().cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM mind_intention_state")
+        cur.execute("SELECT scope,title,source,strength,state,due,condition,started_at,updated_at FROM mind_intention_state")
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
-        return rows
-
+        return {r["scope"]: r for r in rows}
 
 def mind_intention_set(scope, data):
     with _lock:

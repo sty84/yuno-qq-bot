@@ -45,15 +45,35 @@ def _window_recall() -> dict:
     return {"n": total, "hit": hit, "recall": round(hit / total, 3) if total else None}
 
 
+def _query_all(sql, params=()):
+    """兼容 SQLite/PostgreSQL 的查询助手，返回 dict 行列表。"""
+    conn = _db._connect()
+    if hasattr(conn, "cursor"):
+        try:
+            from psycopg2.extras import RealDictCursor
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(sql, params)
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            return rows
+        except TypeError:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            cols = [d[0] for d in cur.description] if cur.description else []
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            cur.close()
+            return rows
+    return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
 def _timeline_order() -> dict:
     ts_map = {}
-    for r in _db._connect().execute("SELECT id, ts FROM events").fetchall():
+    for r in _query_all("SELECT id, ts FROM events"):
         ts_map[r["id"]] = r["ts"]
-    rows = _db._connect().execute(
-        "SELECT src, dst FROM event_relations WHERE rel='follows' LIMIT 300"
-    ).fetchall()
+    rows = _query_all("SELECT src, dst FROM event_relations WHERE rel='follows' LIMIT 300")
     total = ok = 0
-    for src, dst in rows:
+    for r in rows:
+        src, dst = r["src"], r["dst"]
         if src not in ts_map or dst not in ts_map:
             continue
         try:
