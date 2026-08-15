@@ -179,3 +179,41 @@ def test_conv_review_queue_and_submit():
         "emotional": 4, "proactive": 4, "boundary": 5,
     })
     assert bad.status_code == 400
+
+
+# ---- 产品化/运维：公开统计 + 高危操作确认 ----
+
+def test_public_stats_no_auth(monkeypatch):
+    """设置 token 后，/api/public/stats 仍可匿名访问。"""
+    import importlib
+    import webapp
+    monkeypatch.setenv("YUNO_WEB_TOKEN", "web-secret")
+    reloaded = importlib.reload(webapp)
+    try:
+        from starlette.testclient import TestClient
+        client = TestClient(reloaded.app)
+        assert client.get("/api/health").status_code == 401
+        r = client.get("/api/public/stats")
+        assert r.status_code == 200, r.status_code
+        body = r.json()
+        assert "memory_count" in body and "event_count" in body
+    finally:
+        monkeypatch.delenv("YUNO_WEB_TOKEN", raising=False)
+        importlib.reload(webapp)
+
+
+def test_high_risk_tool_requires_confirm():
+    """高危运维动作必须 confirm=true，且确认后写审计。"""
+    from plugins import _db
+    from starlette.testclient import TestClient
+    import webapp
+    client = TestClient(webapp.app)
+    # 未确认 -> 400
+    r = client.post("/api/tools", json={"name": "conflict-scan-apply"})
+    assert r.status_code == 400, r.status_code
+    assert "confirm" in r.json().get("detail", "")
+    # 确认后 -> 200（空库也能返回 dry-run/空结果）
+    r2 = client.post("/api/tools", json={"name": "conflict-scan-apply", "confirm": True})
+    assert r2.status_code == 200, r2.status_code
+    audit = _db.audit_query(limit=5, action="web.high_risk")
+    assert audit, "高危操作应写审计"

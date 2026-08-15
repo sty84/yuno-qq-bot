@@ -232,6 +232,9 @@ _WEB_TOKEN = os.getenv("YUNO_WEB_TOKEN", "")
 if _WEB_TOKEN:
     @app.middleware("http")
     async def _require_web_token(request: Request, call_next):
+        # 公开统计接口不鉴权，供只读展示页使用
+        if request.url.path.startswith("/api/public/"):
+            return await call_next(request)
         if request.headers.get("Authorization", "") != f"Bearer {_WEB_TOKEN}":
             return JSONResponse({"detail": "未授权"}, status_code=401)
         return await call_next(request)
@@ -265,6 +268,9 @@ class AblationRun(BaseModel):
 
 class ToolRun(BaseModel):
     name: str
+    confirm: bool = False
+    uid: str = ""
+    scope: str = ""
 
 
 class ReviewSubmit(BaseModel):
@@ -292,6 +298,19 @@ class ConvReviewSubmit(BaseModel):
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/public/stats")
+def public_stats():
+    """公开只读统计：用于展示页/监控，不暴露敏感数据。"""
+    return {
+        "memory_count": _count("memories"),
+        "event_count": _count("events"),
+        "conv_count": _count("conv_log"),
+        "trace_count": _count("memory_trace"),
+        "today_cost": _cost_summary_today(),
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
 
 
 @app.get("/api/counters")
@@ -654,12 +673,41 @@ def convreview_submit(req: ConvReviewSubmit):
 
 @app.post("/api/tools")
 def run_tool(req: ToolRun):
-    """运维动作白名单（诊断页按钮）：约定表巡检清理 / 记忆来源归一。"""
+    """运维动作白名单（诊断页按钮）。
+    高危操作（污染/矛盾/日历 apply、清用户）必须 confirm=true 并写审计。"""
+    _HIGH_RISK = {
+        "pollution-scan-apply",
+        "conflict-scan-apply",
+        "calendar-check-apply",
+        "memory-clear-user",
+    }
+    if req.name in _HIGH_RISK and not req.confirm:
+        raise HTTPException(400, "高危操作需要 confirm=true")
+    if req.name in _HIGH_RISK:
+        _db.audit_add(
+            "web.high_risk", req.name,
+            f"uid={req.uid} scope={req.scope}",
+            operator="web",
+        )
     if req.name == "appointment-clean":
         from memory import appointment
         return appointment.clean()
     if req.name == "memory-source-backfill":
         return _db.memory_source_normalize()
+    if req.name == "pollution-scan-apply":
+        import tools as tools_mod
+        return tools_mod.cmd_pollution_scan(req.scope, apply=True)
+    if req.name == "conflict-scan-apply":
+        import tools as tools_mod
+        return tools_mod.cmd_conflict_scan(req.scope, apply=True)
+    if req.name == "calendar-check-apply":
+        import tools as tools_mod
+        return tools_mod.cmd_calendar_check(req.scope, apply=True)
+    if req.name == "memory-clear-user":
+        if not req.uid:
+            raise HTTPException(400, "memory-clear-user 需要 uid")
+        import tools as tools_mod
+        return tools_mod.cmd_memory_clear_user(req.uid)
     raise HTTPException(400, f"未知工具：{req.name}")
 
 
