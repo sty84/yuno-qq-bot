@@ -10,7 +10,7 @@ from datetime import datetime
 _log = logging.getLogger(__name__)
 
 from plugins import _db, _shared
-from memory import analysis, embedder, extract, graph, lexical, policy, topic, trace, world
+from memory import analysis, embedder, extract, graph, lexical, policy, reasoning, topic, trace, world
 
 
 _GROUND_NOISE = ("是", "的", "了", "我", "你", "他", "她", "它", "只", "有", "在", "很",
@@ -373,6 +373,7 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
             details.append(
                 {"fact": fact, "confidence": cur, "new_confidence": 0.0, "kind": "update", "decision": "update"}
             )
+            reasoning.record_negative_feedback(fact)
         elif decision["action"] == "uncertain":
             # 无法确认 → 冲突降权 + 标记 contested 待核查（按事实类型加阻力）
             new_conf = policy.update(cur, "conflict", resistance=policy.resistance_for(cls))
@@ -390,6 +391,7 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
             details.append(
                 {"fact": fact, "confidence": cur, "new_confidence": new_conf, "kind": "conflict", "decision": "uncertain"}
             )
+            reasoning.record_negative_feedback(fact)
         else:
             # 调查后纠正不成立 → 保留旧记忆，只记审计
             _db.history_add(
@@ -995,7 +997,8 @@ def _decide_edits(text, reply, core) -> list:
     for f in data.get("remember") or []:
         f = str(f).strip()
         if f:
-            ops.append({"op": "remember", "fact": f, "mclass": "core"})
+            # 不直接写入 core：先落 long，后续由 promote_core 的安全校验决定是否升级
+            ops.append({"op": "remember", "fact": f, "mclass": "long"})
     for f in data.get("forget") or []:
         f = str(f).strip()
         if f:
@@ -1015,7 +1018,9 @@ def _apply_ops(scope, key, ops) -> dict:
             continue
         kind = op.get("op")
         if kind == "remember":
-            target = op.get("mclass", "core")
+            target = op.get("mclass", "long")
+            if target == "core" and policy.fact_class(scope, key, fact) != "stable":
+                target = "long"  # 防止绕过 promote_core 直接把非稳定事实塞进核心层
             row = by_fact.get(fact)
             if row:
                 _db.memory_add(

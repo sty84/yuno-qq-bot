@@ -363,6 +363,7 @@ def ask(
         except Exception as e:
             _stats_err(e)
             pass
+    mem_evidence = []
     if scopes and _core_enabled():
         s = session.touch(scopes[0], "", text)
         current = session.current(scopes[0], "")
@@ -389,6 +390,7 @@ def ask(
             top_k=3 if light else 5,
             expand_query=not light,
             recent=recent_texts,
+            evidence_out=mem_evidence,
         )
         try:
             from memory import world
@@ -564,8 +566,8 @@ def ask(
     # 证据门控 v2（生成后验证，代码级拦截）：输出含无证据断言/黑名单词 → 重写
     try:
         from agent import evidence_gate
-        from memory import context as ctx_mod, pack as pack_mod
-        evidence = list(getattr(ctx_mod, "_last_evidence", None) or [])
+        from memory import pack as pack_mod
+        evidence = list(mem_evidence)
         if scopes:
             try:
                 from memory import appointment as appt_mod

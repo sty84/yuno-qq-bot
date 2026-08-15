@@ -224,6 +224,7 @@ run_eval = backfill_mod.eval_run
 eval_report = backfill_mod.eval_report
 backfill_run = backfill_mod.run
 route_stats = reasoning._route_stats
+record_negative_feedback = reasoning.record_negative_feedback
 publicize = update.publicize
 forget = policy.forget
 promote = policy.promote

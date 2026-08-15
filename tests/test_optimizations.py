@@ -1,0 +1,101 @@
+# -*- coding: utf-8 -*-
+"""针对近期优化点的回归测试：
+1) daily_reflect 死代码修复后确实会把反思写入 AI 记忆
+2) assemble_context 能通过 evidence_out 显式返回本次检索证据，不再只靠全局变量
+3) record_negative_feedback 能按检索通道降低命中计数
+4) active_edit 不会绕过 promote_core 直接把非稳定事实写成 core
+"""
+
+import json
+import os
+import sys
+import tempfile
+import types
+
+
+def _setup(prefix="yuno_opt_"):
+    stub = types.ModuleType("openai")
+
+    class _OpenAI:
+        def __init__(self, *a, **k):
+            self.chat = types.SimpleNamespace(completions=None)
+
+    stub.OpenAI = _OpenAI
+    sys.modules["openai"] = stub
+    tmp = tempfile.mkdtemp(prefix=prefix)
+    cfg = {"memory": {"embedder": {"provider": "none"}, "core": {"enabled": True}}}
+    os.environ["CONFIG_PATH"] = os.path.join(tmp, "config.json")
+    with open(os.environ["CONFIG_PATH"], "w", encoding="utf-8") as f:
+        json.dump(cfg, f)
+    from plugins import _db, _shared
+    _shared.CONFIG_PATH = os.environ["CONFIG_PATH"]
+    _shared.reload_config()
+    _db.init(tmp, force=True)
+    return _db, _shared
+
+
+def test_daily_reflect_persists_insights(monkeypatch):
+    _db, _shared = _setup("yuno_refl_")
+    from memory import advisor
+
+    _db.event_add(
+        "c2c:refl", "", "event", "用户聊了项目进展",
+        ts="2026-08-01T10:00:00", ts_source="explicit",
+    )
+
+    class _FakeResp:
+        def __init__(self, content):
+            self.choices = [types.SimpleNamespace(message=types.SimpleNamespace(content=content))]
+
+    monkeypatch.setattr(_shared, "deepseek_chat", lambda **kwargs: _FakeResp("用户偏好稳定\n第二条洞察也很重要\n"))
+    n = advisor.daily_reflect(limit=10)
+    assert n == 2, n
+    rows = _db.memory_rows("ai", "reflection")
+    texts = [r["fact"] for r in rows]
+    assert "用户偏好稳定" in texts
+    assert "第二条洞察也很重要" in texts
+
+
+def test_assemble_context_evidence_out():
+    _db, _shared = _setup("yuno_evout_")
+    from memory import context
+
+    scope = "c2c:evout"
+    fact = "用户养了一只橘猫"
+    _db.memory_add(scope, "", fact, "2026-08-01T10:00:00", None, 0.7, "user")
+    evidence = []
+    ctx = context.assemble_context("用户养了什么猫", [scope], top_k=5, min_score=0.0, evidence_out=evidence)
+    assert ctx, "应能组装出记忆上下文"
+    assert fact in evidence, evidence
+
+
+def test_record_negative_feedback():
+    _db, _shared = _setup("yuno_fb_")
+    from memory import reasoning
+
+    reasoning._route_cache = None
+    reasoning._last_details = {"用户养了橘猫": {"channels": ["lexical", "vector"]}}
+    # 先给一个已有统计
+    reasoning._route_cache = {
+        "lexical": {"trials": 5, "hits": 3},
+        "vector": {"trials": 5, "hits": 4},
+    }
+    ok = reasoning.record_negative_feedback("用户养了橘猫")
+    assert ok is True
+    stats = reasoning._route_cache
+    assert stats["lexical"]["hits"] == 2
+    assert stats["vector"]["hits"] == 3
+    assert stats["lexical"]["misses"] == 1
+
+
+def test_active_edit_not_direct_core():
+    _db, _shared = _setup("yuno_ae_")
+    from memory import controller
+
+    scope = "c2c:ae"
+    result = controller._apply_ops(scope, "", [{"op": "remember", "fact": "用户今天心情不错", "mclass": "core"}])
+    assert result["remember"] == 1
+    rows = _db.memory_rows(scope, "")
+    assert len(rows) == 1
+    # 非稳定事实不应直接进 core，应落为 long，等待 promote_core 安全升级
+    assert rows[0]["mclass"] == "long", rows[0]

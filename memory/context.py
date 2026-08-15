@@ -84,7 +84,7 @@ def core_memory_block(scope, limit=None) -> str:
     return "\n".join(lines)
 
 
-def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, recent) -> str:
+def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, recent, evidence_out=None) -> str:
     global _last_evidence
     hits = reasoning.retrieve(
         query,
@@ -95,15 +95,20 @@ def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, r
         expand_query=expand_query,
         recent=recent,
     )
-    _last_evidence = [f for f, _s, _sc in hits]
+    _hits_facts = [f for f, _s, _sc in hits]
+    if evidence_out is not None:
+        evidence_out[:] = _hits_facts
+    else:
+        _last_evidence = _hits_facts
     if hits:
         conf_map = {}
         src_map = {}
         status_map = {}
         mclass_map = {}
         time_map = {}
+        _hit_facts = {f for f, _s, _sc in hits}
         for scope in list(scopes) + list(extra_scopes or []):
-            for r in _db.memory_rows(scope):
+            for r in _db.memory_rows_by_facts(scope, _hit_facts):
                 conf_map[r["fact"]] = float(r.get("confidence", 0.7))
                 src_map.setdefault(r["fact"], r.get("source", ""))
                 status_map.setdefault(r["fact"], r.get("status", "active"))
@@ -146,7 +151,9 @@ def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, r
                 label = f"我记得你好像提过……{label}？"
             tag = _scope_tag(sc)
             src_label = _source_label(src_map.get(f, ""))
-            lines.append("- " + tag + label + src_label)
+            _ch = reasoning._last_details.get(f, {}).get("channels", [])
+            ch_label = (" ·[" + "/".join(_ch) + "]") if _ch else ""
+            lines.append("- " + tag + label + ch_label + src_label)
             shown += 1
         # 证据门控（v2.3）：按来源统计证据状态，注入分桶说明
         src_buckets = {}
@@ -330,6 +337,7 @@ def assemble_context(
     budget=None,
     expand_query=False,
     recent=None,
+    evidence_out=None,
 ) -> str:
     """令牌预算分级注入：议题（核心）→ 记忆 → 事件脉络，逐级填充到预算上限。
     budget 单位为字符（中文 1 字 ≈ 1 token 量级），默认 2000，可配
@@ -349,7 +357,7 @@ def assemble_context(
             parts.append(resident)
     blocks = [
         _topic_block(query, scopes),
-        _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, recent),
+        _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, recent, evidence_out=evidence_out),
         _event_block(query, scopes),
     ]
     used = 0

@@ -257,6 +257,15 @@ def daily_reflect(limit=20) -> int:
     except Exception as e:
         _stats_err(e)
         return 0
+    n = 0
+    ts = datetime.now().isoformat(timespec="seconds")
+    for l in lines[:3]:
+        if 6 <= len(l) <= 80:
+            _db.memory_add("ai", "reflection", l, ts, None, 0.6, "reflection")
+            # 反思闭环（v6 建议 §8）：洞察落策略日志，供复盘与后续 HITL 行为调整
+            _db.policy_log_add("reflection", "insight", 0.6, detail=l[:100])
+            n += 1
+    return n
 
 
 # ===== 成长反思闭环（v31.3 合并自 memory/reflect.py）=====
@@ -406,15 +415,6 @@ def rollback_belief(log_id) -> str:
         note=f"回滚自 #{log_id}", old_content=entry["content"],
     )
     return f"已回滚 belief 至：{old[:40]}"
-    n = 0
-    ts = datetime.now().isoformat(timespec="seconds")
-    for l in lines[:3]:
-        if 6 <= len(l) <= 80:
-            _db.memory_add("ai", "reflection", l, ts, None, 0.6, "reflection")
-            # 反思闭环（v6 建议 §8）：洞察落策略日志，供复盘与后续 HITL 行为调整
-            _db.policy_log_add("reflection", "insight", 0.6, detail=l[:100])
-            n += 1
-    return n
 
 
 

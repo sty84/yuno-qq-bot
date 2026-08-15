@@ -5,6 +5,7 @@
 
 import re
 import time
+from collections import OrderedDict
 from datetime import datetime
 
 from plugins import _db, _shared
@@ -181,6 +182,23 @@ def _record_route(lists, hits):
     _flush_route_stats()
 
 
+def record_negative_feedback(fact) -> bool:
+    """真实负反馈：用户纠正/否认了某条已召回记忆时，降低对应检索通道的命中计数。
+    用于缓解“把被召回当成召回正确”的自反馈偏差。无通道信息时静默跳过。"""
+    if not fact:
+        return False
+    detail = _last_details.get(fact)
+    if not detail:
+        return False
+    stats = _route_stats()
+    for algo in detail.get("channels", []):
+        s = stats.setdefault(algo, {"trials": 0, "hits": 0})
+        s["hits"] = max(0, int(s.get("hits", 0)) - 1)
+        s["misses"] = int(s.get("misses", 0)) + 1
+    _flush_route_stats()
+    return True
+
+
 def _rerank_cfg() -> dict:
     r = _cfg("rerank", {}) or {}
     return {"enabled": bool(r.get("enabled", True)), "mode": str(r.get("mode", "light"))}
@@ -319,7 +337,8 @@ def _scene_kind(scopes):
     return None
 
 
-_result_cache = {"ts": 0.0, "key": None, "hits": None}
+_result_cache = OrderedDict()
+_RESULT_CACHE_MAX = 16
 _last_details = {}
 
 
@@ -334,9 +353,11 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
         return []
     cc = _cache_cfg()
     cache_key = hash((query_text, tuple(scopes), tuple(extra_scopes or []), top_k, min_score, location, window))
-    if use_cache and cc["enabled"] and _result_cache["key"] == cache_key:
-        if time.time() - _result_cache["ts"] < cc["ttl"]:
-            return list(_result_cache["hits"])
+    if use_cache and cc["enabled"]:
+        _cached = _result_cache.get(cache_key)
+        if _cached and time.time() - _cached[0] < cc["ttl"]:
+            _result_cache.move_to_end(cache_key)
+            return list(_cached[1])
     all_scopes = list(scopes) + list(extra_scopes or [])
     loc_mark = f"[地点：{location}]" if location else ""
 
@@ -354,6 +375,10 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
     plan = _plan(query_text)
     time_hint = extract.understand(query_text).get("time_hint")
     lists = _ranked_lists(query_text, all_scopes, top_k, weights, plan)
+    channel_map = {}
+    for _algo, _lst in lists.items():
+        for _fact in _lst:
+            channel_map.setdefault(_fact, []).append(_algo)
     structured_hits = set(lists["structured"])
     # P2-3 检索优化：只加载通道命中的候选记忆行（避免全量扫描），可见性/隐私仍逐行校验
     candidates = {f for lst in lists.values() for f in lst}
@@ -504,10 +529,14 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
             "policy": round(policy_contrib.get(fact, 0.0), 4),
             "confidence": conf_by_fact.get(fact, 0.7),
             "rerank": rerank_map.get(fact),
+            "channels": sorted(channel_map.get(fact, [])),
         }
     _record_route(lists, hits)
     if use_cache:
-        _result_cache.update({"ts": time.time(), "key": cache_key, "hits": hits})
+        _result_cache[cache_key] = (time.time(), hits)
+        _result_cache.move_to_end(cache_key)
+        while len(_result_cache) > _RESULT_CACHE_MAX:
+            _result_cache.popitem(last=False)
     return hits
 
 
