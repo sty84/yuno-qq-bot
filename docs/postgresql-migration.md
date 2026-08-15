@@ -53,4 +53,26 @@ export YUNO_PG_PASSWORD=yuno
 
 - `plugins/_db.py` 已默认切换为 PostgreSQL；设 `YUNO_DB_BACKEND=sqlite` 可强制 SQLite（主要用于测试隔离）。
 - 需要继续实现 PG adapter，覆盖现有 `_db` 的读写接口。
-- 需要处理 FTS5 → PostgreSQL 全文检索 / pgvector。
+- FTS5 已由 pg_trgm/ILIKE 替代；pgvector 已支持（可选）。
+
+## pgvector 启用
+
+生产库 `yuno`：
+
+```bash
+sudo -u postgres psql -d yuno -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+测试库 `yuno_test`：
+
+```bash
+sudo -u postgres psql -d yuno_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+启用后重建向量索引：
+
+```bash
+python tools.py memory-index
+```
+
+`memory/vecindex.py` 会自动检测 pgvector 并优先使用原生检索；不可用时回退自研 IVF。
