@@ -189,3 +189,22 @@ def adjustments() -> dict:
         "auto_adjust": False,
         "suggestions": suggestions,
     }
+
+def auto_adjust_enabled() -> bool:
+    """是否允许自动调参（默认 false，先攒数据/人工确认再开）。"""
+    return bool(_cfg("auto_adjust", False))
+
+
+def apply_adjustments() -> dict:
+    """把当前对话评分建议写入 kv，供后续模块读取；auto_adjust=false 时仅记录 dry-run。"""
+    data = report()
+    sugg = adjustments().get("suggestions", {})
+    record = {
+        "auto_adjust": auto_adjust_enabled(),
+        "applied": bool(auto_adjust_enabled()),
+        "suggestions": sugg,
+        "dimension_averages": data.get("dimension_averages", {}),
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    _db.kv_set("memory", "conv_adjustments", record)
+    return record

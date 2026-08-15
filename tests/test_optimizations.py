@@ -125,6 +125,17 @@ def test_conflict_scan_detects_like_dislike():
     assert len(conflicts) == 1, conflicts
 
 
+def test_conv_adjustments_dry_run():
+    _db, _shared = _setup("yuno_convadj_")
+    from memory import convreview
+    rec = convreview.apply_adjustments()
+    assert rec["auto_adjust"] is False
+    assert rec["applied"] is False
+    assert "suggestions" in rec
+    saved = _db.kv_get("memory", "conv_adjustments")
+    assert saved is not None and saved["auto_adjust"] is False
+
+
 def test_reflection_quality_rejects_generic():
     _db, _shared = _setup("yuno_reflq_")
     from memory import advisor

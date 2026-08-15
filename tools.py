@@ -671,6 +671,14 @@ def cmd_memory_conv_report() -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
+def cmd_memory_conv_adjust(apply: bool = False) -> str:
+    """对话评分调参框架：--apply 时把当前建议写入 kv（auto_adjust=false 仍只是 dry-run）。"""
+    import memory
+    if apply:
+        return json.dumps(memory.conv_apply_adjustments(), ensure_ascii=False, indent=2)
+    return json.dumps(memory.conv_adjustments(), ensure_ascii=False, indent=2)
+
+
 def cmd_reflection_stats() -> str:
     """反思质量统计：最近 daily_reflect 产出/过滤/写入计数。"""
     import memory.stats as _st
@@ -1954,6 +1962,10 @@ def main() -> int:
     sub.add_parser("reflection-stats", help="反思质量统计：产出/过滤/写入").set_defaults(
         func=lambda a: _emit(cmd_reflection_stats()) or 0
     )
+    p = sub.add_parser("memory-conv-adjust", help="对话评分调参框架：查看建议或写入 dry-run")
+    p.add_argument("--apply", action="store_true", help="把建议写入 kv（auto_adjust=false 时仅 dry-run）")
+    p.set_defaults(func=lambda a: _emit(cmd_memory_conv_adjust(a.apply)) or 0)
+
 
 
     p = sub.add_parser("data-export", help="全量数据打包导出（v12）")
