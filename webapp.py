@@ -176,7 +176,12 @@ def _count(table, where=""):
         sql = f"SELECT COUNT(*) FROM {table}"
         if where:
             sql += f" WHERE {where}"
-        return int(_db._connect().execute(sql).fetchone()[0])
+        conn = _db._connect()
+        if hasattr(conn, "cursor"):
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                return int(cur.fetchone()[0])
+        return int(conn.execute(sql).fetchone()[0])
     except Exception:
         return 0
 

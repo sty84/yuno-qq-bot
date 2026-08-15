@@ -12,7 +12,7 @@ import json
 import os
 import threading
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 
 try:
     import psycopg2
@@ -49,6 +49,7 @@ def init(data_dir=None, force=False):
             pass
     _conn = psycopg2.connect(dsn())
     _conn.autocommit = False
+    _ensure_schema_migrations()
 
 
 def _connect():
@@ -1386,17 +1387,40 @@ def llm_cost_clear():
 
 
 def llm_cost_summary(days=30) -> dict:
+    cutoff = (datetime.now() - timedelta(days=max(1, int(days)))).isoformat(timespec="seconds")
     with _lock:
         cur = _connect().cursor(cursor_factory=RealDictCursor)
         cur.execute(
-            "SELECT COUNT(*) AS calls, COALESCE(SUM(prompt_tokens),0) AS prompt, "
-            "COALESCE(SUM(completion_tokens),0) AS completion, COALESCE(SUM(chars),0) AS chars "
-            "FROM llm_cost WHERE ts >= %s",
-            (datetime.now().isoformat(timespec="seconds"),),
+            "SELECT ts,module,detail,prompt_tokens,completion_tokens FROM llm_cost WHERE ts >= %s ORDER BY ts",
+            (cutoff,),
         )
-        row = cur.fetchone()
+        rows = [dict(r) for r in cur.fetchall()]
         cur.close()
-        return dict(row) if row else {"calls": 0, "prompt": 0, "completion": 0, "chars": 0}
+    total = {"calls": len(rows), "prompt": 0, "completion": 0}
+    by_day, by_module, by_path = {}, {}, {}
+    for r in rows:
+        p, c = int(r["prompt_tokens"]), int(r["completion_tokens"])
+        total["prompt"] += p
+        total["completion"] += c
+        day = str(r["ts"])[:10]
+        d = by_day.setdefault(day, {"calls": 0, "prompt": 0, "completion": 0})
+        d["calls"] += 1; d["prompt"] += p; d["completion"] += c
+        m = by_module.setdefault(str(r["module"] or "chat"), {"calls": 0, "prompt": 0, "completion": 0})
+        m["calls"] += 1; m["prompt"] += p; m["completion"] += c
+        if str(r["module"]) == "rerank":
+            for path in str(r["detail"] or "").split(","):
+                path = path.strip()
+                if not path:
+                    continue
+                q = by_path.setdefault(path, {"calls": 0, "prompt": 0, "completion": 0})
+                q["calls"] += 1; q["prompt"] += p; q["completion"] += c
+    return {
+        "days": int(days),
+        "total": total,
+        "by_day": [{"date": k, **v} for k, v in sorted(by_day.items())],
+        "by_module": [{"module": k, **v} for k, v in sorted(by_module.items(), key=lambda x: -(x[1]["prompt"] + x[1]["completion"]))],
+        "by_path": [{"path": k, **v} for k, v in sorted(by_path.items(), key=lambda x: -(x[1]["prompt"] + x[1]["completion"]))],
+    }
 
 
 # ===== procedures =====
