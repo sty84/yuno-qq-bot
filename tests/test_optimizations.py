@@ -88,6 +88,38 @@ def test_record_negative_feedback():
     assert stats["lexical"]["misses"] == 1
 
 
+def test_record_negative_feedback_scope_alignment():
+    _db, _shared = _setup("yuno_fb_align_")
+    from memory import reasoning
+    import time
+
+    reasoning._route_cache = {
+        "lexical": {"trials": 5, "hits": 3},
+    }
+    reasoning._last_retrieval["c2c:fb"] = {
+        "ts": time.time(),
+        "facts": {"用户养了橘猫"},
+        "details": {"用户养了橘猫": {"channels": ["lexical"]}},
+    }
+    # 不在最近一次检索结果里 -> 不惩罚
+    ok = reasoning.record_negative_feedback("无关事实", scope="c2c:fb")
+    assert ok is False
+    assert reasoning._route_cache["lexical"]["hits"] == 3
+
+    # 在最近一次检索结果里 -> 惩罚
+    ok = reasoning.record_negative_feedback("用户养了橘猫", scope="c2c:fb")
+    assert ok is True
+    assert reasoning._route_cache["lexical"]["hits"] == 2
+
+
+def test_hesitation_safe_rule_skips_llm():
+    _db, _shared = _setup("yuno_hes_")
+    from memory import hesitation
+    out = hesitation.gate("晚安", scope="c2c:x", kind="share")
+    assert out["action"] == "send"
+    assert out["reason"] == "safe_rule"
+
+
 def test_active_edit_not_direct_core():
     _db, _shared = _setup("yuno_ae_")
     from memory import controller

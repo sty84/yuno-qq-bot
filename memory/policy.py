@@ -53,21 +53,33 @@ PREF_HINT = (
 )
 
 
+def _fact_rules() -> dict:
+    """事实分类词表可从 config.json → memory.core.policy.rules 覆盖，默认用内置词表。"""
+    rules = _cfg("rules", {}) or {}
+    return {
+        "stable_anchor": rules.get("stable_anchor", STABLE_ANCHOR),
+        "process_mark": rules.get("process_mark", PROCESS_MARK),
+        "pref_hint": rules.get("pref_hint", PREF_HINT),
+        "stable_ctx": rules.get("stable_ctx", STABLE_CTX),
+    }
+
+
 def fact_class(scope, key, fact) -> str:
     """事实类型：stable 客观稳定事实 / preference 主观偏好 / process 过程状态。
     贝叶斯更新按类型加抗噪阻力：稳定事实不怕玩笑，偏好不因单次异常翻转。
     v2.2+：子串匹配改为"强锚点 + 语境确认 + 过程标记降级"，避免
     "今天工作很累"（含'工作'）/ "记住这个地址"（含'住'）被误判 stable。"""
     t = str(fact or "")
+    _rules = _fact_rules()
     if key in ("identity", "birthday", "blood_type", "profile"):
         return "stable"
-    if any(w in t for w in STABLE_ANCHOR):
+    if any(w in t for w in _rules["stable_anchor"]):
         return "stable"
-    if any(m in t for m in PROCESS_MARK):
+    if any(m in t for m in _rules["process_mark"]):
         return "process"
-    if any(re.search(p, t) for _w, patterns in STABLE_CTX for p in patterns):
+    if any(re.search(p, t) for _w, patterns in _rules["stable_ctx"] for p in patterns):
         return "stable"
-    if key in ("preference", "偏好", "喜好") or any(w in t for w in PREF_HINT):
+    if key in ("preference", "偏好", "喜好") or any(w in t for w in _rules["pref_hint"]):
         return "preference"
     return "process"
 

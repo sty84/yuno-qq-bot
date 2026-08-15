@@ -311,6 +311,12 @@ def cmd_memory_route(text: str) -> str:
     )
 
 
+def cmd_evidence_gate_eval() -> str:
+    """证据门控评测：跑内置评测集，输出准确率/错误明细（before/after 对比用）。"""
+    from memory.gate_eval import evaluate
+    return json.dumps(evaluate(), ensure_ascii=False, indent=2)
+
+
 def cmd_memory_topics(scope: str, limit: int) -> str:
     """列出议题（大类 → 议题 → 参数）。"""
     import memory
@@ -1826,6 +1832,10 @@ def main() -> int:
     sub.add_parser("config-validate", help="校验 config.json：未知段/类型错误/取值越界").set_defaults(
         func=lambda a: _emit(cmd_config_validate()) or 0
     )
+    sub.add_parser("evidence-gate-eval", help="证据门控评测：准确率 + 错误明细").set_defaults(
+        func=lambda a: _emit(cmd_evidence_gate_eval()) or 0
+    )
+
 
     p = sub.add_parser("emotion-eval", help="情绪判断评测：分类准确率 + VAD MAE")
     p.add_argument("--file", default="", help="评测集 JSON（默认 data/emotion_probes.json）")

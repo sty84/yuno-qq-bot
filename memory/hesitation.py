@@ -15,6 +15,24 @@ import random
 from plugins import _shared
 
 
+_SAFE_SHORT_RE = None
+
+
+def _safe_short_re():
+    global _SAFE_SHORT_RE
+    if _SAFE_SHORT_RE is None:
+        import re
+        _SAFE_SHORT_RE = re.compile(
+            r"^(晚安|早安|早|哈哈+|嗯+|好的?|知道啦?|拜拜|再见|睡啦?|加油|在吗|我回来了|我先去忙了)[！!。.]?$"
+        )
+    return _SAFE_SHORT_RE
+
+
+def _obviously_safe(msg) -> bool:
+    """规则预筛：极短、无断言、纯日常寒暄的主动消息不调 LLM 犹豫。"""
+    return bool(_safe_short_re().match(str(msg or "").strip()))
+
+
 def _cfg(key, default):
     return _shared.core_cfg("hesitation", key, default)
 def enabled() -> bool:
@@ -80,6 +98,9 @@ def gate(msg, scope="", kind="generic", ctx=""):
     action ∈ send / rewrite / hold / discard；discard 才真正不发，其余都发（最多延迟/改口）。"""
     out = {"action": "send", "delay_s": 0, "msg": msg, "reason": "", "monologue": ""}
     if not enabled() or not msg:
+        return out
+    if _cfg("skip_safe", True) and _obviously_safe(msg):
+        out["reason"] = "safe_rule"
         return out
     _bump("hesitation_eval")
     if not _should_evaluate(kind):

@@ -373,7 +373,7 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
             details.append(
                 {"fact": fact, "confidence": cur, "new_confidence": 0.0, "kind": "update", "decision": "update"}
             )
-            reasoning.record_negative_feedback(fact)
+            reasoning.record_negative_feedback(fact, scope=scope)
         elif decision["action"] == "uncertain":
             # 无法确认 → 冲突降权 + 标记 contested 待核查（按事实类型加阻力）
             new_conf = policy.update(cur, "conflict", resistance=policy.resistance_for(cls))
@@ -391,7 +391,7 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
             details.append(
                 {"fact": fact, "confidence": cur, "new_confidence": new_conf, "kind": "conflict", "decision": "uncertain"}
             )
-            reasoning.record_negative_feedback(fact)
+            reasoning.record_negative_feedback(fact, scope=scope)
         else:
             # 调查后纠正不成立 → 保留旧记忆，只记审计
             _db.history_add(

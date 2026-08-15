@@ -182,12 +182,24 @@ def _record_route(lists, hits):
     _flush_route_stats()
 
 
-def record_negative_feedback(fact) -> bool:
+def record_negative_feedback(fact, scope=None) -> bool:
     """真实负反馈：用户纠正/否认了某条已召回记忆时，降低对应检索通道的命中计数。
-    用于缓解“把被召回当成召回正确”的自反馈偏差。无通道信息时静默跳过。"""
+    用于缓解“把被召回当成召回正确”的自反馈偏差。
+    传入 scope 时会做对齐保护：只惩罚最近一次该 scope 检索确实命中的记忆。"""
     if not fact:
         return False
-    detail = _last_details.get(fact)
+    detail = None
+    if scope is not None:
+        entry = _last_retrieval.get(scope)
+        if not entry:
+            return False
+        if time.time() - entry["ts"] > _RETRIEVAL_FEEDBACK_WINDOW:
+            return False
+        if fact not in entry["facts"]:
+            return False
+        detail = entry["details"].get(fact)
+    if detail is None:
+        detail = _last_details.get(fact)
     if not detail:
         return False
     stats = _route_stats()
@@ -340,6 +352,8 @@ def _scene_kind(scopes):
 _result_cache = OrderedDict()
 _RESULT_CACHE_MAX = 16
 _last_details = {}
+_last_retrieval = {}
+_RETRIEVAL_FEEDBACK_WINDOW = 600.0
 
 
 def _cache_cfg() -> dict:
@@ -351,6 +365,7 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
     """单查询检索（含结果缓存）：返回 [(fact, score, scope)]（score 已归一化 0~1）。"""
     if not query_text or not scopes:
         return []
+    all_scopes = list(scopes) + list(extra_scopes or [])
     cc = _cache_cfg()
     cache_key = hash((query_text, tuple(scopes), tuple(extra_scopes or []), top_k, min_score, location, window))
     if use_cache and cc["enabled"]:
@@ -359,8 +374,14 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
             _result_cache.move_to_end(cache_key)
             _last_details.clear()
             _last_details.update(_cached[2])
+            _now = time.time()
+            for _sc in all_scopes:
+                _last_retrieval[_sc] = {
+                    "ts": _now,
+                    "facts": {f for f, _s, _sc2 in _cached[1]},
+                    "details": _cached[2],
+                }
             return list(_cached[1])
-    all_scopes = list(scopes) + list(extra_scopes or [])
     loc_mark = f"[地点：{location}]" if location else ""
 
     # 注意力系统（v6）：活跃目标相关记忆加权
@@ -534,6 +555,13 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
             "channels": sorted(channel_map.get(fact, [])),
         }
     _record_route(lists, hits)
+    _now = time.time()
+    for _sc in all_scopes:
+        _last_retrieval[_sc] = {
+            "ts": _now,
+            "facts": {f for f, _s, _sc2 in hits},
+            "details": {f: dict(d) for f, d in _last_details.items()},
+        }
     if use_cache:
         _details_snapshot = {f: dict(d) for f, d in _last_details.items()}
         _result_cache[cache_key] = (time.time(), hits, _details_snapshot)
