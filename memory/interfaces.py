@@ -21,7 +21,7 @@ class MemoryInterface(Protocol):
 
 
 class DecisionInterface(Protocol):
-    def decide(self, query: str, scope: str = "", context: str = "") -> dict:
+    def decide(self, query: str, scope: str = "", context: str = "", *args, **kwargs) -> dict:
         ...
 
 
@@ -48,7 +48,7 @@ class CognitiveTurn:
 class MemoryPort:
     """默认记忆端口：包装 reasoning / controller / policy。"""
 
-    def search(self, query, scopes, top_k=5):
+    def search(self, query, scopes, top_k=5, **kwargs):
         from memory import reasoning
         return [
             {"fact": f, "score": s, "scope": sc}
@@ -67,7 +67,7 @@ class MemoryPort:
 class DecisionPort:
     """默认决策端口：包装 mind.snapshot。"""
 
-    def decide(self, query, scope="", context=""):
+    def decide(self, query, scope="", context="", *args, **kwargs):
         from memory import mind
         snap = mind.snapshot(scope, query) if scope else {}
         return {
@@ -88,28 +88,44 @@ class ActionPort:
 class CognitiveArchitecture:
     """组合记忆/决策/动作端口，形成统一认知流程。"""
 
-    def __init__(self, memory=None, decision=None, action=None, responder=None):
+    def __init__(self, memory=None, decision=None, action=None):
         self.memory = memory or MemoryPort()
         self.decision = decision or DecisionPort()
         self.action = action or ActionPort()
-        self.responder = responder
 
     def run(self, query: str, scope: str = "", context: str = "", *args, **kwargs) -> CognitiveTurn:
-        # responder 模式：旧核心（如 agent.core._ask_impl）作为实际执行体，
-        # 避免在迁移期间重复执行决策/记忆检索导致查询日志与状态顺序回归。
-        if self.responder is not None:
-            reply, meta = self.responder(query, *args, **kwargs)
+        decision = self.decision.decide(query, scope, context, *args, **kwargs)
+        # 决策端口可返回 early_reply/early_meta 表示无需进入动作阶段（如深睡离线）
+        if decision.get("early_reply") is not None:
             return CognitiveTurn(
                 query=query,
                 scope=scope,
-                reply=reply,
-                meta=meta,
-                action={"action": "reply", "text": query},
+                reply=decision.get("early_reply", ""),
+                meta=decision.get("early_meta", {}),
+                situation=decision.get("situation", {}),
+                goals=decision.get("goals", []),
+                intention=decision.get("intention", {}),
+                activated_memories=decision.get("activated_memories", []),
+                options=decision.get("options", []),
+                action={"action": "early_exit", "text": query},
             )
 
-        decision = self.decision.decide(query, scope, context)
-        hits = self.memory.search(query, [scope] if scope else [], top_k=5)
-        action = self.action.execute(decision.get("options", [{}])[0].get("action", "reply") if decision.get("options") else "reply", text=query)
+        search_scopes = kwargs.get("scopes") if kwargs.get("scopes") is not None else ([scope] if scope else [])
+        search_kwargs = {k: v for k, v in kwargs.items() if k != "scopes"}
+        hits = self.memory.search(query, search_scopes, top_k=5, *args, **search_kwargs)
+        action = self.action.execute(
+            decision.get("options", [{}])[0].get("action", "reply") if decision.get("options") else "reply",
+            text=query,
+            decision=decision,
+            memory=self.memory,
+            context=context,
+            **kwargs,
+        )
+        reply = ""
+        meta = {}
+        if isinstance(action, dict):
+            reply = action.get("reply", "")
+            meta = action.get("meta", {})
         return CognitiveTurn(
             query=query,
             scope=scope,
@@ -119,6 +135,8 @@ class CognitiveArchitecture:
             activated_memories=hits,
             options=decision.get("options", []),
             action=action,
+            reply=reply,
+            meta=meta,
         )
 
     def run_to_dict(self, query: str, scope: str = "", context: str = "") -> dict:

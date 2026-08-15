@@ -8,6 +8,16 @@ import pytest
 os.environ.setdefault("YUNO_DB_BACKEND", "sqlite")
 
 
+@pytest.fixture(autouse=True)
+def _force_sleep_awake(monkeypatch):
+    """测试不依赖真实时钟：深睡窗口（凌晨 2~5 点）会让 agent.ask 直接离线返回。
+
+    这里统一把 sleep_mode 固定为 awake，避免测试套件在深睡时段随机失败。
+    """
+    from memory import sleep
+    monkeypatch.setattr(sleep, "sleep_mode", lambda now=None: "awake")
+
+
 @pytest.fixture(scope="module", autouse=True)
 def _pg_reset_per_module():
     """PG 模式下每个测试模块开始前清空业务表，尽量模拟 SQLite 临时库隔离。"""
