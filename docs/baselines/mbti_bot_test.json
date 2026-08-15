@@ -1,0 +1,82 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "answers": [
+        "B",
+        "A",
+        "B",
+        "B",
+        "B",
+        "A",
+        "B",
+        "B"
+      ],
+      "mbti": "ISFP",
+      "scores": {
+        "E": 0,
+        "I": 2,
+        "S": 2,
+        "N": 0,
+        "T": 0,
+        "F": 2,
+        "J": 0,
+        "P": 2
+      }
+    },
+    {
+      "round": 2,
+      "answers": [
+        "B",
+        "A",
+        "B",
+        "B",
+        "B",
+        "A",
+        "B",
+        "B"
+      ],
+      "mbti": "ISFP",
+      "scores": {
+        "E": 0,
+        "I": 2,
+        "S": 2,
+        "N": 0,
+        "T": 0,
+        "F": 2,
+        "J": 0,
+        "P": 2
+      }
+    },
+    {
+      "round": 3,
+      "answers": [
+        "B",
+        "A",
+        "B",
+        "A",
+        "B",
+        "A",
+        "A",
+        "B"
+      ],
+      "mbti": "ISTJ",
+      "scores": {
+        "E": 0,
+        "I": 2,
+        "S": 2,
+        "N": 0,
+        "T": 1,
+        "F": 1,
+        "J": 1,
+        "P": 1
+      }
+    }
+  ],
+  "agree_answers": 6,
+  "stable_dimensions": 2,
+  "types": [
+    "ISFP",
+    "ISTJ"
+  ]
+}

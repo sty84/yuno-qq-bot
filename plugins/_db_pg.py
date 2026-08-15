@@ -696,14 +696,14 @@ def topic_add(scope, key, category, topic, importance=0.5, confidence=0.7, statu
 
 def topic_find(scope, key, category, topic):
     with _lock:
-        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        cur = _connect().cursor()
         cur.execute(
-            "SELECT * FROM topics WHERE scope=%s AND key=%s AND category=%s AND topic=%s",
+            "SELECT id FROM topics WHERE scope=%s AND key=%s AND category=%s AND topic=%s",
             (scope, key or "", category, topic),
         )
         row = cur.fetchone()
         cur.close()
-        return dict(row) if row else None
+        return row[0] if row else None
 
 
 def topic_get(topic_id):
