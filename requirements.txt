@@ -14,3 +14,6 @@ jieba>=0.42.1
 
 # PostgreSQL 默认后端（生产必需）
 psycopg2-binary>=2.9
+
+# PostgreSQL 连接池（后续接入）
+psycopg_pool>=3.2

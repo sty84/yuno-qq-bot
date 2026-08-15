@@ -344,7 +344,7 @@ sudo grep "\[引导\]" /home/ubuntu/qq-bot/data/bot.log | tail -1
 ### 定时维护（备份 + 每日成长）
 
 ```bash
-printf '0 3 * * * cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py backup >> data/cron.log 2>&1\n30 3 * * * cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py memory-grow >> data/cron.log 2>&1\n0 9 * * 1 cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py reflection-report --limit 50 >> data/reflection_report.log 2>&1\n' | sudo -u aiagent crontab -
+printf '0 3 * * * cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py backup >> data/cron.log 2>&1\n30 3 * * * cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py memory-grow >> data/cron.log 2>&1\n0 9 * * 1 cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py reflection-report --limit 50 >> data/reflection_report.log 2>&1\n0 4 * * 1 cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py internal-db-prune --days 30 >> data/cron.log 2>&1\n' | sudo -u aiagent crontab -
 ```
 
 ## 配置说明

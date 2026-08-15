@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import pathlib
+import time
 import shutil
 import sqlite3
 import sys
@@ -79,6 +80,22 @@ def cmd_health(notify: bool):
         except Exception as e:
             lines.append(f"PostgreSQL [离线] {e}")
             results.append(("PostgreSQL", False, str(e)))
+    # 备份新鲜度检查
+    try:
+        backup_dir = _shared.DATA_DIR / "backups"
+        backups = sorted(backup_dir.glob("bot-*"), key=lambda x: x.stat().st_mtime, reverse=True)
+        if backups:
+            age_h = (time.time() - backups[0].stat().st_mtime) / 3600
+            if age_h > 24:
+                lines.append(f"备份 [过期] 最近备份 {age_h:.1f} 小时前")
+                results.append(("备份", False, f"最近备份 {age_h:.1f} 小时前"))
+            else:
+                lines.append(f"备份 [在线] 最近 {age_h:.1f} 小时前")
+        else:
+            lines.append("备份 [缺失] 还没有备份文件")
+            results.append(("备份", False, "无备份文件"))
+    except Exception as e:
+        lines.append(f"备份 [检查失败] {e}")
     messages = _sync_notify(results, notify)
     if messages:
         lines.append("播报：" + "；".join(messages))
