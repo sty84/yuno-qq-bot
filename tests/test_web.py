@@ -298,3 +298,20 @@ def test_notify_requires_confirm():
     assert r2.json()["ok"] is True
     audit = _db.audit_query(limit=5, action="notify.send")
     assert audit, "播报应写审计"
+
+
+def test_public_trend_no_auth(monkeypatch):
+    """公开趋势接口在设置 token 后仍可匿名访问。"""
+    import importlib
+    import webapp
+    monkeypatch.setenv("YUNO_WEB_TOKEN", "web-secret")
+    reloaded = importlib.reload(webapp)
+    try:
+        from starlette.testclient import TestClient
+        client = TestClient(reloaded.app)
+        r = client.get("/api/public/trend")
+        assert r.status_code == 200, r.status_code
+        assert isinstance(r.json(), dict)
+    finally:
+        monkeypatch.delenv("YUNO_WEB_TOKEN", raising=False)
+        importlib.reload(webapp)

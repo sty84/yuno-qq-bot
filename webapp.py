@@ -313,6 +313,18 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/public/trend")
+def public_trend(limit: int = 50):
+    """公开只读趋势：返回各类评测的历史指标（不含敏感数据）。"""
+    hist = _db.kv_get("memory", "baseline_history") or []
+    out = {}
+    for kind in ("memory_eval", "space_eval", "time_eval", "emotion_eval", "subjects_eval"):
+        items = [h for h in hist if h.get("kind") == kind][-max(1, int(limit)):]
+        if items:
+            out[kind] = items
+    return out
+
+
 @app.get("/api/status")
 def status():
     """运维状态：schema 版本、DB 大小、最近 grow、运行中任务数。"""
