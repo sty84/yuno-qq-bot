@@ -143,6 +143,16 @@ def test_retrieval_contextvar_isolation_between_threads():
     assert main_after == main_before, (main_before, main_after)
 
 
+def test_cognitive_architecture_interfaces():
+    _db, _shared = _setup("yuno_cog_")
+    from memory.interfaces import default_architecture
+    arch = default_architecture()
+    result = arch.run("用户养了什么猫", scope="c2c:cog")
+    assert "decision" in result
+    assert "memory_hits" in result
+    assert "action" in result
+
+
 def test_memory_consolidator():
     _db, _shared = _setup("yuno_cons_")
     from memory import consolidator

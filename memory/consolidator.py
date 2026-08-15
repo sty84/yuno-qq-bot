@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """记忆整合器：自动合并碎片、处理冲突、巩固/遗忘，形成定期维护闭环。"""
 
-from plugins import _db
 from memory import policy
 
 

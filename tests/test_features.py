@@ -87,8 +87,6 @@ def _env() -> dict:
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, repo)
 
-    from plugins import _db, _shared
-
     import agent  # noqa: F401
     import memory  # noqa: F401
     import memory.stats as stats_mod  # noqa: F401
@@ -98,11 +96,17 @@ def _env() -> dict:
     from memory import context as context_mod, controller as consistency, world as world_mod  # noqa: F401
     import tools as tools_mod  # noqa: F401
     from agent import persona as persona_mod  # noqa: F401
+    from plugins import _db, _shared
 
     # 测试隔离：无论前面哪个测试模块先跑，都重定向配置并强制绑定本测试临时库
     _shared.CONFIG_PATH = os.environ["CONFIG_PATH"]
     _shared.reload_config()
     _db.init(tmp, force=True)
+    # 确保人设同步写入当前临时库（否则 sync_identity 可能在 init 前写进默认库）
+    try:
+        persona_mod.sync_identity()
+    except Exception as e:
+        print("sync_identity in _env failed:", e)
     _ENV.update(locals())
     return _ENV
 

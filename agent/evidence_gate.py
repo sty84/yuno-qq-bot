@@ -133,6 +133,10 @@ def contains_unsupported_claim(reply, evidence=None, banned=None, user_text="", 
     # 整句含"没"且匹配本身也含"没"（如"我没跟你说过"）→ 是否认
     if sm and "没" in sm.group(0) and re.search(r"没|没有", t):
         sm = None
+    # 疑问式来源声称（"你说过吗/你告诉过我吗"）→ 不是断言；
+    # 但“你不是说好…吗”这类反问仍按断言处理
+    if sm and t.rstrip().endswith(("吗", "？", "?")) and re.search(r"你说过|你告诉过我|你之前说", t)             and not re.search(r"说好|不是", t):
+        sm = None
     # 意图疑问豁免："你不是说要走了吗/你不是说想换工作吗"是疑问不是声称；
     # 陈述式"你之前说想去京都"是声称，仍拦
     if sm and re.search(r"说(?:要|想|打算)", t) and t.rstrip().endswith(("吗", "？", "?")):
