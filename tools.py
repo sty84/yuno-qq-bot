@@ -671,6 +671,28 @@ def cmd_memory_conv_report() -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
+def cmd_reflection_report(limit: int = 20) -> str:
+    """反思抽检报告：输出最近写入的反思 + 质量统计，供人工审阅。"""
+    from plugins import _db
+    import memory.stats as st
+    rows = _db.memory_rows("ai", "reflection")
+    rows.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
+    c = st.counters()
+    lines = [
+        "# 反思抽检报告",
+        "",
+        f"- 产出(raw)：{int(c.get('reflect_raw', 0))}",
+        f"- 过滤(rejected)：{int(c.get('reflect_rejected', 0))}",
+        f"- 写入(insight)：{int(c.get('reflect_insight', 0))}",
+        "",
+        f"最近 {min(limit, len(rows))} 条：",
+        "",
+    ]
+    for r in rows[:limit]:
+        lines.append(f"- {r.get('updated_at', '')} | {r['fact']}")
+    return "\n".join(lines)
+
+
 def cmd_memory_conv_adjust(apply: bool = False) -> str:
     """对话评分调参框架：--apply 时把当前建议写入 kv（auto_adjust=false 仍只是 dry-run）。"""
     import memory
@@ -1962,6 +1984,10 @@ def main() -> int:
     sub.add_parser("reflection-stats", help="反思质量统计：产出/过滤/写入").set_defaults(
         func=lambda a: _emit(cmd_reflection_stats()) or 0
     )
+    p = sub.add_parser("reflection-report", help="反思抽检报告：最近写入内容 + 质量统计")
+    p.add_argument("--limit", type=int, default=20)
+    p.set_defaults(func=lambda a: _emit(cmd_reflection_report(a.limit)) or 0)
+
     p = sub.add_parser("memory-conv-adjust", help="对话评分调参框架：查看建议或写入 dry-run")
     p.add_argument("--apply", action="store_true", help="把建议写入 kv（auto_adjust=false 时仅 dry-run）")
     p.set_defaults(func=lambda a: _emit(cmd_memory_conv_adjust(a.apply)) or 0)

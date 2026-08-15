@@ -190,6 +190,11 @@ def adjustments() -> dict:
         "suggestions": suggestions,
     }
 
+def current_adjustments() -> dict:
+    """读取最近一次 memory-conv-adjust 写入的调参建议（默认 dry-run）。"""
+    return _db.kv_get("memory", "conv_adjustments") or {}
+
+
 def auto_adjust_enabled() -> bool:
     """是否允许自动调参（默认 false，先攒数据/人工确认再开）。"""
     return bool(_cfg("auto_adjust", False))

@@ -125,6 +125,16 @@ def test_conflict_scan_detects_like_dislike():
     assert len(conflicts) == 1, conflicts
 
 
+def test_conv_adjustments_visible_in_trace():
+    _db, _shared = _setup("yuno_conv_trace_")
+    from memory import convreview, trace
+    convreview.apply_adjustments()
+    adj = trace.adjustments(force=True)
+    assert "convreview" in adj
+    assert adj["convreview"]["auto_adjust"] is False
+    assert "suggestions" in adj["convreview"]
+
+
 def test_conv_adjustments_dry_run():
     _db, _shared = _setup("yuno_convadj_")
     from memory import convreview

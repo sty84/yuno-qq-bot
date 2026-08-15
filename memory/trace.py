@@ -159,6 +159,16 @@ def adjustments(force=False) -> dict:
     if _adjust_cache["data"] and not force and now - _adjust_cache["ts"] < 600:
         return _adjust_cache["data"]
     data = _compute_adjustments()
+    try:
+        conv = _db.kv_get("memory", "conv_adjustments") or {}
+        if conv:
+            data["convreview"] = {
+                "auto_adjust": bool(conv.get("auto_adjust", False)),
+                "suggestions": conv.get("suggestions", {}),
+                "updated_at": conv.get("updated_at", ""),
+            }
+    except Exception:
+        pass
     _adjust_cache.update({"ts": now, "data": data})
     return data
 
