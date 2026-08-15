@@ -382,3 +382,30 @@ def test_web_readonly_role_and_csrf(monkeypatch):
         monkeypatch.delenv("YUNO_WEB_PASSWORD", raising=False)
         monkeypatch.delenv("YUNO_WEB_READONLY_PASSWORD", raising=False)
         importlib.reload(webapp)
+
+
+def test_cognitive_run_endpoint(monkeypatch):
+    """认知架构标准化接口可通过 Web 调用。"""
+    import importlib
+    import webapp
+    monkeypatch.setenv("YUNO_WEB_TOKEN", "web-secret")
+    monkeypatch.setenv("YUNO_WEB_PASSWORD", "admin123")
+    reloaded = importlib.reload(webapp)
+    try:
+        from starlette.testclient import TestClient
+        client = TestClient(reloaded.app)
+        ad = client.post("/api/auth/login", json={"password": "admin123"})
+        token = ad.json()["token"]
+        r = client.post(
+            "/api/cognitive/run",
+            json={"query": "用户养了什么猫", "scope": "c2c:cog"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200, r.status_code
+        body = r.json()
+        assert "activated_memories" in body
+        assert "action" in body
+    finally:
+        monkeypatch.delenv("YUNO_WEB_TOKEN", raising=False)
+        monkeypatch.delenv("YUNO_WEB_PASSWORD", raising=False)
+        importlib.reload(webapp)

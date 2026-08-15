@@ -213,6 +213,14 @@ def ask(
     except Exception as e:
         _stats_err(e)
         pass
+    try:
+        # 认知架构标准化（可选）：输出统一 CognitiveTurn，便于 Web/诊断/后续迁移
+        if scopes and _mind_cfg("cognitive_arch", False):
+            from memory.interfaces import default_architecture
+            meta["cognitive_arch"] = default_architecture().run_to_dict(text, scopes[0])
+    except Exception as e:
+        _stats_err(e)
+        pass
     ctx_parts = []
     try:
         from memory import sleep as sleep_mod

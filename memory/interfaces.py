@@ -106,6 +106,19 @@ class CognitiveArchitecture:
             action=action,
         )
 
+    def run_to_dict(self, query: str, scope: str = "", context: str = "") -> dict:
+        turn = self.run(query, scope, context)
+        return {
+            "query": turn.query,
+            "scope": turn.scope,
+            "situation": turn.situation,
+            "goals": turn.goals,
+            "intention": turn.intention,
+            "activated_memories": turn.activated_memories,
+            "options": turn.options,
+            "action": turn.action,
+        }
+
 
 def default_architecture() -> CognitiveArchitecture:
     """返回使用当前项目模块的默认认知架构。"""
