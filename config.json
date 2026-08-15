@@ -1,8 +1,6 @@
 {
   "_comment_top": "带 _comment/_comment_ 前缀的键只是说明，代码不会读取；标注“预留/未实现”的块修改无效。",
-  "allowed_paths": [
-    "/home/ubuntu/qq-bot/data"
-  ],
+  "allowed_paths": [],
   "default_allow": [
     "list",
     "status"
@@ -61,7 +59,7 @@
   "memory": {
     "embedder": {
       "provider": "local",
-      "model": "BAAI/bge-small-zh-v1.5",
+      "model": "BAAI/bge-large-zh-v1.5",
       "device": "auto",
       "base_url": "",
       "api_key_env": "EMBEDDING_API_KEY"
@@ -74,14 +72,13 @@
       "throttle_s": 60,
       "context_budget_chars": 2000,
       "query": {
-        "_comment": "LLM 查询重写（v2.3 已实现）：宽泛/指代查询改写为具体名词再检索；已具体不改写、失败降级原句、同 query 缓存。",
-        "rewrite_llm": true,
-        "multi_query": true
+        "_comment": "LLM 查询重写（v2.3 已实现）：宽泛/指代查询改写为具体名词再检索；已具体不改写、失败降级原句、同 query 缓存。多查询已由 expand_query 实现（指代消解+前文补全+同义替换，ask 里默认开，非极短查询均启用），此处不再有 multi_query 键。",
+        "rewrite_llm": true
       },
       "rerank": {
         "enabled": true,
-        "mode": "light",
-        "cross_model": "BAAI/bge-reranker-base"
+        "mode": "cross",
+        "cross_model": "data/models/bge-reranker-base"
       },
       "mmr": {
         "enabled": true,
@@ -153,7 +150,7 @@
         "enabled": true,
         "provider": "qweather",
         "api_key_env": "WEATHER_API_KEY",
-        "base_url": "",
+        "base_url": "https://nt4wcwa7jw.re.qweatherapi.com",
         "location_id": "101020100",
         "city": "上海",
         "ttl_s": 1800
@@ -245,6 +242,7 @@
         "nprobe": 0
       },
       "policy": {
+        "_comment": "策略参数。core_cap/core_min_confidence 为「核心记忆层」（差距一）升迁配置：stable 事实升 mclass=core，最多 core_cap 条、需置信度 ≥ core_min_confidence。",
         "decay_days": 120,
         "prune_importance": 0.15,
         "ai_experience_min_importance": 0.75,
@@ -255,6 +253,8 @@
         "fuzzy_strength": 0.15,
         "promote_min_access": 3,
         "promote_min_importance": 0.6,
+        "core_cap": 20,
+        "core_min_confidence": 0.5,
         "class_half_life": {
           "core": 0,
           "stable": 720,
@@ -263,6 +263,11 @@
           "process": 120,
           "short": 60
         }
+      },
+      "active_edit": {
+        "_comment": "主动自我编辑（MEMGPT 差距二，方案 B 后置小调用）：enabled=true 后，每条高信息私聊消息额外一次小 LLM 决策（remember/forget），成本记入 llm_cost(module=active_edit)。min_gain 门槛越高越省调用也越保守。默认关，建议先小流量观察 policy_log/llm_cost 再开。",
+        "enabled": true,
+        "min_gain": 0.3
       }
     }
   }

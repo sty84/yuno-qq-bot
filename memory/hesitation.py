@@ -9,19 +9,14 @@
 discard_cap, rewrite_prob, hold_prob}。
 """
 
+from memory._llmutil import parse_json_object
 import json
 import random
+from plugins import _shared
 
 
 def _cfg(key, default):
-    try:
-        from plugins import _shared
-        h = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("hesitation", {}) or {}
-        return h.get(key, default)
-    except Exception:
-        return default
-
-
+    return _shared.core_cfg("hesitation", key, default)
 def enabled() -> bool:
     return bool(_cfg("enabled", True))
 
@@ -55,10 +50,9 @@ def _evaluate(msg, scope, kind, ctx=""):
             module="hesitation", detail=kind,
         )
         raw = (resp.choices[0].message.content or "").strip()
-        s, e = raw.find("{"), raw.rfind("}")
-        if s < 0:
+        d = parse_json_object(raw)
+        if d is None:
             return None
-        d = json.loads(raw[s:e + 1])
         action = str(d.get("action", "send")).strip().lower()
         if action not in ("send", "rewrite", "hold", "discard"):
             action = "send"

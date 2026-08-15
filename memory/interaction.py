@@ -18,10 +18,7 @@ _NEG_LABELS = ("忧郁", "悲伤", "低落", "不安", "恐惧", "焦虑", "恼�
 
 
 def _cfg(key, default):
-    it = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("interaction", {}) or {}
-    return it.get(key, default)
-
-
+    return _shared.core_cfg("interaction", key, default)
 def _scene_of(scope) -> str:
     return "group" if str(scope or "").startswith("group") else "c2c"
 

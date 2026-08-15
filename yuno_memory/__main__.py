@@ -1,10 +1,9 @@
 """python -m yuno_memory --host 127.0.0.1 --port 8457 [--data-dir ...]"""
 
 import argparse
+import os
 
 import uvicorn
-
-from .server import app, init_memory
 
 
 def main():
@@ -18,7 +17,12 @@ def main():
     p.add_argument("--model", default="deepseek-chat")
     p.add_argument("--embedder", default="", help="local 或 openai_compatible")
     p.add_argument("--persona", default="", help="人设文本路径")
+    p.add_argument("--token", default="", help="Bearer token（默认读 YUNO_API_TOKEN；空=不鉴权）")
     args = p.parse_args()
+    if args.token:
+        # server 模块 import 时创建 app，须在 import 前注入环境变量
+        os.environ["YUNO_API_TOKEN"] = args.token
+    from .server import app, init_memory
     init_memory(
         config=args.config or None,
         data_dir=args.data_dir or None,

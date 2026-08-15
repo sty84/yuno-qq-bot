@@ -43,6 +43,47 @@ def ai_memory_block(limit=4) -> str:
     return "\n".join(lines)
 
 
+def _core_layer_cfg(key, default):
+    """核心层配置（memory.core.core_layer，代码内置默认值，可覆盖）。"""
+    core = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("core_layer", {}) or {}
+    return core.get(key, default)
+
+
+def _resident_core(mclass, status) -> bool:
+    """是否「常驻核心」：mclass=core 且非废弃/待核实。常驻核心已注入 prompt，检索时需排除。"""
+    return mclass == "core" and status not in ("superseded", "contested")
+
+
+def core_memory_block(scope, limit=None) -> str:
+    """用户核心记忆（MEMGPT 式「热层」）：mclass=core 的事实常驻注入，不检索。
+    与 _memory_block 分离：核心层独立预算，不参与检索 top-k 竞争，也不会被压缩。
+    只取可信度达标的非加密、非废弃事实，总字符数截到 limit（默认 core_layer.budget_chars=600）。"""
+    if not scope or not _core_layer_cfg("enabled", True):
+        return ""
+    limit = int(limit or _core_layer_cfg("budget_chars", 600))
+    min_conf = float(_core_layer_cfg("min_confidence", 0.3))
+    rows = [
+        r for r in _db.memory_rows(scope)
+        if _resident_core(r.get("mclass", "short"), r.get("status", "active"))
+        and not str(r.get("fact", "")).startswith("enc:")
+        and float(r.get("confidence", 0.7)) >= min_conf
+    ]
+    if not rows:
+        return ""
+    rows.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
+    lines = ["【关于用户的核心记忆（常驻，高可信）】以下是你已确认的、关于用户的基本事实，"
+             "回答相关问题时直接据此作答："]
+    used = 0
+    for r in rows:
+        line = "- " + extract.nice_fact(r["fact"])
+        if used + len(line) > limit:
+            lines.append("…（核心记忆较多，其余略）")
+            break
+        lines.append(line)
+        used += len(line)
+    return "\n".join(lines)
+
+
 def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, recent) -> str:
     global _last_evidence
     hits = reasoning.retrieve(
@@ -59,12 +100,14 @@ def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, r
         conf_map = {}
         src_map = {}
         status_map = {}
+        mclass_map = {}
         time_map = {}
         for scope in list(scopes) + list(extra_scopes or []):
             for r in _db.memory_rows(scope):
                 conf_map[r["fact"]] = float(r.get("confidence", 0.7))
                 src_map.setdefault(r["fact"], r.get("source", ""))
                 status_map.setdefault(r["fact"], r.get("status", "active"))
+                mclass_map.setdefault(r["fact"], r.get("mclass", "short"))
         try:
             # 复用 reasoning 的 60 秒缓存，避免每轮 O(3000×scopes) 扫描
             from memory import reasoning as reasoning_mod
@@ -73,10 +116,14 @@ def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, r
             time_map = {}
         lines = []
         shown = 0
+        resident_skipped = 0
         has_approx_time = False
         for f, _s, sc in hits:
             if shown >= 8:  # 记忆压缩（v5 §P1-4）：最多注入 8 条完整，其余合并
                 break
+            if _resident_core(mclass_map.get(f, "short"), status_map.get(f, "active")):
+                resident_skipped += 1
+                continue  # 常驻核心记忆已注入 prompt，不重复占用检索 top_k
             label = extract.nice_fact(f)
             tinfo = time_map.get(f)
             if tinfo and tinfo[0]:
@@ -129,8 +176,8 @@ def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, r
                     lines.append(anchor["hint"])
             except Exception:
                 pass
-        if shown < len(hits):  # 记忆压缩（v5 §P1-4）：超出预算部分合并
-            lines.append(f"- …等 {len(hits) - shown} 条相关记忆（已压缩）")
+        if shown + resident_skipped < len(hits):  # 记忆压缩（v5 §P1-4）：超出预算部分合并（不含已常驻的核心）
+            lines.append(f"- …等 {len(hits) - shown - resident_skipped} 条相关记忆（已压缩）")
         return (
             "相关的历史记忆（只能引用这些内容回答用户个人问题，禁止编造记忆中没有的具体细节"
             "如地点/时间/他人特征/事件，查不到就明说）：\n" + "\n".join(lines)
@@ -294,12 +341,18 @@ def assemble_context(
         pass
     core = _shared.CONFIG.get("memory", {}).get("core", {}) or {}
     budget = int(budget or core.get("context_budget_chars", 2000))
+    parts = []
+    # 核心记忆（MEMGPT 热层）：常驻注入，独立预算，不参与下方检索块的竞争
+    if scopes:
+        resident = core_memory_block(scopes[0])
+        if resident:
+            parts.append(resident)
     blocks = [
         _topic_block(query, scopes),
         _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, recent),
         _event_block(query, scopes),
     ]
-    parts, used = [], 0
+    used = 0
     for block in blocks:
         if not block:
             continue

@@ -16,10 +16,18 @@ from plugins import _db
 try:
     from dotenv import load_dotenv
 except ImportError:
-    def load_dotenv():
+    def load_dotenv(*args, **kwargs):
         pass
 
-load_dotenv()
+# 显式定位项目根目录的 .env（不依赖启动时的工作目录），
+# 否则从别处 python bot.py 会因找不到 .env 而读不到凭证/镜像配置。
+_PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
+load_dotenv(_PROJECT_ROOT / ".env")
+
+# HF_HOME 若是相对路径（如 ./data/hf_cache），固定到项目根目录下。
+_hf_home = os.getenv("HF_HOME", "")
+if _hf_home and not os.path.isabs(_hf_home):
+    os.environ["HF_HOME"] = str(_PROJECT_ROOT / _hf_home)
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
@@ -91,6 +99,17 @@ def save_config():
             json.dump(CONFIG, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"保存 config.json 失败：{e}")
+
+
+def core_cfg(section, key, default=None):
+    """读 CONFIG['memory']['core'][section][key]；section='' 读 core 顶层。
+    memory 各模块统一配置入口（替代各模块重复的 _cfg 实现）。"""
+    try:
+        core = CONFIG.get("memory", {}).get("core", {}) or {}
+        seg = core.get(section) if section else core
+        return (seg or {}).get(key, default)
+    except Exception:
+        return default
 
 
 def reload_config():

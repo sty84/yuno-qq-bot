@@ -190,10 +190,7 @@ def user_label(s):
 
 # ===== 配置 =====
 def _cfg(key, default):
-    emo = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("emotion", {}) or {}
-    return emo.get(key, default)
-
-
+    return _shared.core_cfg("emotion", key, default)
 # ===== AI 情绪状态机 =====
 def ai_baseline():
     """人设情绪基线。Persona Pack 优先（emotion_baseline），config 兜底，最后代码默认。"""
@@ -387,7 +384,7 @@ def _confidence_of(text, an, source="rule") -> float:
     return 0.3
 
 
-def _compound_of(text, label, vad) -> str:
+def compound_of(text, label) -> str:
     """复合情绪检测：词表直配 → '又X又Y' 情绪对 → 正负词并存兜底。"""
     t = str(text or "")
     for w, c in COMPOUND_WORDS.items():
@@ -445,7 +442,7 @@ def judge(text="", an=None, scope="") -> dict:
                 if label == "平静":
                     label = "低落"
     out = {"emotion": label, "vad": vad, "confidence": round(conf, 2), "source": src}
-    compound = _compound_of(text, label, vad)
+    compound = compound_of(text, label)
     if compound:
         out["compound"] = compound
     return out
@@ -554,6 +551,34 @@ def user_observe(scope, an, text=""):
     log_judgment(scope, text, j)
 
 
+def vad_centroid(samples, half_life) -> dict | None:
+    """VAD 加权质心 + 效价趋势（时间衰减 × 位置加权）。
+    samples: 按时间序的 (age, (v, a, d)) 列表；age 与 half_life 同单位
+    （调用方决定：topic 用天、user_estimate 用小时，逐位复刻各自原公式）。
+    topic.mood_centroid_from_params 与 user_estimate 共用（P0-4 去重）。
+    返回 {vad, trend, n, weights, total}；空输入返回 None。"""
+    n = len(samples)
+    if not n:
+        return None
+    weights = []
+    for i, (age, _v) in enumerate(samples):
+        rec = 0.5 ** (max(0.0, age) / float(half_life))  # 时间衰减
+        pos = 0.5 + 0.5 * i / max(1, n - 1)                  # 越近权重越高
+        weights.append(rec * pos)
+    total = sum(weights)
+    s = {"v": 0.0, "a": 0.0, "d": 0.0}
+    for (_, v), w in zip(samples, weights):
+        s["v"] += v[0] * w / total
+        s["a"] += v[1] * w / total
+        s["d"] += v[2] * w / total
+    half = max(1, n // 2)
+    v_first = sum(v[0] for _, v in samples[:half]) / half
+    rest = samples[half:]
+    v_last = sum(v[0] for _, v in rest) / len(rest) if rest else v_first
+    trend = "变好" if v_last - v_first > 0.2 else ("变差" if v_first - v_last > 0.2 else "平稳")
+    return {"vad": s, "trend": trend, "n": n, "weights": weights, "total": total}
+
+
 def user_estimate(scope):
     """窗口内 VAD 加权平均（时间衰减 + 位置加权）+ 效价趋势。无观测返回 None。"""
     rows = (_db.kv_get("memory", f"user_emotion:{scope}") or {}).get("rows") or []
@@ -561,29 +586,21 @@ def user_estimate(scope):
         return None
     n = len(rows)
     now = time.time()
-    weights = []
-    for i, r in enumerate(rows):
+    samples = []
+    for r in rows:
         try:
             age_h = max(0.0, (now - float(r.get("ts", now))) / 3600.0)
         except Exception as e:
             _stats_err(e)
             age_h = 0.0
-        rec = 0.5 ** (age_h / 12.0)          # 时间衰减：12 小时半衰期
-        pos = 0.5 + 0.5 * i / max(1, n - 1)  # 越近权重越高
-        weights.append(rec * pos)
-    total = sum(weights)
-    s = {"v": 0.0, "a": 0.0, "d": 0.0}
+        samples.append((age_h, (float(r.get("v", 0.0)), float(r.get("a", 0.0)), float(r.get("d", 0.0)))))
+    c = vad_centroid(samples, 12.0)
+    if c is None:
+        return None
+    s, trend = c["vad"], c["trend"]
     conf = 0.0
-    for r, w in zip(rows, weights):
-        s["v"] += float(r.get("v", 0.0)) * w / total
-        s["a"] += float(r.get("a", 0.0)) * w / total
-        s["d"] += float(r.get("d", 0.0)) * w / total
-        conf += float(r.get("confidence", 0.5)) * w / total
-    half = max(1, n // 2)
-    v_first = sum(float(r["v"]) for r in rows[:half]) / half
-    rest = rows[half:]
-    v_last = sum(float(r["v"]) for r in rest) / len(rest) if rest else v_first
-    trend = "变好" if v_last - v_first > 0.2 else ("变差" if v_first - v_last > 0.2 else "平稳")
+    for r, w in zip(rows, c["weights"]):
+        conf += float(r.get("confidence", 0.5)) * w / c["total"]
     compound = next((r.get("compound") for r in reversed(rows) if r.get("compound")), "")
     return {
         "vad": s,

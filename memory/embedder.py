@@ -45,7 +45,7 @@ def _local_encode(texts) -> list[list[float]] | None:
                 device = "cpu"
         try:
             _local_model = SentenceTransformer(
-                str(cfg.get("model") or "BAAI/bge-small-zh-v1.5"),
+                str(cfg.get("model") or "BAAI/bge-large-zh-v1.5"),
                 device=device,
             )
         except Exception as e:

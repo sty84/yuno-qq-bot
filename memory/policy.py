@@ -13,10 +13,7 @@ from plugins import _db, _shared
 
 
 def _cfg(key, default):
-    policy = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("policy", {}) or {}
-    return policy.get(key, default)
-
-
+    return _shared.core_cfg("policy", key, default)
 # ===== Bayesian 置信度更新 =====
 def _lr(kind: str) -> float:
     """证据似然比：确认 2.0、反驳 0.3、轻微冲突 0.5（可在 config 调整）。"""
@@ -34,6 +31,9 @@ STABLE_ANCHOR = (
     "生日", "血型", "星座", "身份证", "手机号", "邮箱", "真名", "本名",
     "已婚", "未婚", "离婚", "国籍", "学历", "老家", "入职", "毕业", "学校",
     "父母", "爸妈", "兄弟", "姐妹",
+    # 身份/职业锚点（对话暴露的 bug：'用户是乐队的经纪人助理'被判 process，
+    # 身份记忆无法升 core 常驻注入——AI 把经纪人助理当成了上台表演的乐队成员）
+    "经纪人", "助理", "助手", "担任", "从事", "职位", "职业", "岗位", "角色",
 )
 # 需要语境确认的稳定词：词出现 + 语境模式（正则）命中才判 stable。
 # 解决"今天工作很累（过程）"/"记住这个地址（指令）"这类子串误伤。
@@ -241,6 +241,65 @@ def calibrate_adjust(confidence) -> float:
     return float(confidence)
 
 
+def calibrate_from_feedback(limit=500) -> dict:
+    """校准闭环（v2.3 P2）：把用户纠错调查结论（feedback_log investigate:*）当
+    地面真值回流置信度校准——
+      update    = 旧记忆被证伪（负例 label=0）
+      keep      = 旧记忆被证实（正例 label=1）
+      uncertain = 存疑（弱样本 label=0.5）
+    分桶统计"该置信度段的实际正确率" → 覆盖校准映射。此前 calibrate_train 只吃
+    手工评测集，feedback 数据从不回流；本函数让真实对话的纠错/确认自动校正
+    置信度标定，检索打分（calibrate_adjust）随之更贴合实际。"""
+    rows = _db.feedback_rows(limit=max(10, int(limit)))
+    samples = []  # (confidence, label)
+    for r in rows:
+        kind = str(r.get("kind") or "")
+        if not kind.startswith("investigate:"):
+            continue
+        action = kind.split(":", 1)[1]
+        label = {"update": 0.0, "keep": 1.0, "uncertain": 0.5}.get(action)
+        if label is None:
+            continue
+        fact, scope = str(r.get("fact") or ""), str(r.get("scope") or "")
+        if not fact:
+            continue
+        conf = 0.7
+        try:
+            for row in _db.memory_rows(scope):
+                if row["fact"] == fact:
+                    conf = float(row.get("confidence", 0.7))
+                    break
+        except Exception:
+            pass
+        samples.append((conf, label))
+    report = {}
+    if not samples:
+        return report
+    buckets = {b: {"n": 0.0, "pos": 0.0} for b in BUCKETS}
+    for conf, label in samples:
+        for lo, hi in BUCKETS:
+            if lo <= conf < hi:
+                b = buckets[(lo, hi)]
+                b["n"] += 1.0
+                b["pos"] += label
+                break
+    mapping = {}
+    for (lo, hi), v in buckets.items():
+        acc = v["pos"] / v["n"] if v["n"] else None
+        report[f"{lo:.1f}-{hi:.1f}"] = {"n": int(v["n"]), "accuracy": round(acc, 3) if acc is not None else None}
+        if v["n"] >= 2 and acc is not None:
+            mapping[(lo, hi)] = round(min(0.99, max(0.05, acc)), 3)
+    report["samples"] = len(samples)
+    report["naive_accuracy"] = round(sum(l for _c, l in samples) / len(samples), 3)
+    if mapping:
+        _db.kv_set(*_calibration_key(), {"mapping": [[lo, hi, v] for (lo, hi), v in mapping.items()],
+                                          "source": "feedback"})
+        report["trained"] = True
+    else:
+        report["trained"] = False
+    return report
+
+
 def calibrate_report() -> str:
     data = _db.kv_get(*_calibration_key())
     if not data:
@@ -294,7 +353,7 @@ def _current_confidence(scope, key, fact) -> float:
     return 0.7
 
 
-def confirm(scope, key, fact, delta=None):
+def confirm(scope, key, fact):
     """确认反馈：贝叶斯上调可信度（LR=confirm_lr，默认 2.0）。返回新可信度。"""
     conf = update(_current_confidence(scope, key, fact), "confirm")
     _db.memory_set_confidence(scope, key, fact, conf)
@@ -302,7 +361,7 @@ def confirm(scope, key, fact, delta=None):
     return conf
 
 
-def dispute(scope, key, fact, delta=None):
+def dispute(scope, key, fact):
     """反驳反馈：贝叶斯下调可信度（LR=dispute_lr，默认 0.3）。返回新可信度。"""
     conf = update(_current_confidence(scope, key, fact), "dispute")
     _db.memory_set_confidence(scope, key, fact, conf)
@@ -470,6 +529,55 @@ def promote(scope=None) -> int:
             )
             n += 1
     _db.policy_log_add("promote", f"promoted={n}", detail="短期→长期巩固")
+    return n
+
+
+def promote_core(scope=None, cap=None) -> int:
+    """核心层巩固（MEMGPT 式「热层」）：稳定事实（生日/真名/公司/住址等身份锚点）
+    且可信度达标 → 升为 mclass='core'，供 context.core_memory_block 常驻注入（不检索）。
+    设上限 cap（默认 policy.core_cap=20），保证「核心」是一小撮而非平铺。
+    高隐私（加密）事实不升核心。返回升迁数。"""
+    cap = int(cap if cap is not None else _cfg("core_cap", 20))
+    min_conf = float(_cfg("core_min_confidence", 0.5))
+    # 核心层语义只对私聊（c2c）成立：群聊/多主体按 speaker 分存，注入"关于用户"会混淆身份
+    if not (scope or "").startswith("c2c:"):
+        return 0
+    rows = _db.memory_rows(scope)
+    core_count = sum(
+        1 for r in rows
+        if r.get("mclass") == "core" and r.get("status") not in ("superseded", "contested")
+    )
+    if core_count >= cap:
+        return 0
+    n = 0
+    for r in rows:
+        if core_count + n >= cap:
+            break
+        if r.get("mclass") == "core":
+            continue
+        if str(r.get("fact", "")).startswith("enc:"):
+            continue
+        if float(r.get("confidence", 0.7)) < min_conf:
+            continue
+        if fact_class(r.get("scope", scope), r.get("key", ""), r["fact"]) != "stable":
+            continue
+        _db.memory_add(
+            r["scope"],
+            r["key"],
+            r["fact"],
+            updated_at=r.get("updated_at") or "",
+            confidence=float(r.get("confidence", 0.7)),
+            source=r.get("source", ""),
+            audience=r.get("audience", ""),
+            speaker=r.get("speaker", ""),
+            mclass="core",
+            arousal=float(r.get("arousal", 0.0)),
+            valence=float(r.get("valence", 0.0)),
+            privacy=float(r.get("privacy", 0.0)),
+        )
+        n += 1
+    if n:
+        _db.policy_log_add("promote_core", f"promoted_core={n}", detail="稳定事实→核心常驻")
     return n
 
 

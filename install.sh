@@ -1,48 +1,32 @@
 #!/bin/bash
-# 方案二一键安装：专用账号 aiagent + systemd + 白名单脚本
-# 在服务器上执行：cd ~/qq-bot && bash install.sh
+# 本机（桌面 Linux）一键安装脚本 —— 已从「服务器版」改造：
+#   原版创建 aiagent 专用账号 / root 加固 / sudoers 白名单 / 停 Docker，均为云端服务器所需；
+#   本地桌面单用户环境改为：当前用户 + venv + CUDA torch（NVIDIA 卡）+ 其余依赖。
+# 用法：cd 到本项目目录 && bash install.sh
 set -euo pipefail
 
-BOT_DIR="${QQBOT_DIR:-/home/ubuntu/qq-bot}"
+BOT_DIR="${QQBOT_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+echo "==> 项目目录：$BOT_DIR"
 
-echo "==> 创建专用账号 aiagent（不能登录）"
-sudo useradd -r -M -s /usr/sbin/nologin aiagent 2>/dev/null || echo "aiagent 已存在，跳过创建"
+echo "==> 创建 venv"
+python3 -m venv "$BOT_DIR/venv"
 
-echo "==> 准备目录（机器人文件和数据目录归 aiagent）"
-sudo mkdir -p "$BOT_DIR/data"
-sudo chown -R aiagent:aiagent "$BOT_DIR"
+echo "==> 升级 pip"
+"$BOT_DIR/venv/bin/pip" install --upgrade pip
 
-echo "==> 加固：config.json 改为 root 所有、aiagent 只读"
-sudo chown root:aiagent "$BOT_DIR/config.json"
-sudo chmod 640 "$BOT_DIR/config.json"
+echo "==> 安装 CUDA 版 torch（NVIDIA 卡；无独显时改装 CPU 版）"
+# 国内直连 download.pytorch.org 常卡住，改从阿里云镜像按当前 Python 版本取 wheel；
+# 海外或需换版本时，把下面 TORCH_WHEEL 换成官方源对应 wheel 即可。
+PYV="$("$BOT_DIR/venv/bin/python" -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+TORCH_WHEEL="https://mirrors.aliyun.com/pytorch-wheels/cu124/torch-2.6.0%2Bcu124-cp${PYV}-cp${PYV}-linux_x86_64.whl"
+"$BOT_DIR/venv/bin/pip" install "$TORCH_WHEEL" -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-echo "==> 保证 aiagent 能进入 BOT_DIR 的父目录（home 目录为 700 时 sudo -u aiagent 会报 Permission denied）"
-sudo chmod o+x "$(dirname "$BOT_DIR")" 2>/dev/null || true
-
-echo "==> 安装 Python 依赖（清华源）"
-sudo -u aiagent python3 -m venv "$BOT_DIR/venv"
-sudo -u aiagent "$BOT_DIR/venv/bin/pip" install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r "$BOT_DIR/requirements.txt"
-
-echo "==> 安装白名单脚本 qqbot-ctl"
-sudo install -o root -g root -m 755 qqbot-ctl /usr/local/bin/qqbot-ctl
-
-echo "==> 配置日志轮转（bot.log 保留 7 天）"
-sudo install -o root -g root -m 644 logrotate-qqbot.conf /etc/logrotate.d/qqbot
-
-echo "==> 配置 sudoers（aiagent 只能运行白名单脚本和重启机器人服务）"
-echo 'aiagent ALL=(root) NOPASSWD: /usr/local/bin/qqbot-ctl *' | sudo tee /etc/sudoers.d/qqbot-ctl >/dev/null
-echo 'aiagent ALL=(root) NOPASSWD: /usr/bin/systemctl restart qqbot' | sudo tee /etc/sudoers.d/qqbot-restart >/dev/null
-sudo chmod 440 /etc/sudoers.d/qqbot-ctl /etc/sudoers.d/qqbot-restart
-
-echo "==> 安装并启动 systemd 服务"
-sudo install -o root -g root -m 644 qqbot.service /etc/systemd/system/qqbot.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now qqbot
-
-echo "==> 停用旧的 Docker 版机器人（如有）"
-cd "$BOT_DIR" && docker compose down 2>/dev/null || true
+echo "==> 安装其余依赖（清华源）"
+"$BOT_DIR/venv/bin/pip" install -r "$BOT_DIR/requirements.txt" -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 echo ""
-echo "安装完成。常用命令："
-echo "  查看状态：systemctl status qqbot"
-echo "  查看日志：journalctl -u qqbot -f"
+echo "安装完成。前台运行："
+echo "  cd '$BOT_DIR' && ./venv/bin/python bot.py"
+echo "如需开机自启（systemd，需 sudo 密码）："
+echo "  sudo cp '$BOT_DIR/qqbot.service' /etc/systemd/system/"
+echo "  sudo systemctl daemon-reload && sudo systemctl enable --now qqbot"

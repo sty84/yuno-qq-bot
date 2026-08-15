@@ -21,10 +21,7 @@ PERSONA_WEIGHTS_DEFAULT = {
 
 
 def _cfg(key, default):
-    m = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("mind", {}) or {}
-    return m.get(key, default)
-
-
+    return _shared.core_cfg("mind", key, default)
 def persona_weights() -> dict:
     """人设价值权重：Persona Pack 优先（persona_weights），config 兜底，最后默认。"""
     try:

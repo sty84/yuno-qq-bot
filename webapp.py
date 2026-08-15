@@ -17,8 +17,8 @@ import threading
 import time
 import uuid
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -226,6 +226,16 @@ def _task_fn(kind):
 
 app = FastAPI(title="Yuno Ops Web", version="0.3.0")
 
+# 可选鉴权（P1-3）：设置 YUNO_WEB_TOKEN 后所有请求需带 Authorization: Bearer <token>；
+# 未设置则不鉴权（默认 127.0.0.1 本机使用，向后兼容；公网暴露时务必设置）
+_WEB_TOKEN = os.getenv("YUNO_WEB_TOKEN", "")
+if _WEB_TOKEN:
+    @app.middleware("http")
+    async def _require_web_token(request: Request, call_next):
+        if request.headers.get("Authorization", "") != f"Bearer {_WEB_TOKEN}":
+            return JSONResponse({"detail": "未授权"}, status_code=401)
+        return await call_next(request)
+
 
 class TaskRequest(BaseModel):
     kind: str  # space_eval | time_eval | memory_eval | grow
@@ -255,6 +265,28 @@ class AblationRun(BaseModel):
 
 class ToolRun(BaseModel):
     name: str
+
+
+class ReviewSubmit(BaseModel):
+    """记忆评分提交（路线图 trace 审核页）：五维均 1~5。"""
+    trace_id: int
+    extraction: float
+    decision: float
+    confidence: float
+    provenance: float
+    privacy: float
+    comment: str = ""
+
+
+class ConvReviewSubmit(BaseModel):
+    """对话评分提交（v33 对话质量审核页）：五维均 1~5。"""
+    conv_id: int
+    remember: float
+    natural: float
+    emotional: float
+    proactive: float
+    boundary: float
+    comment: str = ""
 
 
 @app.get("/api/health")
@@ -331,6 +363,7 @@ def diagnostics():
         "item_events": _count("item_events"),
         "explicit_events": _count("events", "ts_source='explicit'"),
         "trace": _count("memory_trace"),
+        "conv_log": _count("conv_log"),
         "feedback": _count("feedback_log"),
         "procedures": _count("procedures"),
     }
@@ -359,6 +392,11 @@ def diagnostics():
             "avg_total": round(total_score / n, 2) if n else None,
             **{f"avg_{d}": round(sums[d] / n, 2) if n else None for d in dims},
         }
+    except Exception:
+        pass
+    try:
+        from memory import convreview
+        out["conv_review"] = convreview.report()  # 对话五维诊断（v33，只诊断不调参）
     except Exception:
         pass
     return out
@@ -528,6 +566,90 @@ def hesitation():
     """犹豫层统计 + 最近决策明细（管理台回看）。"""
     from memory import hesitation as hesitation_mod
     return {"stats": hesitation_mod.stats(), "recent": _db.hesitation_log_rows(30)}
+
+
+@app.get("/api/review/queue")
+def review_queue(limit: int = 20, source: str = "trace"):
+    """评分待办：source=trace（记忆轨迹，默认）或 conv（对话质量 v33）。"""
+    if source == "conv":
+        from memory import convreview
+        items = convreview.queue(limit)
+        return {
+            "items": [{
+                "id": r["id"],
+                "scope": r.get("scope"),
+                "conversation_id": r.get("conversation_id"),
+                "user_text": (r.get("user_text") or "")[:200],
+                "ai_text": (r.get("ai_text") or "")[:400],
+                "ts": r.get("ts"),
+            } for r in items[: max(1, int(limit))]],
+            "reviewed": len(_db.conv_review_recent(limit=1000)),
+        }
+    rows = _db.trace_rows(limit=300)
+    reviewed = _db.trace_review_map([r["id"] for r in rows])
+    TEST_MARK = ("guard", "ev:", "poke", "pdtest", "testg", "scenario", "c2c:t:", "c2c:priv")
+    queue = [
+        r for r in rows
+        if r["id"] not in reviewed
+        and r.get("memory_action") in ("create", "reject")
+        and not any(k in str(r.get("scope", "")) for k in TEST_MARK)
+    ]
+    # create（存了什么）优先于 reject（该不该存）
+    queue.sort(key=lambda r: 0 if r.get("memory_action") == "create" else 1)
+    return {
+        "items": [{
+            "id": r["id"],
+            "scope": r.get("scope"),
+            "action": r.get("memory_action"),
+            "content": (r.get("raw_content") or "")[:120],
+            "confidence": r.get("confidence"),
+            "reasoning": (r.get("reasoning") or "")[:60],
+            "ts": r.get("ts"),
+        } for r in queue[:max(1, int(limit))]],
+        "reviewed": len(_db.trace_review_recent(limit=1000)),
+    }
+
+
+@app.post("/api/review/submit")
+def review_submit(req: ReviewSubmit):
+    """提交五维评分并刷新评分驱动缓存（confidence_factor/igt/privacy/extraction）。"""
+    scores = {
+        "extraction": float(req.extraction),
+        "decision": float(req.decision),
+        "confidence": float(req.confidence),
+        "provenance": float(req.provenance),
+        "privacy": float(req.privacy),
+    }
+    for k, v in scores.items():
+        if not 1 <= v <= 5:
+            raise HTTPException(400, f"{k} 必须在 1~5")
+    avg = sum(scores.values()) / 5
+    _db.trace_review_add(req.trace_id, round(avg, 2), scores, comment=req.comment or "", reviewer="web")
+    try:
+        from memory import trace
+        trace.adjustments(force=True)  # 评分驱动参数立即生效
+    except Exception as e:
+        _stats_err(e)
+    return {"ok": True, "score": round(avg, 2), "reviews": len(_db.trace_review_recent(limit=1000))}
+
+
+@app.post("/api/convreview/submit")
+def convreview_submit(req: ConvReviewSubmit):
+    """提交对话五维评分（v33）：写 conv_review + 低分审计归因（不自动调参）。"""
+    scores = {
+        "remember": float(req.remember),
+        "natural": float(req.natural),
+        "emotional": float(req.emotional),
+        "proactive": float(req.proactive),
+        "boundary": float(req.boundary),
+    }
+    for k, v in scores.items():
+        if not 1 <= v <= 5:
+            raise HTTPException(400, f"{k} 必须在 1~5")
+    avg = sum(scores.values()) / 5
+    from memory import convreview
+    convreview.score(req.conv_id, scores, comment=req.comment or "", reviewer="web")
+    return {"ok": True, "score": round(avg, 2), "reviews": len(_db.conv_review_recent(limit=1000))}
 
 
 @app.post("/api/tools")

@@ -26,6 +26,7 @@ from memory import (
     character,
     context,
     controller,
+    convreview,
     embedder,
     emotion,
     environment,
@@ -95,6 +96,11 @@ trace_markdown = trace.render_markdown
 trace_prune = trace.prune
 trace_score = trace.score
 trace_adjustments = trace.adjustments
+conv_record = convreview.record
+conv_queue = convreview.queue
+conv_markdown = convreview.render_markdown
+conv_score = convreview.score
+conv_report = convreview.report
 user_tz = tz.user_tz
 tz_detect = tz.detect
 appointment_extract = appointment.extract
@@ -221,6 +227,8 @@ route_stats = reasoning._route_stats
 publicize = update.publicize
 forget = policy.forget
 promote = policy.promote
+promote_core = policy.promote_core
+active_edit = controller.active_edit
 governance_report = policy.governance
 topic_search = topic.search
 topic_list = topic.list_topics
@@ -240,6 +248,7 @@ retrieve_detailed = reasoning.retrieve_detailed
 calibrate_train = policy.calibrate_train
 calibrate_adjust = policy.calibrate_adjust
 calibrate_report = policy.calibrate_report
+calibrate_from_feedback = policy.calibrate_from_feedback
 relationship_update = relationship.update
 relationship_describe = relationship.describe
 relationship_rows = relationship.rows

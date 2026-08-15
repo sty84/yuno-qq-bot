@@ -8,6 +8,7 @@
 （md 为权威来源：清空旧档案后重建，不堆叠）。
 """
 
+from memory._llmutil import parse_json_object
 import json
 import pathlib
 import re
@@ -166,10 +167,9 @@ def _llm_dossier(name, llm=None) -> dict:
         raw = re.sub(
             r"^```(?:json)?\s*|\s*```$", "", str(raw).strip(), flags=re.S
         )
-        start, end = raw.find("{"), raw.rfind("}")
-        if start < 0 or end < 0:
+        data = parse_json_object(raw)
+        if data is None:
             return {}
-        data = json.loads(raw[start:end + 1])
         out = {}
         for key in KIND_META:
             items = data.get(key) or []

@@ -48,10 +48,7 @@ SCENE_EVENT_KINDS = {
 
 
 def _cfg(key, default):
-    e = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("environment", {}) or {}
-    return e.get(key, default)
-
-
+    return _shared.core_cfg("environment", key, default)
 def _cast() -> list:
     cast = [str(x).strip() for x in (_cfg("cast", []) or []) if str(x).strip()]
     if not cast:

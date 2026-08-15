@@ -3,6 +3,7 @@
 返回结构：{intent, emotion, importance, event_type, confidence, correction,
 correction_strong, playful, valence, arousal, dominance}。"""
 
+from memory._llmutil import parse_json_object
 import json
 import re
 import threading
@@ -21,10 +22,12 @@ INTENT_RULES = [
 EMOTION_WORDS = {
     "开心": ["开心", "高兴", "太好了", "哈哈", "耶", "爽", "好棒", "满意", "幸福", "笑死", "好玩", "美滋滋"],
     "低落": ["难过", "伤心", "烦", "累", "生气", "崩溃", "郁闷", "沮丧", "失望", "委屈", "心累", "emo", "破防", "想哭", "哭", "难受", "痛苦", "摆烂"],
-    "焦虑": ["焦虑", "烦躁", "担心", "害怕", "紧张", "压力", "失眠", "慌", "不安", "坐立不安"],
+    "焦虑": ["焦虑", "烦躁", "担心", "紧张", "压力", "失眠", "慌", "不安", "坐立不安"],
     "兴奋": ["兴奋", "激动", "期待", "惊喜", "迫不及待", "超爽", "太棒了", "冲鸭", "终于"],
     "愤怒": ["气死", "火大", "忍不了", "太过分", "凭什么", "岂有此理", "烦死了", "滚", "神经病", "有病吧"],
     "惊讶": ["震惊", "离谱", "什么鬼", "不会吧", "真的假的", "天哪", "我去", "居然", "没想到"],
+    "恐惧": ["害怕", "可怕", "恐怖", "吓死", "吓人", "吓", "救命", "好怕", "怕", "惊悚", "后怕", "腿软", "冒冷汗"],
+    "厌恶": ["恶心", "讨厌", "反感", "嫌弃", "烦人", "真烦", "厌恶", "油腻", "矫情"],
 }
 
 EMOTION_METRICS = {
@@ -56,6 +59,23 @@ PLAYFUL_WORDS = [
     "🙃", "玩笑话", "说笑", "调侃", "沙雕", "离谱", "哈哈哈",
 ]
 
+_QUESTION_WORDS = (
+    "吗", "呢", "么", "是不是", "有没有", "什么", "多少", "哪", "几号", "几点",
+    "如何", "怎么", "为啥", "为什么", "还记得", "记不记得", "还记得吗", "啥",
+    "累不累", "对不对", "在不在", "好不好", "要不要", "行不行", "能吗", "可以吗",
+)
+
+
+def is_question(text: str) -> bool:
+    """通用问句检测（v2.3 语义反转防护用）：疑问词/句末问号 → 用户是在提问，
+    其提取结果不能当作"用户亲口陈述"（'你有玩过怪物猎人吗'≠'用户玩过'）。"""
+    t = str(text or "").strip()
+    if not t:
+        return False
+    if t.endswith(("？", "?")):
+        return True
+    return any(w in t for w in _QUESTION_WORDS)
+
 INTENT_CONFIDENCE = {
     "偏好": 0.8,
     "事件": 0.8,
@@ -67,13 +87,17 @@ INTENT_CONFIDENCE = {
 
 
 def detect_correction(text: str) -> bool:
-    """检测纠错信号（用户否定/更正之前的记忆）。"""
-    return any(w in (text or "") for w in CORRECTION_WORDS)
+    """检测纠错信号（用户否定/更正之前的记忆）。
+    排除"是不是"确认疑问（如"我们是不是约好要做什么事"是确认性提问，不是否定）——
+    子串匹配会让"是不是"命中"不是"而误判纠错，触发调查把好记忆标成 contested（对话暴露的 bug）。"""
+    t = (text or "").replace("是不是", "")
+    return any(w in t for w in CORRECTION_WORDS)
 
 
 def detect_correction_strong(text: str) -> bool:
     """检测强纠错信号（明确说“记错了/不对/不是”），用于更重地降可信度。"""
-    return any(w in (text or "") for w in CORRECTION_STRONG)
+    t = (text or "").replace("是不是", "")
+    return any(w in t for w in CORRECTION_STRONG)
 
 
 def detect_playful(text: str) -> bool:
@@ -185,7 +209,9 @@ def llm_enrich(text, reply="", force=False):
             (resp.choices[0].message.content or "").strip(),
             flags=re.S,
         )
-        data = json.loads(raw[raw.find("{") : raw.rfind("}") + 1])
+        data = parse_json_object(raw)
+        if data is None:
+            return None
         with _llm_lock:
             _llm_state["ts"] = time.time()
         return data
@@ -194,10 +220,59 @@ def llm_enrich(text, reply="", force=False):
         return None
 
 
+_local_clf = None
+
+
+def _local_emotion(text):
+    """本地情绪分类器推理（复用 embedder 的 bge-large 编码）；未训练/失败返回 None。"""
+    global _local_clf
+    try:
+        if _local_clf is None:
+            import pathlib
+            import pickle
+            from plugins import _shared
+            p = _shared.DATA_DIR / "models" / "emotion_clf.pkl"
+            if not p.exists():
+                _local_clf = False
+                return None
+            with open(p, "rb") as f:
+                _local_clf = pickle.load(f)
+        if not _local_clf:
+            return None
+        from memory import embedder
+        vecs = embedder.embed([str(text or "")])
+        if not vecs:
+            return None
+        return {"emotion": str(_local_clf["clf"].predict([vecs[0]])[0])}
+    except Exception as e:
+        _stats_err(e)
+        return None
+
+
+def _apply_emotion(an, emotion, source):
+    """把识别出的情绪写回分析结果（local/llm 两分支共用）。"""
+    out = dict(an)
+    out["emotion"] = emotion
+    out["emotion_source"] = source
+    metrics = EMOTION_METRICS.get(emotion, {"valence": 0.0, "arousal": 0.0, "dominance": 0.0})
+    out["valence"] = float(metrics["valence"])
+    out["arousal"] = float(metrics["arousal"])
+    out["dominance"] = float(metrics["dominance"])
+    if emotion != "平静":
+        out["importance"] = round(min(0.95, float(out.get("importance", 0.5)) + 0.05), 2)
+    return out
+
+
 def enrich(an, text, reply=""):
-    """规则分析偏弱（情绪=平静且非玩笑）时，用 LLM 补充；失败保持原样。"""
+    """规则分析偏弱（情绪=平静且非玩笑）时，优先本地分类器（零成本），不可用回退 LLM。"""
     if not an or an.get("emotion") != "平静" or an.get("playful"):
         return an
+    # 本地分类器优先；识别出长尾情绪即用，判平静则回退 LLM（保玩笑/更复杂情绪能力）
+    local = _local_emotion(text)
+    if local:
+        emotion = str(local.get("emotion") or "平静").strip()
+        if emotion in EMOTION_WORDS and emotion != "平静":
+            return _apply_emotion(an, emotion, "local")
     llm = llm_enrich(text, reply)
     if not llm:
         return an
@@ -207,16 +282,8 @@ def enrich(an, text, reply=""):
     playful = bool(llm.get("playful"))
     if emotion == "平静" and not playful:
         return an
-    out = dict(an)
-    out["emotion"] = emotion
-    out["emotion_source"] = "llm"
+    out = _apply_emotion(an, emotion, "llm")
     out["playful"] = playful
-    metrics = EMOTION_METRICS.get(emotion, {"valence": 0.0, "arousal": 0.0, "dominance": 0.0})
-    out["valence"] = float(metrics["valence"])
-    out["arousal"] = float(metrics["arousal"])
-    out["dominance"] = float(metrics["dominance"])
-    if emotion != "平静":
-        out["importance"] = round(min(0.95, float(out.get("importance", 0.5)) + 0.05), 2)
     return out
 
 

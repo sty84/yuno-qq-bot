@@ -15,7 +15,10 @@ import os
 import subprocess
 import sys
 
-CONFIG = os.getenv("QQBOT_CONFIG", "/home/ubuntu/qq-bot/config.json")
+CONFIG = os.getenv(
+    "QQBOT_CONFIG",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json"),
+)
 ACTIONS = ("start", "stop", "restart")
 
 # 允许机器人/后端修改的标量字段（服务注册表请直接编辑 config.json）

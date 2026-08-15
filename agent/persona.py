@@ -50,6 +50,7 @@ def _ai_scope() -> str:
 SECTION_KINDS = {
     "identity": ("identity", 0.95, 0.9),
     "身份": ("identity", 0.95, 0.9),
+    "用户角色": ("identity", 0.95, 0.9),  # 对话暴露的 bug：用户身份（经纪人助理）需进身份字段常驻
     "style": ("style", 0.85, 0.7),
     "风格": ("style", 0.85, 0.7),
     "说话风格": ("style", 0.85, 0.7),

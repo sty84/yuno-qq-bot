@@ -501,6 +501,11 @@ async def after_chat(ctx, text, reply):
     else:
         _sess_buffer.pop(key, None)
     info = await asyncio.to_thread(memory.ingest, scope, sk, text, reply)
+    # 主动自我编辑（MEMGPT 主动记忆，方案 B）：后置小调用，默认关（memory.core.active_edit.enabled）
+    try:
+        await asyncio.to_thread(memory.active_edit, scope, sk, text, reply)
+    except Exception as e:
+        _stats_err(e)
     if info["facts"]:
         print(f"[记忆] {kind} {_safe_id(k2 or k1)} 新增 {info['facts']} 条，事件 {info['events']}")
     if info.get("disputed"):
@@ -508,6 +513,12 @@ async def after_chat(ctx, text, reply):
         _print_dispute_details(info)
     elif is_correction:
         print("[记忆] 收到纠错信号，但未命中相关旧记忆")
+    # 对话质量评分（v33 convreview）：记录本轮（用户+AI），供人工评分北极星
+    try:
+        import memory.convreview as _cr
+        _cr.record(scope, text, reply, conversation_id=f"{kind}:{k1}:{k2}")
+    except Exception as e:
+        _stats_err(e)
 
 
 

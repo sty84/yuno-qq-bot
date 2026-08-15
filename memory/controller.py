@@ -1,22 +1,110 @@
 """Memory Controller：分析 → 分类路由 → 提取 → 存储（多库）→ 记忆更新 → 策略反馈 → AI 自身记忆。"""
 
+from memory._llmutil import parse_json_object
+import logging
 import re
 import os
+import json
 from datetime import datetime
+
+_log = logging.getLogger(__name__)
 
 from plugins import _db, _shared
 from memory import analysis, embedder, extract, graph, lexical, policy, topic, trace, world
 
 
-def merge_facts(existing, new, cap=30):
-    """合并事实（去重、截断到 cap 条）。"""
+_GROUND_NOISE = ("是", "的", "了", "我", "你", "他", "她", "它", "只", "有", "在", "很",
+                "都", "也", "就", "和", "与", "及", "一个", "这个", "那个", "什么", "吗",
+                "吧", "啊", "呀", "呢", "刚", "才", "过", "被", "把", "让", "给", "对", "去", "来",
+                "买", "吃", "喝", "玩", "看", "听", "说", "想", "要", "做", "用", "拿",
+                "找", "带", "写", "读", "打", "养", "开", "关", "换", "改", "问", "答")
+
+
+def _fact_grounded(fact, user_text) -> bool:
+    """提取事实的字面支撑校验（防 LLM 提取幻觉固化——"颜色是橘色"曾从
+    "月底有场演出，是30号周日"的消息中提取，成为假来源的"证据"）。
+    规则：fact 去除泛词后，至少一个 >=2 字的片段必须字面出现在用户消息里
+    （"橘色"不是任何用户消息的子串 → 拒；"橘猫"是"我买了只橘猫"的子串 → 放行）。"""
+    t = str(user_text or "")
+    if not t:
+        return True
+    cleaned = str(fact or "")
+    for w in _GROUND_NOISE:
+        cleaned = cleaned.replace(w, " ")
+    # jieba 切词后逐词校验（"喜欢打游戏"→"打游戏"是消息子串 → 放行；
+    # "颜色是橘色"→"橘色"不是任何用户消息子串 → 拒）
+    try:
+        from memory.extract import tokenize
+        words = tokenize(cleaned)
+    except Exception:
+        words = cleaned.split()
+    multi, single = [], []
+    for seg in words:
+        (multi if len(seg) >= 2 else single).append(seg)
+    # 任一 >=2 字词字面在消息中 → 放行（"橘猫"⊂"我今天买了只橘猫"）
+    if any(seg in t for seg in multi):
+        return True
+    # 只有单字词时须全部在消息中（"猫粮"→['猫','粮']，"粮"不在 → 拒；
+    # "我养了只猫"→['猫']，"猫"⊂"橘猫" → 放行）
+    if single and all(seg in t for seg in single):
+        return True
+    return False
+
+
+def fact_keywords(fact) -> list:
+    """提取事实的内容词（>=2 字，去噪音词），供污染扫描做"字面出处"反向校验。
+    与 _fact_grounded 共用噪音表；分词噪声词（如 jieba 的"万买""室见"）无法
+    命中任何历史消息，自然不参与支撑，无需额外清洗。"""
+    cleaned = str(fact or "")
+    for w in _GROUND_NOISE:
+        cleaned = cleaned.replace(w, " ")
+    try:
+        from memory.extract import tokenize
+        words = tokenize(cleaned)
+    except Exception:
+        words = cleaned.split()
+    out = []
+    for seg in words:
+        if len(seg) >= 2:
+            out.append(seg)
+    return out
+
+
+def pollution_level(fact, stmt_msgs, quest_msgs) -> str:
+    """污染扫描分级（2026-08-16）：事实的内容词在用户历史消息中的字面出处覆盖率。
+    - strong  陈述句出处 >=2/3 → 用户亲口说过，保留
+    - partial 陈述出处 <2/3（>0）→ 部分是推断/概括 → 降级为 ai_edit
+    - weak    仅问句命中 → 语义反转（用户问"你玩过吗"被提取成"用户玩过"）→ 降级
+    - none    无任何出处 → 提取幻觉固化的污染 → 删除候选
+    - empty   无内容词（全是噪音）→ 无法判定，跳过
+    """
+    kws = fact_keywords(fact)
+    if not kws:
+        return "empty"
+    hit_stmt = sum(1 for w in kws if any(w in m for m in stmt_msgs))
+    if hit_stmt * 3 >= len(kws) * 2:
+        return "strong"
+    if hit_stmt > 0:
+        return "partial"
+    if any(w in m for w in kws for m in quest_msgs):
+        return "weak"
+    return "none"
+
+
+def merge_facts(existing, new, cap=30, protect=None):
+    """合并事实（去重、截断到 cap 条；protect 内的身份锚点不参与截断）。
+    修复（对话暴露的 bug）：用户身份事实（"我是你们乐队新来的经纪人助手"）曾被 cap=30
+    无条件截掉——生成层从此不知道用户是谁，把经纪人助理当成上台表演的乐队成员。"""
     seen, out = set(existing), list(existing)
     for fact in new:
         fact = extract.nice_fact(fact).strip()
         if fact and fact not in seen:
             seen.add(fact)
             out.append(fact)
-    return out[-cap:]
+    protect = protect or set()
+    kept = [f for f in out if f in protect]
+    rest = [f for f in out if f not in protect]
+    return kept + rest[-max(1, cap - len(kept)):]
 
 
 def _maybe_embed(facts):
@@ -24,6 +112,160 @@ def _maybe_embed(facts):
         return None
     vecs = embedder.embed(facts)
     return dict(zip(facts, vecs)) if vecs else None
+
+
+# ===== 存量矛盾扫描（v2.3 P0-2）=====
+# 主语字符类排除"不"（防贪婪把"煤球不"吃进主语）；宾语允许含"不"
+_ATTR_RE = re.compile(r"([\u4e00-\u9fffA-Za-z0-9]{1,8}?)(不是|是)([\u4e00-\u9fffA-Za-z0-9]{1,12})")
+# 无语义量宾语才跳过（"是人/是东西"）；"猫/狗/队友"是具体类别，必须参与冲突判定——
+# "煤球是猫 vs 煤球是狗"正是最典型的矛盾形态
+_ATTR_TRIVIAL = ("人", "东西", "事物", "机器人", "AI", "软件")
+# 语气词/虚词不是实体：对话里"反正不是什么大事"的"反正"会被正则误当主语
+_ATTR_FAKE_SUBJ = ("反正", "其实", "真的", "确实", "原来", "大概", "可能", "应该", "总之",
+                   "不过", "但是", "然而", "反正就", "基本上", "说白了", "老实说")
+
+
+def _attr_pairs(fact) -> list:
+    """提取事实的 (主语, 宾语, 是否否定) 属性对：'阿拉蕾是雪貂'→('阿拉蕾','雪貂',False)。
+    只认"X是Y/X不是Y"紧凑结构，主语≤8 字宾语≤12 字；琐碎宾语（是人/是东西）跳过。"""
+    out = []
+    for m in _ATTR_RE.finditer(str(fact or "")):
+        subj, neg, obj = m.group(1), m.group(2) == "不是", m.group(3)
+        if subj in _GROUND_NOISE or obj in _ATTR_TRIVIAL or subj in _ATTR_FAKE_SUBJ:
+            continue
+        if len(subj) >= 2 or subj in ("我", "你", "它", "她", "他"):
+            out.append((subj, obj, neg))
+    return out
+
+
+def _attrs_conflict(a, b) -> bool:
+    """两个属性对是否矛盾：同主语、宾语不同、无包含关系、否定性不一致即冲突。
+    '阿拉蕾是雪貂' vs '阿拉蕾是队友' → 冲突；'煤球是猫' vs '煤球是橘猫' → 包含，不冲突。"""
+    if a[0] != b[0]:
+        return False
+    oa, ob, na, nb = a[1], b[1], a[2], b[2]
+    if oa == ob:
+        return False
+    if oa in ob or ob in oa:
+        return False  # 上下位（猫⊂橘猫）是细化不是矛盾
+    return True
+
+
+def conflict_scan(scope="", apply=False):
+    """存量矛盾扫描（v2.3 P0-2）：同 scope 内 active 记忆中，同实体（主语）不同属性
+    值且无上下位包含 → 矛盾候选（'阿拉蕾是雪貂' vs '阿拉蕾是队友'）。
+    返回 (报告文本, 冲突列表)；apply=True 时把置信度低的一方降权并标 contested
+    （core 记忆只降权不标 contested），audit 留痕 conflict_scan。"""
+    rows = _db.memory_rows(scope=scope or None)
+    rows = [r for r in rows if (r.get("status") or "") in ("", "active")]
+    pairs = []
+    for r in rows:
+        for subj, obj, neg in _attr_pairs(r["fact"]):
+            pairs.append((r, subj, obj, neg))
+    conflicts = []
+    for i in range(len(pairs)):
+        for j in range(i + 1, len(pairs)):
+            r1, s1, o1, n1 = pairs[i]
+            r2, s2, o2, n2 = pairs[j]
+            if r1["fact"] == r2["fact"] or r1["scope"] != r2["scope"]:
+                continue
+            if _attrs_conflict((s1, o1, n1), (s2, o2, n2)):
+                conflicts.append({
+                    "subject": s1, "a": o1, "b": o2,
+                    "fact1": r1["fact"], "fact2": r2["fact"],
+                    "conf1": r1.get("confidence"), "conf2": r2.get("confidence"),
+                    "scope": r1["scope"],
+                })
+    # 去重（同对只报一次）
+    seen, uniq = set(), []
+    for c in conflicts:
+        k = frozenset((c["fact1"], c["fact2"]))
+        if k in seen:
+            continue
+        seen.add(k)
+        uniq.append(c)
+    if apply:
+        n_dem, n_contested = 0, 0
+        for c in uniq:
+            # 只处理置信度低的一方（高置信方保留——更可能是用户后来确认的正确记忆）
+            r1 = next((r for r in rows if r["fact"] == c["fact1"] and r["scope"] == c["scope"]), None)
+            r2 = next((r for r in rows if r["fact"] == c["fact2"] and r["scope"] == c["scope"]), None)
+            low = None
+            if r1 and r2:
+                low = r1 if float(c.get("conf1", 0)) <= float(c.get("conf2", 0)) else r2
+            elif r1:
+                low = r1
+            elif r2:
+                low = r2
+            if not low:
+                continue
+            is_core = (low.get("mclass") or "") == "core"
+            new_conf = float(low.get("confidence", 0.7)) * 0.5
+            _db.memory_set_confidence(low["scope"], low["key"], low["fact"], new_conf)
+            if not is_core:
+                _db.memory_set_status(low["scope"], low["key"], low["fact"], "contested")
+                n_contested += 1
+            _db.audit_add("conflict_scan", f"矛盾降权 {'core保护' if is_core else 'contested'} {low['fact'][:40]}", "auto")
+            n_dem += 1
+    lines = [f"矛盾扫描：{scope or '全部'} · 属性对 {len(pairs)} 个 · 冲突 {len(uniq)} 对"]
+    if apply:
+        lines.append(f"已执行：降权 {n_dem} 条（contested {n_contested}）")
+    for c in uniq[:15]:
+        lines.append(f"  [{c['subject']}] '{c['a']}' vs '{c['b']}'\n"
+                     f"     · {c['fact1'][:50]} (conf {c['conf1']})\n"
+                     f"     · {c['fact2'][:50]} (conf {c['conf2']})")
+    if len(uniq) > 15:
+        lines.append(f"  … 其余 {len(uniq) - 15} 对")
+    if not uniq:
+        lines.append("  无矛盾候选（或事实不含'X是Y'结构）")
+    return "\n".join(lines), uniq
+
+
+# ===== 存量日历校验（v2.3 P1-2）=====
+_CAL_FACT_RE = re.compile(r"(\d{1,2})号[^，。！？!?]{0,8}?(?:是)?(?:周|星期)([日一二三四五六天])")
+
+
+def calendar_check(scope="", apply=False, now=None):
+    """存量日历校验（v2.3 P1-2）：库内"X号是周Y"类事实用真实日历验证——
+    与当月日历不符（"31号是周日"在 2026-08 实际是周一）→ 错误事实候选，
+    --apply 时降权 + 标 contested（core 只降权）。生成侧由 verify_reply_calendar
+    拦截新回复，本工具清存量。"""
+    from datetime import datetime, date
+    import calendar as _cal
+    now = now or datetime.now()
+    rows = _db.memory_rows(scope=scope or None)
+    rows = [r for r in rows if (r.get("status") or "") in ("", "active")]
+    bad = []
+    for r in rows:
+        for m in _CAL_FACT_RE.finditer(r["fact"]):
+            day, wdch = int(m.group(1)), m.group(2)
+            wd = {"日": 6, "天": 6, "一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5}.get(wdch)
+            if wd is None:
+                continue
+            last_day = _cal.monthrange(now.year, now.month)[1]
+            if not (1 <= day <= last_day):
+                continue  # 超当月天数：可能是历史月份，跳过不误伤
+            actual = date(now.year, now.month, day).weekday()
+            if actual != wd:
+                bad.append({"fact": r["fact"], "day": day, "weekday": wdch,
+                            "actual": "日一二三四五六"[actual], "confidence": r.get("confidence"),
+                            "scope": r["scope"], "key": r["key"]})
+    if apply:
+        n = 0
+        for b in bad:
+            _db.memory_set_confidence(b["scope"], b["key"], b["fact"],
+                                      float(b.get("confidence") or 0.7) * 0.4)
+            _db.memory_set_status(b["scope"], b["key"], b["fact"], "contested")
+            _db.audit_add("calendar_check", f"日历不符降权 {b['fact'][:40]}（{b['day']}号实际是{b['actual']}）", "auto")
+            n += 1
+    lines = [f"日历校验：{scope or '全部'} · 检查 {len(rows)} 条 · 日历不符 {len(bad)} 条（当月）"]
+    if apply:
+        lines.append(f"已执行：降权 {len(bad)} 条")
+    for b in bad[:15]:
+        lines.append(f"  · {b['fact'][:44]}（{b['day']}号实际是{b['actual']}，非{b['weekday']}）conf {b['confidence']}")
+    if not bad:
+        lines.append("  无日历不符事实")
+    return "\n".join(lines), bad
 
 
 def _ai_experience_min_importance() -> float:
@@ -421,6 +663,14 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
             if f:
                 cleaned.append(f)
         new_facts = cleaned
+    # 提取幻觉防护（对话暴露的 bug）：提取的事实必须在用户消息里有字面支撑——
+    # "颜色是橘色"曾从"月底有场演出"的消息中提取固化，成为假来源的"证据"，
+    # 让"橘色假来源"检测被合法化（自我强化污染循环的入口）
+    if text:
+        _before_nf = len(new_facts)
+        new_facts = [f for f in new_facts if _fact_grounded(f, text)]
+        if len(new_facts) < _before_nf:
+            _db.audit_add("extract_grounded", f"提取幻觉拦截 {_before_nf - len(new_facts)} 条", "auto")
     if not new_facts:
         trace.record(
             scope, raw_content=text, semantic=an, action="reject", confidence=conf,
@@ -439,142 +689,165 @@ def ingest(scope, key, text, reply="", facts=None, confidence=None, source=None)
 
     # 证据门控（v2.3）：用户 scope 的提取事实统一标 source="user"（用户亲口说，高可信）
     src = source or "user"
+    # 语义反转防护（v2.3 P0-1）：用户消息是疑问句时（"你有玩过怪物猎人吗"），
+    # 提取结果不能标"用户亲口说"——否则问句里的实体被固化成语义反转的假事实
+    # （用户问 AI 玩过没 → 库记"用户玩过"），且字面支撑存在，_fact_grounded 拦不住。
+    # 问句提取统一降级为 ai_edit + 置信度打折：记忆仍在、可检索，但 prompt 里
+    # 不标"用户亲口说"，证据状态不进"高可信可引用"桶，来源声明也无据可引。
+    if text and analysis.is_question(text):
+        src = "ai_edit"
+        conf = min(conf, 0.6) * 0.8
+        _db.audit_add("extract_question_demote", f"问句提取降级 {len(new_facts)} 条: {(text or '')[:40]}", "auto")
     audience, speaker, mclass = _scene_meta(scope, key)
 
     # 记忆更新：近似重复合并（刷新旧记录，不堆叠）
-    rows = _db.memory_rows(scope, key)
-    existing_rows = {r["fact"]: r for r in rows}
-    additions, refreshed = [], 0
-    for f in new_facts:
-        if f in existing_rows:
-            continue
-        dup = find_near_dup(scope, key, f, rows=rows, threshold=0.9)
-        if dup:
-            old_conf = float(existing_rows[dup].get("confidence", 0.7))
-            new_conf = max(conf, old_conf)
-            refresh(scope, key, dup, confidence=new_conf, source=src)
-            _db.history_add(
-                scope, key, dup, "merge", reason="近似重复合并",
-                old_value=dup, new_value=f,
-                old_confidence=old_conf, new_confidence=new_conf,
-            )
-            refreshed += 1
-            continue
-        additions.append(f)
-
-    merged = merge_facts(list(existing_rows), additions)
-    confidences, sources, privacies = {}, {}, {}
-    audiences, speakers, mclasses, arousals, valences = {}, {}, {}, {}, {}
-    for f in merged:
-        if f in existing_rows:
-            confidences[f] = float(existing_rows[f].get("confidence", 0.7))
-            sources[f] = existing_rows[f].get("source", "")
-            audiences[f] = existing_rows[f].get("audience", "")
-            speakers[f] = existing_rows[f].get("speaker", "")
-            mclasses[f] = existing_rows[f].get("mclass") or "short"
-            arousals[f] = float(existing_rows[f].get("arousal", 0.0))
-            valences[f] = float(existing_rows[f].get("valence", 0.0))
-            privacies[f] = float(existing_rows[f].get("privacy", 0.0))
-        else:
-            confidences[f] = conf
-            sources[f] = src
-            audiences[f] = audience
-            speakers[f] = speaker
-            mclasses[f] = mclass
-            arousals[f] = float(an.get("arousal", 0.0))
-            valences[f] = float(an.get("valence", 0.0))
-            privacy, _labels = detect(f)
-            privacies[f] = privacy
-            if privacy >= float(adj.get("privacy_threshold", 0.8)):
-                audiences[f] = "private"
-    emb = _maybe_embed(merged)
-    _db.memory_replace(
-        scope,
-        key,
-        merged,
-        ts,
-        emb,
-        confidences,
-        sources,
-        audience=audience,
-        speaker=speaker,
-        mclass=mclass,
-        arousal=float(an.get("arousal", 0.0)),
-        valence=float(an.get("valence", 0.0)),
-        audiences=audiences,
-        speakers=speakers,
-        mclasses=mclasses,
-        arousals=arousals,
-        valences=valences,
-        privacies=privacies,
-    )
-
-    importance = float(an.get("importance", 0.5))
-    event_count = 0
-    for f in additions:
-        if privacies.get(f, 0.0) >= float(adj.get("privacy_threshold", 0.8)):
-            # 高隐私：加密且不进索引（只有 /我的记忆 能看）
-            _db.memory_delete(scope, key, f)
-            _db.memory_add(
-                scope, key, encrypt_text(f), ts,
-                confidence=conf, source=src, audience="private",
-                speaker=speaker, mclass=mclass, privacy=privacies[f],
-            )
-            continue
-        if analysis.attr_of(f, an):
-            _db.attr_set(scope, key, analysis.attr_of(f, an), f, conf, ts)
-        eid, _linked = graph.build_for_fact(
-            scope, key, f, etype=an.get("event_type"), importance=importance,
-            ts=ev_ts, ts_source=ev_source,
-        )
-        if eid:
-            event_count += 1
-        tid = topic.link_fact(scope, key, f, an.get("event_type") or "event", conf, an)
-        if eid and tid:
-            _db.event_set_topic(eid, tid)
-        policy.touch(scope, key, f, importance=importance)
-        if _participants:
-            try:
-                from memory import subjects, world as world_mod
-                nscope_aud = (
-                    f"group:{scope.split(':', 1)[1]}"
-                    if scope.startswith("group:")
-                    else "public"
+    # ① 事务化（P1-5）：主写段（合并/替换/事件图/议题/词法/多主体/巩固/关系）单事务，
+    # 中途失败整体回滚——不再留"事实已存但图/索引/议题缺失"的半成品状态
+    with _db.transaction():
+        rows = _db.memory_rows(scope, key)
+        existing_rows = {r["fact"]: r for r in rows}
+        additions, refreshed = [], 0
+        for f in new_facts:
+            if f in existing_rows:
+                continue
+            dup = find_near_dup(scope, key, f, rows=rows, threshold=0.9)
+            if dup:
+                old_conf = float(existing_rows[dup].get("confidence", 0.7))
+                new_conf = max(conf, old_conf)
+                refresh(scope, key, dup, confidence=new_conf, source=src)
+                _db.history_add(
+                    scope, key, dup, "merge", reason="近似重复合并",
+                    old_value=dup, new_value=f,
+                    old_confidence=old_conf, new_confidence=new_conf,
                 )
-                for pname in _participants[: subjects.top_k()]:
-                    if not world_mod.subject_gate(scope, key, f):
-                        continue
-                    nscope = subjects.scope_of(pname)
-                    nconf = round(min(subjects.confidence_cap(), world_mod.subject_confidence("overheard")), 2)
-                    _db.memory_add(
-                        nscope, "", f, ts, None, confidence=nconf,
-                        source="overheard", audience=nscope_aud, mclass="short",
+                refreshed += 1
+                continue
+            additions.append(f)
+
+            # 身份锚点保护：stable 类事实（身份/职业/生日…）不参与 cap 截断，
+        # 否则用户身份记忆会被截掉（"经纪人助理"被当成"乐队成员"的对话 bug）
+        _protect = {
+            r["fact"] for r in rows
+            if policy.fact_class(scope, key, r["fact"]) == "stable"
+        }
+        merged = merge_facts(list(existing_rows), additions, protect=_protect)
+        confidences, sources, privacies = {}, {}, {}
+        audiences, speakers, mclasses, arousals, valences = {}, {}, {}, {}, {}
+        for f in merged:
+            if f in existing_rows:
+                confidences[f] = float(existing_rows[f].get("confidence", 0.7))
+                sources[f] = existing_rows[f].get("source", "")
+                audiences[f] = existing_rows[f].get("audience", "")
+                speakers[f] = existing_rows[f].get("speaker", "")
+                mclasses[f] = existing_rows[f].get("mclass") or "short"
+                arousals[f] = float(existing_rows[f].get("arousal", 0.0))
+                valences[f] = float(existing_rows[f].get("valence", 0.0))
+                privacies[f] = float(existing_rows[f].get("privacy", 0.0))
+            else:
+                confidences[f] = conf
+                sources[f] = src
+                audiences[f] = audience
+                speakers[f] = speaker
+                mclasses[f] = mclass
+                arousals[f] = float(an.get("arousal", 0.0))
+                valences[f] = float(an.get("valence", 0.0))
+                privacy, _labels = detect(f)
+                privacies[f] = privacy
+                if privacy >= float(adj.get("privacy_threshold", 0.8)):
+                    audiences[f] = "private"
+        emb = _maybe_embed(merged)
+        _db.memory_replace(
+            scope,
+            key,
+            merged,
+            ts,
+            emb,
+            confidences,
+            sources,
+            audience=audience,
+            speaker=speaker,
+            mclass=mclass,
+            arousal=float(an.get("arousal", 0.0)),
+            valence=float(an.get("valence", 0.0)),
+            audiences=audiences,
+            speakers=speakers,
+            mclasses=mclasses,
+            arousals=arousals,
+            valences=valences,
+            privacies=privacies,
+        )
+
+        importance = float(an.get("importance", 0.5))
+        event_count = 0
+        for f in additions:
+            if privacies.get(f, 0.0) >= float(adj.get("privacy_threshold", 0.8)):
+                # 高隐私：加密且不进索引（只有 /我的记忆 能看）
+                _db.memory_delete(scope, key, f)
+                _db.memory_add(
+                    scope, key, encrypt_text(f), ts,
+                    confidence=conf, source=src, audience="private",
+                    speaker=speaker, mclass=mclass, privacy=privacies[f],
+                )
+                continue
+            if analysis.attr_of(f, an):
+                _db.attr_set(scope, key, analysis.attr_of(f, an), f, conf, ts)
+            eid, _linked = graph.build_for_fact(
+                scope, key, f, etype=an.get("event_type"), importance=importance,
+                ts=ev_ts, ts_source=ev_source,
+            )
+            if eid:
+                event_count += 1
+            tid = topic.link_fact(scope, key, f, an.get("event_type") or "event", conf, an)
+            if eid and tid:
+                _db.event_set_topic(eid, tid)
+            policy.touch(scope, key, f, importance=importance)
+            if _participants:
+                try:
+                    from memory import subjects, world as world_mod
+                    nscope_aud = (
+                        f"group:{scope.split(':', 1)[1]}"
+                        if scope.startswith("group:")
+                        else "public"
                     )
-                    _db.event_add(
-                        nscope, "", an.get("event_type") or "event",
-                        graph.title_of(f), content=f, importance=importance,
-                        ts=ev_ts, ts_source=ev_source,
-                        memory_scope=nscope, memory_key="", memory_fact=f,
-                    )
-                    try:
-                        from memory import lexical as lexical_mod
-                        lexical_mod.bm25_upsert(nscope, "", [f])
-                        _db.lexicon_sync(nscope, "")
-                    except Exception as e:
-                        _stats_err(e)
-                    policy.touch(nscope, "", f, importance=importance * 0.8)
-            except Exception as e:
-                _stats_err(e)
-    _db.lexicon_sync(scope, key)
-    lexical.bm25_upsert(scope, key, [f for f in additions if privacies.get(f, 0.0) < 0.8])
-    _record_ai_experience(scope, key, text, ts, importance)
-    if _participants:
+                    for pname in _participants[: subjects.top_k()]:
+                        if not world_mod.subject_gate(scope, key, f):
+                            continue
+                        nscope = subjects.scope_of(pname)
+                        nconf = round(min(subjects.confidence_cap(), world_mod.subject_confidence("overheard")), 2)
+                        _db.memory_add(
+                            nscope, "", f, ts, None, confidence=nconf,
+                            source="overheard", audience=nscope_aud, mclass="short",
+                        )
+                        _db.event_add(
+                            nscope, "", an.get("event_type") or "event",
+                            graph.title_of(f), content=f, importance=importance,
+                            ts=ev_ts, ts_source=ev_source,
+                            memory_scope=nscope, memory_key="", memory_fact=f,
+                        )
+                        try:
+                            from memory import lexical as lexical_mod
+                            lexical_mod.bm25_upsert(nscope, "", [f])
+                            _db.lexicon_sync(nscope, "")
+                        except Exception as e:
+                            _stats_err(e)
+                        policy.touch(nscope, "", f, importance=importance * 0.8)
+                except Exception as e:
+                    _stats_err(e)
+        _db.lexicon_sync(scope, key)
+        lexical.bm25_upsert(scope, key, [f for f in additions if privacies.get(f, 0.0) < 0.8])
+        _record_ai_experience(scope, key, text, ts, importance)
+        # 核心层巩固（MEMGPT 热层）：稳定事实升 mclass=core，供 context.core_memory_block 常驻注入
         try:
-            from memory import subjects, relationship as rel_mod
-            for pname in set(_participants):
-                rel_mod.update(subjects.scope_of(pname), subject=key or scope, event="chat", detail=(text or "")[:40])
+            policy.promote_core(scope)
         except Exception as e:
             _stats_err(e)
+        if _participants:
+            try:
+                from memory import subjects, relationship as rel_mod
+                for pname in set(_participants):
+                    rel_mod.update(subjects.scope_of(pname), subject=key or scope, event="chat", detail=(text or "")[:40])
+            except Exception as e:
+                _stats_err(e)
     # Memory Trace（v10）：可解释的处理结果与决策理由
     try:
         modules = trace.detect_modules(scope, key, text)
@@ -648,6 +921,126 @@ def add_fact(scope, key, fact, importance=0.5, confidence=0.8, source="mcp"):
     _db.lexicon_sync(scope, key)
     lexical.bm25_upsert(scope, key, [fact])
     return fact
+
+
+# ===== 主动自我编辑（MEMGPT 主动记忆，方案 B：后置小调用）=====
+def _active_edit_cfg(key, default):
+    core = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("active_edit", {}) or {}
+    return core.get(key, default)
+
+
+def active_edit(scope, key, text, reply) -> dict:
+    """主动自我编辑入口：回复生成后，用一次轻量 LLM 判断这轮有哪些值得记/该删的用户记忆并应用。
+    与 ingest 的规则被动提取平行——ingest 管「阈值/规则」漏掉的信息由这里兜住，反之亦然。
+    触发门槛（min_gain）+ 失败不连坐（异常只审计，不影响已落地的回复）。
+    config → memory.core.active_edit.enabled（默认 false，验证后再开）。"""
+    if not _active_edit_cfg("enabled", False):
+        return {"enabled": False}
+    if not scope or not str(scope).startswith("c2c:"):
+        return {"enabled": True, "skipped": "not_c2c"}
+    if message_gain(text, scope, key)["score"] < float(_active_edit_cfg("min_gain", 0.3)):
+        return {"enabled": True, "skipped": "low_gain"}
+    core = ""
+    try:
+        from memory import context as context_mod
+        core = context_mod.core_memory_block(scope)
+    except Exception as e:
+        _stats_err(e)
+    ops = _decide_edits(text, reply, core)
+    applied = _apply_ops(scope, key, ops)
+    return {"enabled": True, "applied": applied, "ops": ops}
+
+
+def _decide_edits(text, reply, core) -> list:
+    """轻量 LLM 判断：输入 (用户消息, 回复, 已有核心记忆)，输出编辑操作列表。
+    只输出 JSON：{"remember": [...], "forget": [...]}。解析失败/格式不符返回 []。"""
+    prompt = (
+        "你是记忆管理员。判断这轮对话里有哪些关于用户的信息值得长期记住，"
+        "尤其关注规则可能漏掉、但重要且稳定的事实。\n"
+        "重点记这几类（都是用户本人的稳定信息）：\n"
+        "1) 身份/长期角色：用户是做什么的、和你是什么关系定位；\n"
+        "2) 能力/擅长：用户对自己能力的表述——例如用户说「我还挺适合干这行」，应记为「用户擅长<某领域>」；\n"
+        "3) 长期偏好/价值观：稳定的喜好、习惯、处事原则；\n"
+        "4) 长期计划/目标：跨多天的重要安排。\n"
+        "不要记：一次性琐事（吃了什么、闲聊寒暄）、转瞬即逝的当下状态，以及你（AI）自己说的话。\n"
+        '只输出 JSON，格式：{"remember": ["值得记的事实（一句话，含具体名字/数字/时间）"], '
+        '"forget": ["已有核心记忆里确实已过时的条目原文"]}。\n'
+        "规则：remember 只记用户本人稳定且重要的事实，有把握才记；"
+        "forget 只能从下面「已有核心记忆」里选已过时的，没有就填 []。\n"
+        f"已有核心记忆：\n{core or '（无）'}\n"
+        f"用户消息：{(text or '')[:400]}\n"
+        f"你的回复：{(reply or '')[:200]}"
+    )
+    try:
+        resp = _shared.deepseek_chat(
+            messages=[
+                {"role": "system", "content": "你是记忆管理员。只输出 JSON，不要解释。"},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=200,
+            temperature=0.0,
+            module="active_edit",
+            detail="decide",
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+    except Exception as e:
+        _stats_err(e)
+        return []
+    data = parse_json_object(raw)
+    if data is None:
+        return []
+    if not isinstance(data, dict):
+        return []
+    ops = []
+    for f in data.get("remember") or []:
+        f = str(f).strip()
+        if f:
+            ops.append({"op": "remember", "fact": f, "mclass": "core"})
+    for f in data.get("forget") or []:
+        f = str(f).strip()
+        if f:
+            ops.append({"op": "forget", "fact": f})
+    return ops
+
+
+def _apply_ops(scope, key, ops) -> dict:
+    """应用编辑操作：remember（事实存在则升核心/长期，否则新建）；forget（supersede 保留历史）。"""
+    applied = {"remember": 0, "forget": 0}
+    if not ops:
+        return applied
+    by_fact = {r["fact"]: r for r in _db.memory_rows(scope, key)}
+    for op in ops:
+        fact = extract.nice_fact(str(op.get("fact", ""))).strip()
+        if not fact:
+            continue
+        kind = op.get("op")
+        if kind == "remember":
+            target = op.get("mclass", "core")
+            row = by_fact.get(fact)
+            if row:
+                _db.memory_add(
+                    scope, key, fact,
+                    updated_at=row.get("updated_at") or "",
+                    confidence=max(float(row.get("confidence", 0.7)), 0.6),
+                    source=row.get("source", "") or "ai_edit",
+                    audience=row.get("audience", ""),
+                    speaker=row.get("speaker", ""),
+                    mclass=target,
+                    arousal=float(row.get("arousal", 0.0)),
+                    valence=float(row.get("valence", 0.0)),
+                    privacy=float(row.get("privacy", 0.0)),
+                )
+            else:
+                _db.memory_add(scope, key, fact, confidence=0.6, source="ai_edit", mclass=target)
+            applied["remember"] += 1
+        elif kind == "forget":
+            if fact in by_fact:
+                _db.memory_set_status(scope, key, fact, "superseded")
+                _db.history_add(scope, key, fact, "forget", reason="AI 主动编辑：判定已过时")
+                applied["forget"] += 1
+    if applied["remember"] or applied["forget"]:
+        _db.lexicon_sync(scope, key)
+    return applied
 
 
 # ===== 双轨制一致性（v2.2，原 memory/consistency.py 并入）=====
@@ -728,8 +1121,8 @@ def refresh(scope, key, fact, confidence=None, source="refresh"):
 
 
 def supersede(scope, key, fact):
-    """废弃替换：把旧事实可信度压到 0.05（不再被召回），由新事实替代。"""
-    _db.memory_set_confidence(scope, key, fact, 0.05)
+    """废弃替换：把旧事实标记 superseded（不再召回，保留历史），由新事实替代。"""
+    _db.memory_set_status(scope, key, fact, "superseded")
 
 
 def publicize(scope, key, fact):
@@ -807,8 +1200,19 @@ def available() -> bool:
         return False
 
 
+_no_key_warned = [False]
+
+
+def _warn_no_key(reason=""):
+    """MEMORY_KEY 未配置时一次性告警（避免每条敏感数据刷屏）。"""
+    if not _no_key_warned[0]:
+        _no_key_warned[0] = True
+        _log.warning("MEMORY_KEY 未配置，加密退化为明文%s", f"：{reason}" if reason else "")
+
+
 def encrypt_text(text) -> str:
     if not available():
+        _warn_no_key("写入明文")
         return str(text)
     try:
         nonce = os.urandom(12)
@@ -816,6 +1220,7 @@ def encrypt_text(text) -> str:
         return "enc:" + nonce.hex() + ":" + ct.hex()
     except Exception as e:
         _stats_err(e)
+        _log.warning("AES-GCM 加密失败，降级为明文存储：%s", e)
         return str(text)
 
 
@@ -823,12 +1228,14 @@ def decrypt_text(text) -> str:
     if not isinstance(text, str) or not text.startswith("enc:"):
         return text
     if not available():
+        _warn_no_key("存在 enc: 密文但无法解密")
         return text
     try:
         _, nonce_hex, ct_hex = text.split(":", 2)
         return _crypto_key.decrypt(bytes.fromhex(nonce_hex), bytes.fromhex(ct_hex), None).decode("utf-8")
     except Exception as e:
         _stats_err(e)
+        _log.warning("AES-GCM 解密失败（密钥变更或数据损坏），返回原文：%s", e)
         return text
 
 

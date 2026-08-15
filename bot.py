@@ -41,6 +41,15 @@ BRIDGE_PHRASES = [
 _bridge_last = {}  # chat_key -> 上次衔接时间（防止慢响应时刷屏）
 
 
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("bot", e)
+    except Exception:
+        pass
+
+
 def load_plugins():
     mods = []
     for f in sorted(PLUGIN_DIR.glob("*.py")):
@@ -365,13 +374,3 @@ if __name__ == "__main__":
     intents = botpy.Intents(public_messages=True)
     bot = QQBot(intents=intents, bot_log=None)
     bot.run(appid=APPID, secret=SECRET)
-
-
-
-def _stats_err(e):
-    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
-    try:
-        import memory.stats as _st
-        _st.bump_err("bot", e)
-    except Exception:
-        pass

@@ -41,7 +41,8 @@ def bm25_rebuild() -> int:
     for r in rows:
         by_scope_key.setdefault((r["scope"], r["key"]), []).append(r["fact"])
     for (sc, k), facts in by_scope_key.items():
-        bm25_sync(sc, k, [(f, tokenize(f)) for f in facts])
+        # 传纯 fact 列表，bm25_sync 内部自行 tokenize；预 tokenize 会导致 fact 被存成 tuple 字符串
+        bm25_sync(sc, k, facts)
     _stats_cache["ts"] = 0.0
     return len(rows)
 

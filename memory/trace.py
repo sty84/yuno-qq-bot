@@ -24,10 +24,7 @@ DIMENSION_LABELS = {
 
 
 def _cfg(key, default):
-    trace = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("trace", {}) or {}
-    return trace.get(key, default)
-
-
+    return _shared.core_cfg("trace", key, default)
 def enabled() -> bool:
     return bool(_cfg("enabled", True))
 

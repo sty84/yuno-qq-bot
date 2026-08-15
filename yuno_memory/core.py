@@ -84,7 +84,7 @@ class Memory:
         for k, v in _DEFAULT_CORE.items():
             core.setdefault(k, v)
         if embedder == "local":
-            mem["embedder"] = {"provider": "local", "model": "BAAI/bge-small-zh-v1.5", "device": "auto"}
+            mem["embedder"] = {"provider": "local", "model": "BAAI/bge-large-zh-v1.5", "device": "auto"}
         elif isinstance(embedder, dict):
             mem["embedder"] = embedder
         base.setdefault("allowed_paths", [str(data_dir)])

@@ -28,10 +28,7 @@ STRATEGIES = [
 
 
 def _cfg(key, default):
-    b = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("bandit", {}) or {}
-    return b.get(key, default)
-
-
+    return _shared.core_cfg("bandit", key, default)
 def _key(scope):
     return f"bandit:{scope or 'default'}"
 

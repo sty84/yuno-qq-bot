@@ -1,22 +1,18 @@
 [Unit]
-Description=QQ Bot (aiagent)
+Description=QQ Bot (yuno)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=aiagent
-Group=aiagent
-WorkingDirectory=/home/ubuntu/qq-bot
-ExecStart=/home/ubuntu/qq-bot/venv/bin/python -u /home/ubuntu/qq-bot/bot.py
-StandardOutput=append:/home/ubuntu/qq-bot/data/bot.log
-StandardError=append:/home/ubuntu/qq-bot/data/bot.log
+User=esp
+Group=esp
+WorkingDirectory=/home/esp/桌面/agent/qq-bot
+ExecStart=/home/esp/桌面/agent/qq-bot/venv/bin/python -u /home/esp/桌面/agent/qq-bot/bot.py
+StandardOutput=append:/home/esp/桌面/agent/qq-bot/data/bot.log
+StandardError=append:/home/esp/桌面/agent/qq-bot/data/bot.log
 Restart=always
 RestartSec=5
-ProtectSystem=full
-ProtectHome=read-only
-ReadWritePaths=/home/ubuntu/qq-bot/data
-PrivateTmp=true
 KillSignal=SIGINT
 
 [Install]

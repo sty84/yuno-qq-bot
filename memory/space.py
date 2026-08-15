@@ -39,10 +39,7 @@ _MEMORY_EMIT_KINDS = ("depart", "arrive", "enter_room", "depart_room", "item_mov
 
 
 def _cfg(key, default):
-    sp = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("space", {}) or {}
-    return sp.get(key, default)
-
-
+    return _shared.core_cfg("space", key, default)
 def _pack_world() -> dict:
     try:
         from memory import pack
@@ -51,7 +48,7 @@ def _pack_world() -> dict:
         return {}
 
 
-def _memorable_places() -> tuple:
+def memorable_places() -> tuple:
     m = _pack_world().get("memorable_places")
     return tuple(m) if isinstance(m, list) and m else _MEMORABLE_PLACES
 
@@ -484,7 +481,7 @@ def position(now=None) -> dict:
             npos.update({"location": loc, "state": "在场",
                          "arrive_ts": pos.get("arrive_ts") or _now_iso()})
             _set_pos(npos)
-            emit("arrive", f"到了{loc}", memorable=loc in _memorable_places())
+            emit("arrive", f"到了{loc}", memorable=loc in memorable_places())
             remember("", f"到了{loc}")
             return npos
         return pos
@@ -520,7 +517,7 @@ def position(now=None) -> dict:
                      "mode": mode, "depart_ts": _now_iso(),
                      "arrive_ts": start.isoformat(timespec="seconds")})
         _set_pos(npos)
-        emit("depart", f"出发去{plan}", memorable=plan in _memorable_places())
+        emit("depart", f"出发去{plan}", memorable=plan in memorable_places())
         remember("", f"出发去{plan}")
         return npos
     # 已经在目的地的槽位时段内：按槽位开始到达
@@ -528,7 +525,7 @@ def position(now=None) -> dict:
     npos.update({"location": plan, "state": "在场",
                  "arrive_ts": start.isoformat(timespec="seconds")})
     _set_pos(npos)
-    emit("arrive", f"到了{plan}", memorable=plan in _memorable_places())
+    emit("arrive", f"到了{plan}", memorable=plan in memorable_places())
     remember("", f"到了{plan}")
     return npos
 
@@ -549,7 +546,7 @@ def depart(to, mode=None, now=None):
                  "depart_ts": _now_iso(),
                  "arrive_ts": (now + timedelta(minutes=minutes)).isoformat(timespec="seconds")})
     _set_pos(npos)
-    emit("depart", f"出发去{to}", memorable=to in _memorable_places())
+    emit("depart", f"出发去{to}", memorable=to in memorable_places())
     remember("", f"出发去{to}")
     return npos
 

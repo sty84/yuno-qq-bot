@@ -92,10 +92,7 @@ PROFILES = {
 
 
 def _cfg(key, default):
-    sch = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("schedule", {}) or {}
-    return sch.get(key, default)
-
-
+    return _shared.core_cfg("schedule", key, default)
 def profile_id() -> str:
     return str(_cfg("profile", "yuno")).strip() or "yuno"
 
@@ -358,6 +355,9 @@ def block(scope="", now=None) -> str:
     wd, slot, act = _slot_act(plan, now)
     meta = ACTIVITIES.get(act, ACTIVITIES["idle"])
     parts = [f"【此刻状态】{meta['label']}"]
+    _today = today_summary(now.date())
+    if _today:
+        parts.append(f"【今日安排】{_today}")
     nxt = _next_activity(plan, wd, slot)
     if nxt:
         parts.append(f"接下来：{nxt}")

@@ -5,9 +5,12 @@ tick（各状态模块运行次数）/ err（裸 except 审计）。
 热路径只改内存，flush 间隔落盘，避免每条消息刷 SQLite。
 """
 
+import logging
 import time
 
 from plugins import _db
+
+_log = logging.getLogger(__name__)
 
 _buf = {}
 _last_flush = [0.0]
@@ -35,12 +38,9 @@ def bump(key, n=1):
 
 
 def bump_err(module, e=None):
-    """裸 except 审计：计数 err:<module> + 打日志（消融/排查用）。"""
+    """裸 except 审计：计数 err:<module> + logging 告警（消融/排查用）。"""
     bump(f"err:{module}")
-    try:
-        print(f"[err:{module}] {e}" if e is not None else f"[err:{module}]")
-    except Exception:
-        pass
+    _log.warning("[err:%s] %s", module, e if e is not None else "")
 
 
 def counters() -> dict:

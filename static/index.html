@@ -69,6 +69,7 @@
       <div class="tab" data-page="time">时间评测</div>
       <div class="tab" data-page="emotion">情绪评测</div>
       <div class="tab" data-page="subjects">多主体评测</div>
+      <div class="tab" data-page="review">记忆评分</div>
       <div class="tabsep">实验</div>
       <div class="tab" data-page="ablation">消融实验</div>
       <div class="tab" data-page="scenario">对话回放</div>
@@ -126,6 +127,42 @@
     <div class="cards" id="subjects-cards"></div>
     <div class="cards" id="subjects-decay"></div>
     <pre id="subjects-raw" style="display:none"></pre>
+  </div>
+
+  <div class="page" id="page-review">
+    <div class="cards" id="review-progress"></div>
+    <details class="card" style="margin:8px 0">
+      <summary style="cursor:pointer"><b>评分标准（点开看详细打分规则）</b></summary>
+      <p class="muted">评分对象：单条<u>记忆处理决策</u>（create=存了什么 / reject=该不该存 / merge=合并 / update=更新）。
+      五维都按 1~5 打分：<b>5=很好　4=好　3=一般　2=差　1=很离谱</b>，拿不准就打 3。
+      评完自动刷新评分驱动的行为参数（confidence_factor / igt_threshold / privacy_threshold / extraction_strict）。</p>
+      <table style="width:100%;border-collapse:collapse">
+        <tr style="background:#333;color:#eee"><th style="padding:6px">维度</th><th>评什么</th><th>打 5 分（很好）</th><th>打 1 分（很离谱）</th></tr>
+        <tr><td style="padding:6px"><b>提取 extraction</b></td>
+            <td>提取的事实准不准、细节全不全</td>
+            <td>名字/数字/品种/时间等细节都保留了，没瞎编</td>
+            <td>提取内容与原话不符，或编造了原话没有的细节</td></tr>
+        <tr style="background:#2a2a2a"><td style="padding:6px"><b>决策 decision</b></td>
+            <td>这条<u>该不该存</u>、处理方式对不对</td>
+            <td>重要事实存了；玩笑/临时情绪/寒暄正确地没存</td>
+            <td>重要事实漏存（丢了关键信息），或垃圾/玩笑话入库了</td></tr>
+        <tr><td style="padding:6px"><b>置信度 confidence</b></td>
+            <td>conf 数字标得跟实际可信度匹不匹配</td>
+            <td>用户亲口说的给高可信度；AI 猜的/道听途说的给低</td>
+            <td>证据明显不足却给了高可信度（或反之），会误导后续回答</td></tr>
+        <tr style="background:#2a2a2a"><td style="padding:6px"><b>来源 provenance</b></td>
+            <td>这条记忆的来源标得对不对（是谁说的）</td>
+            <td>用户说的标"用户"；AI 自己的想法没混进用户记忆</td>
+            <td>来源张冠李戴（AI 自述/系统话术被当成用户亲口说的存进用户库）</td></tr>
+        <tr><td style="padding:6px"><b>隐私 privacy</b></td>
+            <td>敏感信息（手机号/证件/财务/健康）处理得对不对</td>
+            <td>敏感信息加密或标记私有，检索时不会被其他人召回</td>
+            <td>敏感信息明文入库、还能被群聊/其他场景召回</td></tr>
+      </table>
+      <p class="muted" style="margin-top:6px">对照示例：内容里带了具体数字（10万预算）→ extraction 看数字有没有丢；内容是寒暄/玩笑 → decision 该给低分（不该存）；内容看起来像 AI 自己说的话 → provenance 该给低分。</p>
+    </details>
+    <div id="review-list"></div>
+    <div class="muted" id="review-done"></div>
   </div>
 
   <div class="page" id="page-diag">
@@ -223,6 +260,7 @@
       if (t.dataset.page === 'charts') renderCharts();
       if (t.dataset.page === 'scenario') loadScenarios();
       if (t.dataset.page === 'ablation') loadAblation();
+      if (t.dataset.page === 'review') loadReview();
       if (t.dataset.page === 'subjects') renderSubjects();
       if (t.dataset.page === 'costs') renderCosts();
     });
@@ -861,6 +899,53 @@
       } catch (e) { $('cost-tradeoff').innerHTML = '<div class="muted">消融数据加载失败：' + escapeHtml(e.message) + '</div>'; }
     }
 
+
+    // ===== 记忆评分页（路线图 trace 审核页）=====
+    const REVIEW_DIMS = [
+      ['extraction', '提取'], ['decision', '决策'], ['confidence', '置信度'],
+      ['provenance', '来源'], ['privacy', '隐私'],
+    ];
+
+    function scoreRow(id, name) {
+      return REVIEW_DIMS.map(([k, label]) =>
+        `<select id="rv-${id}-${k}" title="${label} 1~5">${[1,2,3,4,5].map(v => `<option value="${v}" ${v===3?'selected':''}>${v}</option>`).join('')}</select>`
+      ).join('');
+    }
+
+    async function submitReview(id) {
+      const scores = {};
+      REVIEW_DIMS.forEach(([k]) => { scores[k] = Number($('rv-' + id + '-' + k).value); });
+      try {
+        const r = await api('/api/review/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trace_id: id, ...scores }) });
+        $('rv-msg-' + id).textContent = '已提交 ' + r.score + '/5';
+        loadReview();
+      } catch (e) { $('rv-msg-' + id).textContent = '失败：' + e.message; }
+    }
+
+    async function loadReview() {
+      const q = await api('/api/review/queue?limit=50');
+      const reviewed = q.reviewed || 0;
+      $('review-progress').innerHTML =
+        `<div class="card"><b>评分进度</b>：${reviewed} / 300 条（满 300 解锁 V13 置信度校准）<br>
+         <span class="muted">队列剩余 ${q.items.length} 条（create/reject 优先，已自动排除测试数据）</span></div>`;
+      if (!q.items.length) { $('review-list').innerHTML = '<div class="muted">队列已清空（或暂无 create/reject 轨迹）</div>'; return; }
+      $('review-list').innerHTML = q.items.map(r => `
+        <div class="card" style="margin:8px 0">
+          <div><b>#${r.id}</b> [${r.action}] conf ${r.confidence ?? '-'} · ${r.ts || ''}</div>
+          <div style="margin:4px 0">${escapeHtml(r.content || '')}</div>
+          <div class="muted">${escapeHtml(r.reasoning || '')}</div>
+          <div style="margin-top:6px">
+            ${REVIEW_DIMS.map(([k, label]) => `<span class="muted">${label}</span>`).join(' ')}
+            <br>${scoreRow(r.id, r.action)}
+            <button onclick="submitReview(${r.id})">提交</button>
+            <span id="rv-msg-${r.id}" class="muted"></span>
+          </div>
+        </div>`).join('');
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    }
     loadDash().catch(e => $('dash-cards').innerHTML = '<div class="red">加载失败：' + e.message + '</div>');
     setInterval(() => { if (!document.hidden) loadDash().catch(() => {}); }, 15000);
   </script>

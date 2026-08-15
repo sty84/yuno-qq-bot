@@ -6,6 +6,7 @@
 3. 用户纠正时 AI 不盲从：受限 LLM（或规则兜底）调查后决定 update/keep/uncertain。
 """
 
+from memory._llmutil import parse_json_object
 import json
 import time
 from datetime import datetime
@@ -28,10 +29,7 @@ INVESTIGATE_PROMPT = (
 
 
 def _cfg(key, default):
-    world = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("world", {}) or {}
-    return world.get(key, default)
-
-
+    return _shared.core_cfg("world", key, default)
 def snapshot(scope, budget=None, force=False) -> str:
     """用户中心世界模型快照：活跃记忆 + 近期事件 + 目标，硬预算截断 + 缓存。"""
     if not _cfg("enabled", True) or not scope:
@@ -168,10 +166,9 @@ def investigate_correction(scope, key, text, candidate_facts, an=None) -> dict:
             module="world",
         )
         raw = (resp.choices[0].message.content or "").strip()
-        start, end = raw.find("{"), raw.rfind("}")
-        if start < 0:  # 无有效 JSON → 回退规则，不默认 uncertain
+        data = parse_json_object(raw)
+        if data is None:  # 无有效 JSON → 回退规则，不默认 uncertain
             return _rule_decision(old_conf, valid_from, scope, access_count)
-        data = json.loads(raw[start:end + 1]) if start >= 0 else {}
         action = str(data.get("action", "uncertain"))
         if action not in ("update", "keep", "uncertain"):
             action = "uncertain"

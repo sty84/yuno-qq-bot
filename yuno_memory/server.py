@@ -2,14 +2,46 @@
 
 启动：
   python -m yuno_memory --host 127.0.0.1 --port 8457 --data-dir ./data
+
+鉴权（P1-3）：设置 YUNO_API_TOKEN（或 --token）后，所有请求需带
+  Authorization: Bearer <token>；未设置则不鉴权（默认本机使用，向后兼容）。
 """
 
-from fastapi import FastAPI, HTTPException
+import os
+import pathlib
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .core import Memory
 
 _memory = None
+
+
+def _safe_export_path(out: str, data_dir) -> str:
+    """export 路径白名单：空=默认（data_dir 内）；相对路径拼 data_dir；
+    解析后必须在 data_dir 内，否则拒绝（防任意写盘）。"""
+    if not out:
+        return ""
+    p = pathlib.Path(out)
+    if not p.is_absolute():
+        p = pathlib.Path(data_dir) / p
+    try:
+        p = p.resolve()
+        if not p.is_relative_to(pathlib.Path(data_dir).resolve()):
+            raise HTTPException(400, "export 路径必须在 data_dir 内")
+    except (OSError, ValueError):
+        raise HTTPException(400, "export 路径非法")
+    return str(p)
+
+
+def _bearer_middleware(token: str):
+    async def _require_token(request: Request, call_next):
+        if request.headers.get("Authorization", "") != f"Bearer {token}":
+            return JSONResponse({"detail": "未授权"}, status_code=401)
+        return await call_next(request)
+    return _require_token
 
 
 def init_memory(config=None, data_dir=None, api_key=None, base_url=None, model=None, embedder=None, persona=None):
@@ -72,11 +104,15 @@ class EvalRequest(BaseModel):
     k: int = 5
 
 
-def create_app(memory: Memory | None = None) -> FastAPI:
+def create_app(memory: Memory | None = None, token: str = "") -> FastAPI:
     global _memory
     if memory is not None:
         _memory = memory
     app = FastAPI(title="Yuno Memory API", version="1.0.0")
+
+    token = token or os.getenv("YUNO_API_TOKEN", "")
+    if token:
+        app.middleware("http")(_bearer_middleware(token))
 
     @app.get("/health")
     def health():
@@ -127,7 +163,9 @@ def create_app(memory: Memory | None = None) -> FastAPI:
 
     @app.post("/memory/export")
     def export(out: str = ""):
-        return {"path": get_memory().export(out or None)}
+        m = get_memory()
+        safe = _safe_export_path(out, m.data_dir)
+        return {"path": m.export(safe or None)}
 
     return app
 

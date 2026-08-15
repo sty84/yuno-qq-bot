@@ -1,6 +1,7 @@
 """回填与巩固（工程化）：向量 → 事件图/树 → AI 观点 → 修剪 → 词法索引。
 run() 返回结构化报告（供 agent.grow / 定时任务）；backfill() 返回可读文本（兼容 tools.py memory-embed）。"""
 
+from memory._llmutil import parse_json_object
 import json
 from datetime import datetime
 
@@ -89,12 +90,13 @@ def _llm_consolidate(topic, items) -> dict:
             detail="consolidate",
         )
         raw = (resp.choices[0].message.content or "").strip()
-        start, end = raw.find("{"), raw.rfind("}")
-        if start < 0:
+        data = parse_json_object(raw)
+        if data is None:
             if raw and raw not in ("[]", "{}"):
                 return {"summary": raw[:100], "details": {}}
             return {}
-        data = json.loads(raw[start:end + 1])
+        if not isinstance(data, dict):
+            return {}
         if not isinstance(data, dict):
             return {}
         summary = str(data.get("summary", "")).strip()[:100]
@@ -199,6 +201,91 @@ def consolidate_topics(limit=30) -> int:
     return written
 
 
+MERGE_FRAGMENTS_PROMPT = (
+    "以下是用户在同一小段时间里说的一些记忆碎片（同一件事被拆成了多条短句）。"
+    "把明显描述同一件事的碎片合并成一条完整、准确的事实，保留所有具体信息（名字/数字/日期/星期）。"
+    "禁止编造碎片里没有的信息。无法合并的碎片原样保留。"
+    "只输出 JSON 数组，每项是一个字符串。"
+)
+
+
+def _frag_diff_minutes(a, b) -> float:
+    """两个 valid_from 时间戳的分钟差；解析失败返回大值（拆到不同组）。"""
+    try:
+        ta = datetime.fromisoformat(str(a)[:19])
+        tb = datetime.fromisoformat(str(b)[:19])
+        return abs((tb - ta).total_seconds()) / 60.0
+    except Exception:
+        return 999.0
+
+
+def _group_frags_by_time(frags, window_minutes) -> list:
+    """时序分组（TiMem 时序包含思想）：按 valid_from(事件时间)排序，相邻时间差 < window 的归一组。"""
+    def _ts(r):
+        return str(r.get("valid_from") or r.get("updated_at") or "")
+    frags = sorted(frags, key=_ts)
+    groups, cur, last = [], [], None
+    for r in frags:
+        ts = _ts(r)
+        if last is not None and _frag_diff_minutes(last, ts) > window_minutes:
+            if len(cur) >= 2:
+                groups.append(cur)
+            cur = []
+        cur.append(r)
+        last = ts
+    if len(cur) >= 2:
+        groups.append(cur)
+    return groups
+
+
+def merge_fragments(scope=None, window_minutes=10, limit=30) -> int:
+    """时序引导碎片合并：把同一时间窗口内的孤立短事实合并成完整事实。
+    用 valid_from（事件时间）分组，避免全量判断导致的机械拼接；合并出的完整事实写入，旧碎片降权。"""
+    scopes = [scope] if scope else list(dict.fromkeys(r["scope"] for r in _db.memory_rows()))
+    total = 0
+    for sc in scopes:
+        rows = _db.memory_rows(sc)
+        frags = [r for r in rows if len(str(r.get("fact") or "")) < 15]
+        if len(frags) < 2:
+            continue
+        from plugins import _shared
+        for group in _group_frags_by_time(frags, window_minutes):
+            items = "\n".join(f"- {r['fact']}" for r in group[:limit])
+            try:
+                resp = _shared.deepseek_chat(
+                    messages=[
+                        {"role": "system", "content": MERGE_FRAGMENTS_PROMPT},
+                        {"role": "user", "content": items},
+                    ],
+                    max_tokens=400, temperature=0.1, module="merge", detail="fragments",
+                )
+                raw = (resp.choices[0].message.content or "").strip()
+                s, e = raw.find("["), raw.rfind("]")
+                if s < 0:
+                    continue
+                merged = json.loads(raw[s:e + 1])
+            except Exception as e:
+                _stats_err(e)
+                continue
+            merged_facts = [str(x).strip() for x in merged if str(x).strip()]
+            if not merged_facts:
+                continue
+            ts = datetime.now().isoformat(timespec="seconds")
+            orig = {r["fact"] for r in group}
+            for f in merged_facts:
+                if f not in orig:  # 合并出的完整事实 → 写入
+                    _db.memory_add(sc, "", f, ts, None, 0.6, "merge")
+                    total += 1
+            for r in group:
+                if r["fact"] not in merged_facts:  # 被合并的旧碎片 → 降权
+                    try:
+                        cur = float(r.get("confidence", 0.5))
+                        _db.memory_set_confidence(sc, r.get("key") or "", r["fact"], round(cur * 0.5, 3))
+                    except Exception:
+                        pass
+    return total
+
+
 def run(batch=64) -> dict:
     """完整维护/成长流水线，返回结构化报告（幂等，可重复执行）。"""
     report = {
@@ -211,6 +298,7 @@ def run(batch=64) -> dict:
         "topics": _db.topics_count(),
         "beliefs": consolidate(),
         "consolidated": consolidate_topics(),
+        "fragments_merged": merge_fragments(),
         "pruned": policy.prune(),
         "orphans": graph.cleanup_orphans(),
         "fuzzy": 0,

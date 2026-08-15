@@ -88,10 +88,7 @@ _ADOPT_RE = re.compile(r"(?:养了|领养了)(?:一只|一只小|个)?(猫|狗|�
 
 
 def _cfg(key, default):
-    lv = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("living", {}) or {}
-    return lv.get(key, default)
-
-
+    return _shared.core_cfg("living", key, default)
 def _pack_world() -> dict:
     try:
         from memory import pack

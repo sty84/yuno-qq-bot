@@ -8,10 +8,7 @@ from memory import embedder
 
 
 def _cfg(key, default):
-    idx = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("vector_index", {}) or {}
-    return idx.get(key, default)
-
-
+    return _shared.core_cfg("vector_index", key, default)
 def _cosine(a, b) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     na = sum(x * x for x in a) ** 0.5

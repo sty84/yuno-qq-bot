@@ -9,10 +9,7 @@ from plugins import _shared
 
 
 def _cfg(key, default):
-    a = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("agents", {}) or {}
-    return a.get(key, default)
-
-
+    return _shared.core_cfg("agents", key, default)
 def enabled() -> bool:
     return bool(_cfg("enabled", False))
 

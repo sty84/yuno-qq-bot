@@ -153,6 +153,27 @@ def _extra_scopes(scopes) -> list[str]:
     return extra
 
 
+_TIME_FRAG_RE = re.compile(r"周[一二三四五六日天]|月[底末]|\d{1,2}\s*[号日]|日期是|周[一二三四五六日天]")
+
+
+def _time_fragment_hint(mem_ctx):
+    """检测检索 context 里的孤立时间碎片（周日/30号/月底…），生成「关联到事件」的提示。
+    碎片和主体事件（如「月底演出」）常常分条存储，生成层不引导就容易被忽略。"""
+    frags = []
+    for line in (mem_ctx or "").splitlines():
+        line = line.strip().strip("·-* ")
+        if line and len(line) < 16 and _TIME_FRAG_RE.search(line):
+            frags.append(line)
+    if not frags:
+        return ""
+    return (
+        "【时间关联提示】上面记忆里有孤立的时间碎片（"
+        + "、".join(f"「{f}」" for f in frags[:3])
+        + "），它们很可能是某个事件（演出/约定/计划）的补充信息。"
+        "回答时把日期/星期关联到对应事件给出完整答案；确实关联不上的才说记不清。"
+    )
+
+
 def ask(
     text,
     history=None,
@@ -261,7 +282,8 @@ def ask(
         ctx_parts.append(
             "【记忆缺口·硬性要求】用户明确表示不记得/记忆缺失。如实承认不确定："
             "可以基于已有记忆温和提示，但禁止编造任何约定、具体细节、未来承诺或人物关系；"
-            "查不到就明说'我也不太确定/我这边没有这个记录'，绝不把推测说成事实。"
+            "查不到就用你的角色语气含糊带过（'想不起来了''别较真'这类），"
+            "别跳出角色说'我没有记录''作为 AI'这类话，绝不把推测说成事实。"
         )
     _confirm_words = ("好的", "好呀", "好啊", "行", "嗯好", "可以", "没问题", "当然", "OK", "ok")
     _is_confirm = any(w in _t_trim for w in _confirm_words)
@@ -269,7 +291,7 @@ def ask(
         # 上文 bot 声称过"约好/答应"：除非约定表/记忆里有对应记录，否则不得继续坚持
         ctx_parts.append(
             "【约定核验·硬性要求】你上一条提到了'约好/答应'之类。先核验记忆库/约定表："
-            "有对应记录才可继续提；查不到就明确收回（'我好像记岔了，这边没有这个约定'），"
+            "有对应记录才可继续提；查不到就明确收回（'我好像记岔了，没这回事'），"
             "禁止把推测的约定说成既成事实。"
         )
     if _APPT_TOPIC_RE.search(_t_trim):
@@ -279,7 +301,7 @@ def ask(
             if scopes and not appt_mod.context_block(scopes[0]):
                 ctx_parts.append(
                     "【约定验证·硬性要求】已检索：该用户的约定表/记忆里没有任何约定记录。"
-                    "禁止声称'约好的事/你答应过/说好要…'，如实说'我这边没查到相关约定'。"
+                    "禁止声称'约好的事/你答应过/说好要…'，如实说'我好像没跟你约过这个'。"
                 )
         except Exception as e:
             _stats_err(e)
@@ -335,8 +357,8 @@ def ask(
                 # 方向 1（确定性优先）：日程/约定/设备等先查结构化块，按它答，查不到就明说
                 ctx_parts.append(
                     "【结构化事实优先·硬性要求】本问题的答案以上面的【待履约约定】【此刻状态】"
-                    "【周围环境】等结构化块为准：查得到就按它答；查不到就明说'我这边没查到'，"
-                    "禁止编造表格内容、金额、他人意见或具体日期。"
+                    "【周围环境】等结构化块为准：查得到就按它答；查不到就用你的角色语气含糊带过，"
+                    "别跳出角色说'我没查到'，禁止编造表格内容、金额、他人意见或具体日期。"
                 )
         except Exception as e:
             _stats_err(e)
@@ -388,13 +410,17 @@ def ask(
             pass
         if mem_ctx:
             ctx_parts.append(mem_ctx)
+            hint = _time_fragment_hint(mem_ctx)
+            if hint:
+                ctx_parts.append(hint)
         if mem_ctx and scopes:
             # 证据门控（v2.3 生成约束）：只有证据清单里"可引用"的内容才能当事实陈述
             ctx_parts.append(
                 "【证据规则·硬性要求】只有上面检索注入记忆里能对应到的内容才能作为事实陈述："
                 "用户亲口说的（·用户亲口说）与人设设定（·人设设定）可引用；"
                 "'AI 推测'只能说'我好像记得'；"
-                "查不到对应记录的细节/约定/人物关系一律用'我不确定/我这边没记录'表达，禁止编造。"
+                "查不到对应记录的细节/约定/人物关系就用你的角色语气含糊带过"
+                "（'想不起来了''别较真'这类），别跳出角色说'我没记录'，禁止编造。"
             )
     if extra_context:
         ctx_parts.append(extra_context)
@@ -548,11 +574,22 @@ def ask(
                     evidence.append(ab)
             except Exception:
                 pass
+        # 会话内证据（对话暴露的 bug）：用户当前消息本身就是证据——AI 确认用户刚说的事实
+        # （"月底有场演出，是30号周日"）不该被门控当"推断/编造"打回成"记不太清"
+        if text:
+            evidence.append(str(text)[:200])
         banned = pack_mod.behavior().get("banned_claims") or []
         reason = evidence_gate.contains_unsupported_claim(reply, evidence, banned=banned, user_text=text)
+        if not reason and evidence_gate.verify_reply_numbers(reply, evidence):
+            # 数字硬门：回复里的数字/日期不在证据里 → 判编造（短回复也拦，不依赖语义自检）
+            reason = "无证据数字"
+        if not reason and evidence_gate.verify_reply_calendar(reply, evidence, user_text=text):
+            # 日历推算硬门（v2.3 P1-2）："X号+周几"与真实日历推算不符（如 8 月"31号是周日"）
+            # → 判编造/算错；日期类数字由代码推算验证，不靠 LLM 猜
+            reason = "日历推算不符"
         if not reason and evidence_gate._sem_cfg("semantic", True):
             # 方向 3（语义自检）：正则放行但回复有实质内容时，让 LLM 标注断言依据
-            reason = evidence_gate.semantic_annotate(reply, evidence, banned=banned)
+            reason = evidence_gate.semantic_annotate(reply, evidence, banned=banned, user_text=text)
         if reason:
             try:
                 import memory.stats as _st
@@ -564,15 +601,69 @@ def ask(
                 pass
             meta["evidence_gate"] = reason
             if str(reason).startswith("语义推断"):
-                # 方向 3 修正：推断不拦截，仅要求句尾含糊化
-                reply = str(reply or "").rstrip("。！!？?") + "……（这句是我猜的，可能不准）"
+                # 推断放行（对话暴露的 bug）：LLM 标注"推断"= 合理猜测/不确定语气（如
+                # "我好像没跟你约过什么吧？"）——曾经整句替换成"具体数字我记不太清了"模板，
+                # 把正确的回答毁掉。编造由"语义编造"路径重写、数字由 verify_reply_numbers 拦。
+                pass  # reply 保持原文
             else:
-                reply = "……这个我记不太清了，我这边好像没有这个记录。"
+                # 编造/黑名单：用角色语气重新生成一次，而非套固定生硬句。
+                # 约定类（无证据断言）要明确收回，不能含糊；其余一律自然带过。
+                if "断言" in str(reason):
+                    _reg = (
+                        "【重写】你上一条提到了'约好/答应/说好'之类但没有证据。"
+                        "用你的角色语气收回：明确说'我好像记岔了，没这回事'，"
+                        "别再坚持，也别编造新的承诺。"
+                    )
+                else:
+                    _reg = (
+                        "【重写】你上一条回复被判定为编造了没有依据的具体细节（" + str(reason) + "）。"
+                        "用你的角色语气重新回答用户，自然地含糊带过，"
+                        "别编造具体的名字、数字、日期、金额、经历或承诺，"
+                        "也别说'我没有记录''作为 AI'这类跳出角色的话。"
+                    )
+                try:
+                    reply = call(
+                        llm_text,
+                        extra_context=extra_ctx + "\n\n" + _reg,
+                        history=_clean_history(history or []),
+                        system=sys_prompt,
+                    )
+                except Exception:
+                    reply = evidence_gate.forgetful_reply("通用")
+                # 二次校验（对话暴露的 bug）：LLM 重写可能再次编造假来源/无据细节
+                # （"橘色。你亲口说的"重写后仍带假来源）——检测层确定、重写层概率，
+                # 重写结果仍不干净 → 模板兜底（人设化诚实句，不含声称句式）
+                try:
+                    r2 = evidence_gate.contains_unsupported_claim(
+                        reply, evidence, banned=banned, user_text=text
+                    )
+                    # v2.3 二次校验补语义层：词法门抓"来源声称"，抓不住"把推断当记忆"
+                    # 的软编造（"我好像记得是橘色，因为煤球是橘猫对吧？"——无来源声称词、
+                    # 无数字，但'我记得'是记忆断言而证据里没有'橘色偏好'）。
+                    # 语义标注"编造"→ 模板兜底；"推断"→ 保留重写结果（与主流程一致：
+                    # 推断含糊表达可放行，只有明确的记忆/事实断言必须干净）
+                    if not r2:
+                        _r2s = evidence_gate.semantic_annotate(
+                            reply, evidence, banned=banned, user_text=text
+                        )
+                        if _r2s and "编造" in str(_r2s):
+                            r2 = _r2s
+                    if r2:
+                        # 按话题类型选兜底表达（数字/约定/事实/通用），不再是固定一句
+                        reply = evidence_gate.forgetful_reply("", topic=str(text or "")[:20])
+                except Exception:
+                    pass
     except Exception:
         pass
     meta["reply"] = reply
     if learn and learn_scope:
         meta["learn"] = ingest(learn_scope, learn_key, text, reply, facts=facts)
+        # 主动自我编辑（MEMGPT 主动记忆，方案 B）：后置小调用，默认关
+        try:
+            from memory import controller as controller_mod
+            meta["active_edit"] = controller_mod.active_edit(learn_scope, learn_key, text, reply)
+        except Exception as e:
+            _stats_err(e)
     return reply, meta
 
 

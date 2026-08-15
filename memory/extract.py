@@ -1,5 +1,6 @@
 """记忆提取模块：LLM 从对话中提取关键信息，并把事实归类到事件类型。"""
 
+from memory._llmutil import parse_json_object
 import json
 import re
 
@@ -63,6 +64,22 @@ def _norm_extract_item(item) -> str:
     return str(item).strip()
 
 
+_NUM_RE = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _verify_numbers(facts, conversation):
+    """防 LLM 编造数字：事实里出现的每个数字都必须能在原始对话里找到，否则丢弃该事实。
+    「月底几号演出」被脑补成「月底28号演出」时，对话里没有 28 → 丢弃。"""
+    conv_nums = set(_NUM_RE.findall(str(conversation or "")))
+    out = []
+    for f in facts:
+        fact_nums = set(_NUM_RE.findall(str(f)))
+        if fact_nums and not fact_nums.issubset(conv_nums):
+            continue
+        out.append(f)
+    return out
+
+
 def extract_facts(conversation) -> list[str]:
     """LLM 提取事实；任何失败都返回 []，不阻塞聊天。"""
     try:
@@ -85,7 +102,8 @@ def extract_facts(conversation) -> list[str]:
         if start < 0 or end < 0:
             return []
         data = json.loads(raw[start:end + 1])
-        return [f for f in (nice_fact(_norm_extract_item(x)) for x in data) if f][:5]
+        facts = [f for f in (nice_fact(_norm_extract_item(x)) for x in data) if f][:5]
+        return _verify_numbers(facts, conversation)
     except Exception as e:
         _stats_err(e)
         return []
@@ -110,10 +128,9 @@ def structured_extract(conversation) -> dict:
             (resp.choices[0].message.content or "").strip(),
             flags=re.S,
         )
-        start, end = raw.find("{"), raw.rfind("}")
-        if start < 0 or end < 0:
+        data = parse_json_object(raw)
+        if data is None:
             return {}
-        data = json.loads(raw[start:end + 1])
         out = {
             "entities": data.get("entities") or [],
             "attributes": data.get("attributes") or {},
@@ -152,7 +169,7 @@ def extract_with_structure(conversation) -> list[str]:
         if f not in seen:
             seen.add(f)
             out.append(f[:60])
-    return out[:8] or extract_facts(conversation)
+    return _verify_numbers(out[:8], conversation) or extract_facts(conversation)
 
 
 def classify_event_type(fact: str) -> str:

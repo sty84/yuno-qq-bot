@@ -10,6 +10,7 @@ import sqlite3
 import threading
 from collections import Counter
 from datetime import datetime, timedelta
+from contextlib import contextmanager
 
 DB_PATH = None
 _conn = None
@@ -25,10 +26,56 @@ def set_audit_max(n):
     AUDIT_MAX = max(1, int(n))
 
 
-def init(data_dir):
-    global DB_PATH, _conn, _migrated
-    if DB_PATH is not None:
+_txn_depth = 0
+
+
+@contextmanager
+def transaction():
+    """写事务上下文（① ingest 事务化）：事务内 helper 的提交点被 _maybe_commit 挂起，
+    统一在出口 COMMIT / 异常 ROLLBACK。嵌套安全（深度计数，外层统一提交）。
+    注意：事务体内不要放 LLM/网络调用（会长时间持锁）。"""
+    global _txn_depth
+    with _lock:
+        if _txn_depth > 0:
+            _txn_depth += 1
+            try:
+                yield
+            finally:
+                _txn_depth -= 1
+            return
+        _txn_depth = 1
+        c = _connect()
+        try:
+            c.execute("BEGIN")
+            yield
+            c.commit()
+        except Exception:
+            try:
+                c.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            _txn_depth = 0
+
+
+def _maybe_commit():
+    """helper 的提交点：在 transaction() 内不提交（由外层统一），避免半成品状态。"""
+    if _txn_depth > 0:
         return
+    _connect().commit()
+
+
+def init(data_dir, force=False):
+    """初始化数据库连接。force=True 用于测试隔离：重定向到新的临时库。"""
+    global DB_PATH, _conn, _migrated
+    if DB_PATH is not None and not force:
+        return
+    if _conn is not None:
+        try:
+            _conn.close()
+        except Exception:
+            pass
     DB_PATH = pathlib.Path(data_dir) / "bot.db"
     _conn = sqlite3.connect(str(DB_PATH), timeout=10, check_same_thread=False)
     _conn.row_factory = sqlite3.Row
@@ -36,6 +83,8 @@ def init(data_dir):
     # WAL 模式下 synchronous=NORMAL 安全且大幅降低提交延迟（性能优化）
     _conn.execute("PRAGMA synchronous=NORMAL")
     _create_tables()
+    if force:
+        _migrated = False
     if not _migrated:
         _migrate_legacy(pathlib.Path(data_dir))
         _migrated = True
@@ -45,13 +94,18 @@ def init(data_dir):
 
 def _connect():
     if _conn is None:
-        # 未显式初始化时用默认 data 目录
-        default = pathlib.Path(
-            os.getenv(
-                "CONFIG_PATH",
-                os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config.json"),
-            )
-        ).parent / "data"
+        # 未显式初始化时用默认数据目录。优先取 _shared.DATA_DIR（Persona Pack 隔离目录，
+        # 修复：只 import _db 的脚本会连到 CONFIG_PATH.parent/data 的空库而读不到真实数据）。
+        try:
+            from plugins import _shared
+            default = _shared.DATA_DIR
+        except Exception:
+            default = pathlib.Path(
+                os.getenv(
+                    "CONFIG_PATH",
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config.json"),
+                )
+            ).parent / "data"
         init(default)
     return _conn
 
@@ -429,26 +483,42 @@ def _create_tables():
                 reviewer TEXT NOT NULL DEFAULT '',
                 created_at TEXT,
                 UNIQUE(trace_id, reviewer));
+            CREATE TABLE IF NOT EXISTS conv_log(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL DEFAULT '',
+                scope TEXT NOT NULL DEFAULT '',
+                ts TEXT NOT NULL DEFAULT '',
+                user_text TEXT NOT NULL DEFAULT '',
+                ai_text TEXT NOT NULL DEFAULT '');
+            CREATE INDEX IF NOT EXISTS idx_conv_scope_ts ON conv_log(scope, ts);
+            CREATE TABLE IF NOT EXISTS conv_review(
+                conv_id INTEGER NOT NULL,
+                score REAL NOT NULL,
+                scores TEXT NOT NULL DEFAULT '{}',
+                comment TEXT NOT NULL DEFAULT '',
+                reviewer TEXT NOT NULL DEFAULT '',
+                created_at TEXT,
+                UNIQUE(conv_id, reviewer));
             """
         )
-        c.commit()
+        _maybe_commit()
         for col, ddl in (
             ("retries", "INTEGER NOT NULL DEFAULT 0"),
             ("failed", "INTEGER NOT NULL DEFAULT 0"),
         ):
             try:
                 c.execute(f"ALTER TABLE notifications ADD COLUMN {col} {ddl}")
-                c.commit()
+                _maybe_commit()
             except sqlite3.OperationalError:
                 pass
         try:
             c.execute("ALTER TABLE memories ADD COLUMN confidence REAL NOT NULL DEFAULT 0.7")
-            c.commit()
+            _maybe_commit()
         except sqlite3.OperationalError:
             pass
         try:
             c.execute("ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT ''")
-            c.commit()
+            _maybe_commit()
         except sqlite3.OperationalError:
             pass
         for col, ddl in (
@@ -461,12 +531,12 @@ def _create_tables():
         ):
             try:
                 c.execute(f"ALTER TABLE memories ADD COLUMN {col} {ddl}")
-                c.commit()
+                _maybe_commit()
             except sqlite3.OperationalError:
                 pass
         try:
             c.execute("ALTER TABLE events ADD COLUMN topic_id INTEGER")
-            c.commit()
+            _maybe_commit()
         except sqlite3.OperationalError:
             pass
         for col, ddl in (
@@ -476,17 +546,17 @@ def _create_tables():
         ):
             try:
                 c.execute(f"ALTER TABLE events ADD COLUMN {col} {ddl}")
-                c.commit()
+                _maybe_commit()
             except sqlite3.OperationalError:
                 pass
         try:
             c.execute("ALTER TABLE events ADD COLUMN ts_source TEXT NOT NULL DEFAULT 'approx'")
-            c.commit()
+            _maybe_commit()
         except sqlite3.OperationalError:
             pass
         try:
             c.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts)")
-            c.commit()
+            _maybe_commit()
         except sqlite3.OperationalError:
             pass
         for col, ddl in (
@@ -496,23 +566,23 @@ def _create_tables():
         ):
             try:
                 c.execute(f"ALTER TABLE memories ADD COLUMN {col} {ddl}")
-                c.commit()
+                _maybe_commit()
             except sqlite3.OperationalError:
                 pass
         try:
             c.execute("ALTER TABLE feedback_log ADD COLUMN weight REAL NOT NULL DEFAULT 1.0")
-            c.commit()
+            _maybe_commit()
         except sqlite3.OperationalError:
             pass
         try:
             c.execute("ALTER TABLE trace_review ADD COLUMN scores TEXT NOT NULL DEFAULT '{}'")
-            c.commit()
+            _maybe_commit()
         except sqlite3.OperationalError:
             pass
         try:
             # 犹豫层（v2.3）：通知可延后发送（scheduled_at 之前不发）
             c.execute("ALTER TABLE notifications ADD COLUMN scheduled_at TEXT")
-            c.commit()
+            _maybe_commit()
         except sqlite3.OperationalError:
             pass
         for col, ddl in (
@@ -522,12 +592,12 @@ def _create_tables():
         ):
             try:
                 c.execute(f"ALTER TABLE goals ADD COLUMN {col} {ddl}")
-                c.commit()
+                _maybe_commit()
             except sqlite3.OperationalError:
                 pass
         try:
             c.execute("ALTER TABLE belief_log ADD COLUMN old_content TEXT NOT NULL DEFAULT ''")
-            c.commit()
+            _maybe_commit()
         except sqlite3.OperationalError:
             pass
         # FTS5 词法索引（trigram 适合中文；不可用时走 LIKE 降级）
@@ -536,7 +606,7 @@ def _create_tables():
                 "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5("
                 "scope UNINDEXED, key UNINDEXED, fact, tokenize='trigram')"
             )
-            c.commit()
+            _maybe_commit()
         except sqlite3.OperationalError as e:
             print(f"FTS5 不可用，词法检索降级为 LIKE：{e}")
 
@@ -601,7 +671,7 @@ def _migrate_legacy(data_dir):
                     data = json.loads(f.read_text(encoding="utf-8"))
                     facts_replace("group_all", f.stem, data.get("facts", []), data.get("updated_at", ""))
                     kv_set("group", f"{f.stem}:count", data.get("message_count", 0))
-        c.commit()
+        _maybe_commit()
     except Exception as e:
         print(f"[db] 旧数据迁移失败（可忽略）：{e}")
         c.rollback()
@@ -634,7 +704,7 @@ def _migrate_facts_to_memories():
             "INSERT OR IGNORE INTO memories(scope,key,fact,updated_at) VALUES(?,?,?,?)",
             (scope, sk, r["fact"], r["updated_at"]),
         )
-    c.commit()
+    _maybe_commit()
     _memories_migrated = True
 
 
@@ -658,7 +728,7 @@ def _migrate_ai_to_unified():
             "VALUES('ai',?,?,?,?,?)",
             (r["kind"], r["content"], r["embedding"], r["updated_at"] or "", float(r["importance"])),
         )
-    c.commit()
+    _maybe_commit()
     _ai_migrated = True
 
 
@@ -672,7 +742,7 @@ def facts_replace(scene, key, facts, updated_at=""):
                 "INSERT INTO facts(scene,key,idx,fact,updated_at) VALUES(?,?,?,?,?)",
                 (scene, key, i, str(fact), updated_at),
             )
-        c.commit()
+        _maybe_commit()
 
 
 def facts_get(scene, key):
@@ -699,7 +769,7 @@ def kv_set(namespace, key, value):
             "INSERT OR REPLACE INTO kv(namespace,key,value) VALUES(?,?,?)",
             (namespace, key, json.dumps(value, ensure_ascii=False)),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def kv_get(namespace, key, default=None):
@@ -738,7 +808,7 @@ def kv_cas(namespace, key, old_raw, new_raw):
             "UPDATE kv SET value=? WHERE namespace=? AND key=? AND value=?",
             (new_raw, namespace, key, old_raw),
         )
-        c.commit()
+        _maybe_commit()
         return c.total_changes > 0
 
 
@@ -756,7 +826,7 @@ def item_event_add(item, ts, event, from_place="", to_place="", cause="", seen_b
                 str(cause)[:80], str(seen_by)[:20],
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def item_event_add_many(rows):
@@ -777,7 +847,7 @@ def item_event_add_many(rows):
                 for r in rows
             ],
         )
-        c.commit()
+        _maybe_commit()
 
 
 def item_event_rows(item=None, limit=500):
@@ -834,7 +904,7 @@ def item_events_prune(days=90) -> int:
     with _lock:
         c = _connect()
         cur = c.execute("DELETE FROM item_events WHERE ts < ?", (cutoff,))
-        c.commit()
+        _maybe_commit()
         return cur.rowcount
 
 
@@ -866,7 +936,7 @@ def procedure_upsert(situation, action, success, updated_at=""):
                 "INSERT INTO procedures(situation,action,success,tries,updated_at) VALUES(?,?,?,1,?)",
                 (situation, action, success, str(updated_at)),
             )
-        c.commit()
+        _maybe_commit()
 
 
 def procedure_rows(min_tries=0, limit=200):
@@ -885,7 +955,7 @@ def procedure_clear():
     with _lock:
         c = _connect()
         c.execute("DELETE FROM procedures")
-        c.commit()
+        _maybe_commit()
 
 
 def invalidation_add(scope, key, fact, reason=""):
@@ -897,7 +967,7 @@ def invalidation_add(scope, key, fact, reason=""):
             (str(scope), str(key or ""), str(fact)[:200], str(reason)[:40],
              datetime.now().isoformat(timespec="seconds")),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def invalidation_rows(limit=100):
@@ -915,7 +985,7 @@ def invalidation_clear_all():
     with _lock:
         c = _connect()
         c.execute("DELETE FROM state_invalidations")
-        c.commit()
+        _maybe_commit()
 
 
 def exp_log_add(action, detail="", before=None, after=None, delta=None, regression=False):
@@ -934,7 +1004,7 @@ def exp_log_add(action, detail="", before=None, after=None, delta=None, regressi
                 1 if regression else 0,
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def exp_log_rows(limit=50):
@@ -980,7 +1050,7 @@ def scenario_score_add(scenario_id, scope, scores, comment="", mode="manual"):
                 avg,
             ),
         )
-        c.commit()
+        _maybe_commit()
         return {
             "id": cur.lastrowid,
             "ts": datetime.now().isoformat(timespec="seconds"),
@@ -1029,7 +1099,15 @@ def llm_cost_add(ts, module="chat", detail="", prompt_tokens=0, completion_token
                 max(0, int(chars or 0)),
             ),
         )
-        c.commit()
+        _maybe_commit()
+
+
+def llm_cost_clear():
+    """清空 LLM 成本观测表（测试隔离 / 运维重置）。"""
+    with _lock:
+        c = _connect()
+        c.execute("DELETE FROM llm_cost")
+        _maybe_commit()
 
 
 def llm_cost_summary(days=30) -> dict:
@@ -1097,7 +1175,7 @@ def hesitation_log_add(ts, scope, kind, action, reason, delay_s=0, monologue="")
             "DELETE FROM hesitation_log WHERE id NOT IN "
             "(SELECT id FROM hesitation_log ORDER BY id DESC LIMIT 500)"
         )
-        c.commit()
+        _maybe_commit()
 
 
 def hesitation_log_rows(limit=50):
@@ -1126,7 +1204,7 @@ def space_state_get():
                 space_state_set(old)
                 c = _connect()
                 c.execute("DELETE FROM kv WHERE namespace='memory' AND key='space_room'")
-                c.commit()
+                _maybe_commit()
         row = _connect().execute("SELECT * FROM space_state WHERE id=1").fetchone()
         if row is None:
             return None
@@ -1157,7 +1235,7 @@ def space_state_set(st):
                 str(st.get("updated_ts", "")),
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def item_activation_rows():
@@ -1170,7 +1248,7 @@ def item_activation_rows():
                 item_activation_set(old)
                 c = _connect()
                 c.execute("DELETE FROM kv WHERE namespace='memory' AND key='item_activation'")
-                c.commit()
+                _maybe_commit()
         rows = _connect().execute(
             "SELECT item, seen_ts, count FROM item_activation_state"
         ).fetchall()
@@ -1188,7 +1266,7 @@ def item_activation_set(items):
             "ON CONFLICT(item) DO UPDATE SET seen_ts=excluded.seen_ts,count=excluded.count",
             [(str(k)[:60], str(v.get("seen_ts", "")), int(v.get("count", 0))) for k, v in items.items()],
         )
-        c.commit()
+        _maybe_commit()
 
 
 def item_search_rows():
@@ -1201,7 +1279,7 @@ def item_search_rows():
                     item_search_set(scope, d)
                 c = _connect()
                 c.execute("DELETE FROM kv WHERE namespace='memory' AND key='item_search'")
-                c.commit()
+                _maybe_commit()
         rows = _connect().execute(
             "SELECT scope, name, queue, step, started_at FROM item_search_state"
         ).fetchall()
@@ -1235,14 +1313,14 @@ def item_search_set(scope, data):
                 datetime.now().isoformat(timespec="seconds"),
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def item_search_delete(scope):
     with _lock:
         c = _connect()
         c.execute("DELETE FROM item_search_state WHERE scope=?", (str(scope),))
-        c.commit()
+        _maybe_commit()
 
 
 def mind_intention_rows():
@@ -1255,7 +1333,7 @@ def mind_intention_rows():
                     mind_intention_set(scope, d)
                 c = _connect()
                 c.execute("DELETE FROM kv WHERE namespace='memory' AND key='mind_intention'")
-                c.commit()
+                _maybe_commit()
         rows = _connect().execute(
             "SELECT scope,title,source,strength,state,due,condition,started_at,updated_at "
             "FROM mind_intention_state"
@@ -1281,14 +1359,14 @@ def mind_intention_set(scope, data):
                 str(data.get("started_at", "")), str(data.get("updated_at", "")),
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def mind_intention_delete(scope):
     with _lock:
         c = _connect()
         c.execute("DELETE FROM mind_intention_state WHERE scope=?", (str(scope),))
-        c.commit()
+        _maybe_commit()
 
 
 def space_event_add(ts, kind, detail, memorable=False):
@@ -1298,7 +1376,7 @@ def space_event_add(ts, kind, detail, memorable=False):
             "INSERT INTO space_events_state(ts,kind,detail,memorable) VALUES(?,?,?,?)",
             (str(ts), str(kind)[:20], str(detail)[:80], 1 if memorable else 0),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def space_event_rows(limit=200):
@@ -1312,7 +1390,7 @@ def space_event_rows(limit=200):
                     space_event_add(r.get("ts", ""), r.get("kind", ""), r.get("detail", ""), r.get("memorable", False))
                 c = _connect()
                 c.execute("DELETE FROM kv WHERE namespace='memory' AND key='space_events'")
-                c.commit()
+                _maybe_commit()
         rows = _connect().execute(
             "SELECT id, ts, kind, detail, memorable FROM space_events_state "
             "ORDER BY ts DESC, id DESC LIMIT ?",
@@ -1331,7 +1409,7 @@ def space_event_prune(days=7) -> int:
     with _lock:
         c = _connect()
         cur = c.execute("DELETE FROM space_events_state WHERE ts < ?", (cutoff,))
-        c.commit()
+        _maybe_commit()
         return cur.rowcount
 
 
@@ -1342,7 +1420,7 @@ def ai_action_add(ts, scope, action, detail=""):
             "INSERT INTO ai_actions_state(ts,scope,action,detail) VALUES(?,?,?,?)",
             (str(ts), str(scope)[:40], str(action)[:40], str(detail)[:80]),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def ai_action_rows(scope="", limit=60):
@@ -1355,7 +1433,7 @@ def ai_action_rows(scope="", limit=60):
                     ai_action_add(r.get("ts", ""), r.get("scope", ""), r.get("action", ""), r.get("detail", ""))
                 c = _connect()
                 c.execute("DELETE FROM kv WHERE namespace='memory' AND key='ai_actions'")
-                c.commit()
+                _maybe_commit()
         sql = "SELECT ts, scope, action, detail FROM ai_actions_state"
         params = []
         if scope:
@@ -1374,21 +1452,21 @@ def binding_set(uid, gid, mid):
             "INSERT OR REPLACE INTO bindings(user_openid,group_id,member_openid) VALUES(?,?,?)",
             (uid, gid, mid),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def binding_delete_user_group(uid, gid):
     with _lock:
         c = _connect()
         c.execute("DELETE FROM bindings WHERE user_openid=? AND group_id=?", (uid, gid))
-        c.commit()
+        _maybe_commit()
 
 
 def binding_delete_member(gid, mid):
     with _lock:
         c = _connect()
         c.execute("DELETE FROM bindings WHERE group_id=? AND member_openid=?", (gid, mid))
-        c.commit()
+        _maybe_commit()
 
 
 def binding_find_user_for_member(gid, mid):
@@ -1426,7 +1504,7 @@ def score_add(player, game, delta=1):
             "ON CONFLICT(player,game) DO UPDATE SET score=score+?",
             (player, game, delta, delta),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def scores_all():
@@ -1446,7 +1524,7 @@ def nickname_set(player, nickname):
             "INSERT OR REPLACE INTO nicknames(player,nickname) VALUES(?,?)",
             (player, nickname),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def nickname_get(player):
@@ -1477,7 +1555,7 @@ def state_set(data):
         c.execute("DELETE FROM state")
         for k, v in data.items():
             c.execute("INSERT INTO state(k,v) VALUES(?,?)", (k, json.dumps(v, ensure_ascii=False)))
-        c.commit()
+        _maybe_commit()
 
 
 # ===== 审计 =====
@@ -1493,7 +1571,7 @@ def audit_add(action, target="", detail="", operator=""):
             "(SELECT id FROM audit ORDER BY id DESC LIMIT ?)",
             (AUDIT_MAX,),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def audit_query(limit=50, action=None):
@@ -1522,7 +1600,7 @@ def notif_add(target_type, target, content, scheduled_at=""):
                 str(scheduled_at or "")[:30],
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def notif_pending(limit=20):
@@ -1544,7 +1622,7 @@ def notif_mark_sent(nid):
             "UPDATE notifications SET sent_at=? WHERE id=?",
             (datetime.now().isoformat(timespec="seconds"), nid),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def notif_mark_failed(nid, max_retries=3):
@@ -1556,7 +1634,7 @@ def notif_mark_failed(nid, max_retries=3):
             "UPDATE notifications SET failed=1 WHERE id=? AND retries>=?",
             (nid, max_retries),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def notif_failed_retries(nid):
@@ -1648,7 +1726,7 @@ def memory_replace(
                     str(st_map.get(str(fact), status)) or "active",
                 ),
             )
-        c.commit()
+        _maybe_commit()
 
 
 def memory_replace_preserve(scope, key, facts, updated_at=""):
@@ -1680,7 +1758,7 @@ def memory_replace_preserve(scope, key, facts, updated_at=""):
                     float(r.get("privacy", 0.0)),
                 ),
             )
-        c.commit()
+        _maybe_commit()
 
 
 def memory_update_embedding(scope, key, fact, embedding):
@@ -1691,7 +1769,7 @@ def memory_update_embedding(scope, key, fact, embedding):
             "UPDATE memories SET embedding=? WHERE scope=? AND key=? AND fact=?",
             (vec_dumps(embedding), scope, key or "", str(fact)),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def memory_add(
@@ -1744,7 +1822,7 @@ def memory_add(
                 str(status) or "active",
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def memory_get(scope, key=""):
@@ -1771,7 +1849,7 @@ def memory_clear(scope, key=None):
             c.execute("DELETE FROM memories WHERE scope=?", (scope,))
         else:
             c.execute("DELETE FROM memories WHERE scope=? AND key=?", (scope, key))
-        c.commit()
+        _maybe_commit()
 
 
 def memory_search(q, scope=None, key=None, limit=10):
@@ -1815,6 +1893,30 @@ def memory_rows(scope=None, key=None, exclude_status=None, limit=None):
         return [dict(r) for r in _connect().execute(sql, params).fetchall()]
 
 
+def memory_rows_by_facts(scope, facts, exclude_status=None):
+    """按 fact 集合下推查询（检索候选行，避免全表拉取后 Python 过滤）。
+    facts 为空返回 []；自动分块防 SQLite 参数上限（默认 999/32766）。"""
+    facts = list(dict.fromkeys(str(f) for f in (facts or [])))
+    if not facts:
+        return []
+    with _lock:
+        rows = []
+        for i in range(0, len(facts), 500):
+            chunk = facts[i:i + 500]
+            sql = (
+                "SELECT scope,key,fact,embedding,updated_at,confidence,source,audience,speaker,mclass,"
+                "arousal,valence,privacy,valid_from,valid_to,status FROM memories WHERE scope=?"
+            )
+            params = [scope]
+            if exclude_status:
+                sql += " AND status NOT IN (" + ",".join("?" * len(exclude_status)) + ")"
+                params.extend(exclude_status)
+            sql += " AND fact IN (" + ",".join("?" * len(chunk)) + ")"
+            params.extend(chunk)
+            rows.extend(dict(r) for r in _connect().execute(sql, params).fetchall())
+        return rows
+
+
 def memory_set_status(scope, key, fact, status, valid_to=""):
     """时间推理（v5）：把记忆标记为 superseded/history 等状态。"""
     with _lock:
@@ -1823,7 +1925,7 @@ def memory_set_status(scope, key, fact, status, valid_to=""):
             "UPDATE memories SET status=?, valid_to=? WHERE scope=? AND key=? AND fact=?",
             (str(status)[:20], str(valid_to or ""), scope, key or "", str(fact)),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def memory_set_confidence(scope, key, fact, confidence):
@@ -1839,7 +1941,7 @@ def memory_set_confidence(scope, key, fact, confidence):
                 str(fact),
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def memory_source_normalize() -> dict:
@@ -1853,7 +1955,7 @@ def memory_source_normalize() -> dict:
         n1 = cur.rowcount
         cur = c.execute("UPDATE memories SET source='pack' WHERE source='persona'")
         n2 = cur.rowcount
-        c.commit()
+        _maybe_commit()
         return {"ingest_to_user": n1, "persona_to_pack": n2}
 
 
@@ -1865,7 +1967,18 @@ def memory_delete(scope, key, fact):
             "DELETE FROM memories WHERE scope=? AND key=? AND fact=?",
             (scope, key or "", str(fact)),
         )
-        c.commit()
+        _maybe_commit()
+
+
+def memory_set_source(scope, key, fact, source):
+    """污染扫描降级用：改写单条记忆的来源（user → ai_edit），证明链不再把它当"用户亲口说"。"""
+    with _lock:
+        c = _connect()
+        c.execute(
+            "UPDATE memories SET source=? WHERE scope=? AND key=? AND fact=?",
+            (str(source)[:20], scope, key or "", str(fact)),
+        )
+        _maybe_commit()
 
 
 # ===== 事件图（events + event_relations 邻接表）=====
@@ -1914,7 +2027,7 @@ def event_add(
                 str(memory_fact)[:200],
             ),
         )
-        c.commit()
+        _maybe_commit()
         row = c.execute(
             "SELECT id FROM events WHERE scope=? AND key=? AND title=?",
             (scope, key, title),
@@ -1931,7 +2044,7 @@ def event_set_ts(event_id, ts, ts_source="explicit"):
             (str(ts), str(ts_source)[:20] or "approx",
              datetime.now().isoformat(timespec="seconds"), int(event_id)),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def event_set_ts_by_title(scope, key, title, ts, ts_source="explicit"):
@@ -1943,7 +2056,7 @@ def event_set_ts_by_title(scope, key, title, ts, ts_source="explicit"):
             (str(ts), str(ts_source)[:20] or "approx",
              datetime.now().isoformat(timespec="seconds"), str(scope), str(key or ""), str(title)),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def event_rows(scope=None, key=None, since=None, min_importance=None, limit=None):
@@ -1978,7 +2091,7 @@ def event_delete(event_id):
         c = _connect()
         c.execute("DELETE FROM event_relations WHERE src=? OR dst=?", (event_id, event_id))
         c.execute("DELETE FROM events WHERE id=?", (event_id,))
-        c.commit()
+        _maybe_commit()
 
 
 def relation_add(src, dst, rel="influences", weight=1.0):
@@ -1991,7 +2104,7 @@ def relation_add(src, dst, rel="influences", weight=1.0):
             "ON CONFLICT(src,dst,rel) DO UPDATE SET weight=excluded.weight, updated_at=excluded.updated_at",
             (int(src), int(dst), str(rel)[:50], float(weight), datetime.now().isoformat(timespec="seconds")),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def relations_for(event_ids, direction="both"):
@@ -2030,7 +2143,7 @@ def ai_memory_set(kind, content, importance=0.5, embedding=None, updated_at=""):
             "importance=excluded.importance, embedding=excluded.embedding, updated_at=excluded.updated_at",
             (kind, str(content)[:1000], float(importance), vec_dumps(embedding), updated_at or datetime.now().isoformat(timespec="seconds")),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def ai_memory_rows(kind=None, limit=None):
@@ -2054,7 +2167,7 @@ def ai_memory_clear(kind=None):
             c.execute("DELETE FROM ai_memory WHERE kind=?", (kind,))
         else:
             c.execute("DELETE FROM ai_memory")
-        c.commit()
+        _maybe_commit()
 
 
 # ===== 记忆元数据（Memory Policy 的原始数据）=====
@@ -2069,7 +2182,25 @@ def meta_touch(scope, key, fact, importance=0.5, ts=""):
             "importance=MAX(importance,excluded.importance)",
             (scope, key or "", str(fact), ts or datetime.now().isoformat(timespec="seconds"), float(importance)),
         )
-        c.commit()
+        _maybe_commit()
+
+
+def meta_touch_many(items):
+    """批量隐式反馈（一次事务）：items = [(scope, key, fact, importance, ts)]。
+    语义等价逐条 meta_touch，但只 commit 一次（修复检索命中多条时的提交放大）。"""
+    if not items:
+        return
+    now = datetime.now().isoformat(timespec="seconds")
+    with _lock:
+        c = _connect()
+        c.executemany(
+            "INSERT INTO memory_meta(scope,key,fact,access_count,last_access,importance) VALUES(?,?,?,1,?,?) "
+            "ON CONFLICT(scope,key,fact) DO UPDATE SET "
+            "access_count=access_count+1, last_access=excluded.last_access, "
+            "importance=MAX(importance,excluded.importance)",
+            [(s, k or "", str(f), ts or now, float(imp)) for s, k, f, imp, ts in items],
+        )
+        _maybe_commit()
 
 
 def meta_rows(scope=None, key=None, min_importance=None, limit=None):
@@ -2102,7 +2233,7 @@ def meta_delete(scope, key, fact):
             "DELETE FROM memory_meta WHERE scope=? AND key=? AND fact=?",
             (scope, key or "", str(fact)),
         )
-        c.commit()
+        _maybe_commit()
 
 
 # ===== 议题（大类 → 议题 → 参数）=====
@@ -2119,7 +2250,7 @@ def topic_add(scope, key, category, topic, importance=0.5, confidence=0.7, statu
             (scope, key or "", str(category)[:50], str(topic)[:100], float(importance),
              float(confidence), str(status)[:20], started_at or now, now),
         )
-        c.commit()
+        _maybe_commit()
         row = c.execute(
             "SELECT id FROM topics WHERE scope=? AND key=? AND category=? AND topic=?",
             (scope, key or "", str(category)[:50], str(topic)[:100]),
@@ -2187,7 +2318,7 @@ def topic_clear(scope):
             marks = ",".join("?" * len(ids))
             c.execute(f"DELETE FROM topic_params WHERE topic_id IN ({marks})", ids)
             c.execute(f"DELETE FROM topics WHERE id IN ({marks})", ids)
-        c.commit()
+        _maybe_commit()
 
 
 def topic_param_add(topic_id, param, value, confidence=0.7, updated_at=""):
@@ -2200,7 +2331,7 @@ def topic_param_add(topic_id, param, value, confidence=0.7, updated_at=""):
             (int(topic_id), str(param)[:30], str(value)[:500], float(confidence),
              updated_at or datetime.now().isoformat(timespec="seconds")),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def topic_params(topic_id) -> list:
@@ -2216,7 +2347,7 @@ def event_set_topic(event_id, topic_id):
     with _lock:
         c = _connect()
         c.execute("UPDATE events SET topic_id=? WHERE id=?", (int(topic_id), int(event_id)))
-        c.commit()
+        _maybe_commit()
 
 
 def topic_param_invalidate(value):
@@ -2224,7 +2355,7 @@ def topic_param_invalidate(value):
     with _lock:
         c = _connect()
         c.execute("UPDATE topic_params SET confidence=MIN(confidence, 0.3) WHERE value=?", (str(value),))
-        c.commit()
+        _maybe_commit()
 
 
 # ===== 自研 IVF 向量索引（SQLite 持久化）=====
@@ -2233,7 +2364,7 @@ def vec_clear():
         c = _connect()
         c.execute("DELETE FROM vec_index")
         c.execute("DELETE FROM vec_centroids")
-        c.commit()
+        _maybe_commit()
 
 
 def vec_centroids_set(centroids):
@@ -2246,7 +2377,7 @@ def vec_centroids_set(centroids):
                 "INSERT INTO vec_centroids(id,dim,embedding,n) VALUES(?,?,?,?)",
                 (i, len(emb), vec_dumps(emb), int(n)),
             )
-        c.commit()
+        _maybe_commit()
 
 
 def vec_centroids_get() -> list:
@@ -2271,7 +2402,7 @@ def vec_index_replace(rows):
             "INSERT INTO vec_index(scope,key,fact,centroid_id,embedding) VALUES(?,?,?,?,?)",
             [(sc, k, f, int(cid), vec_dumps(emb)) for sc, k, f, cid, emb in rows],
         )
-        c.commit()
+        _maybe_commit()
 
 
 def vec_index_upsert(scope, key, fact, centroid_id, embedding):
@@ -2283,7 +2414,7 @@ def vec_index_upsert(scope, key, fact, centroid_id, embedding):
             "INSERT INTO vec_index(scope,key,fact,centroid_id,embedding) VALUES(?,?,?,?,?)",
             (scope, key, fact, int(centroid_id), vec_dumps(embedding)),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def vec_index_count() -> int:
@@ -2321,7 +2452,7 @@ def bm25_sync(scope, key, tokenized):
                     "INSERT OR IGNORE INTO bm25_terms(term,scope,key,fact,tf) VALUES(?,?,?,?,?)",
                     (term, scope, key, str(fact), tf),
                 )
-        c.commit()
+        _maybe_commit()
 
 
 def bm25_upsert(scope, key, tokenized):
@@ -2347,7 +2478,7 @@ def bm25_upsert(scope, key, tokenized):
                     "INSERT OR IGNORE INTO bm25_terms(term,scope,key,fact,tf) VALUES(?,?,?,?,?)",
                     (term, scope, key, str(fact), tf),
                 )
-        c.commit()
+        _maybe_commit()
 
 
 def bm25_clear():
@@ -2355,7 +2486,7 @@ def bm25_clear():
         c = _connect()
         c.execute("DELETE FROM bm25_terms")
         c.execute("DELETE FROM bm25_docs")
-        c.commit()
+        _maybe_commit()
 
 
 def bm25_stats():
@@ -2417,7 +2548,7 @@ def belief_log_add(kind, content, action, confidence=None, note="", old_content=
                 datetime.now().isoformat(timespec="seconds"),
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def belief_log_rows(limit=20):
@@ -2452,7 +2583,7 @@ def query_log_add(query, scopes, top_k, hits):
                 json.dumps(list(hits or []), ensure_ascii=False)[:3000],
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def query_log_pending(limit=200):
@@ -2472,7 +2603,7 @@ def query_log_mark_exported(ids):
     with _lock:
         c = _connect()
         c.execute(f"UPDATE query_log SET exported=1 WHERE id IN ({marks})", list(ids))
-        c.commit()
+        _maybe_commit()
 
 
 def query_log_prune(days=30) -> int:
@@ -2482,7 +2613,7 @@ def query_log_prune(days=30) -> int:
     with _lock:
         c = _connect()
         cur = c.execute("DELETE FROM query_log WHERE ts<?", (cutoff,))
-        c.commit()
+        _maybe_commit()
         return cur.rowcount
 
 
@@ -2495,7 +2626,7 @@ def query_log_followup(query):
             "AND id=(SELECT id FROM query_log WHERE query=? ORDER BY id DESC LIMIT 1)",
             (str(query)[:200], str(query)[:200]),
         )
-        c.commit()
+        _maybe_commit()
 
 
 # ===== 会话（session）=====
@@ -2528,7 +2659,7 @@ def session_create(scope, key, topic="", summary=""):
             "VALUES(?,?,?,?,?,1,?)",
             (scope, key or "", str(topic)[:100], now, now, str(summary)[:500]),
         )
-        c.commit()
+        _maybe_commit()
         return c.execute("SELECT last_insert_rowid()").fetchone()[0]
 
 
@@ -2543,7 +2674,7 @@ def session_bump(session_id, topic="", summary="", text=""):
             "topic=COALESCE(NULLIF(?,''),topic), summary=COALESCE(NULLIF(?,''),summary) WHERE id=?",
             (now, str(topic)[:100], str(summary)[:500], int(session_id)),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def session_close_old(days=3):
@@ -2555,7 +2686,7 @@ def session_close_old(days=3):
             "updated_at < datetime('now', ?)",
             (f"-{int(days)} days",),
         )
-        c.commit()
+        _maybe_commit()
         return c.total_changes - before
 
 
@@ -2600,7 +2731,7 @@ def entity_add(scope, key, canonical):
             "INSERT OR IGNORE INTO entities(scope,key,canonical) VALUES(?,?,?)",
             (scope, key or "", str(canonical)[:100]),
         )
-        c.commit()
+        _maybe_commit()
         row = c.execute(
             "SELECT id FROM entities WHERE scope=? AND key=? AND canonical=?",
             (scope, key or "", str(canonical)[:100]),
@@ -2615,7 +2746,7 @@ def entity_alias_add(entity_id, alias):
             "INSERT OR IGNORE INTO entity_aliases(entity_id,alias) VALUES(?,?)",
             (int(entity_id), str(alias)[:100]),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def entity_aliases(entity_id):
@@ -2633,7 +2764,7 @@ def entity_events_add(entity_id, event_id):
             "INSERT OR IGNORE INTO entity_events(entity_id,event_id) VALUES(?,?)",
             (int(entity_id), int(event_id)),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def entity_rows(scope=None, key=None):
@@ -2651,12 +2782,66 @@ def entity_rows(scope=None, key=None):
         return [dict(r) for r in _connect().execute(sql, params).fetchall()]
 
 
-def purge_scope(scope):
-    """按用户/场景彻底删除：记忆/属性/事件/议题/索引/日志。"""
+# 纯记忆/画像类：purge_scope 默认清（「彻底删除」必须覆盖的个人数据，含审计与轨迹）
+_MEM_SCOPE_TABLES = (
+    "memories", "memory_meta", "memory_attrs", "memory_history",
+    "memory_trace", "feedback_log", "state_invalidations", "user_expression_profile",
+    "bm25_terms", "bm25_docs", "memories_fts", "vec_index", "entities", "sessions",
+)
+# 子系统状态类：默认不清，subsystems=True 才一并清（关系/目标/咨询/意图/场景评分等）
+_SUBSYS_SCOPE_TABLES = (
+    "relationships", "goals", "consultations", "mind_intention_state",
+    "scenario_scores", "hesitation_log", "item_search_state", "ai_actions_state",
+)
+
+
+def _archive_scope(scope, tables):
+    """删除前把待删的 scope 行归档到 .trash/，误删可手工恢复。返回备份文件路径或 None。
+
+    只归档带 scope 列的内容表；event_relations/entity_events/topic_params 这类
+    无 scope 列的联结/索引表不归档（属派生物，重放 ingest 可重建）。
+    """
+    c = _connect()
+    dump = {}
+    for t in tables:
+        try:
+            rows = c.execute(f"SELECT * FROM {t} WHERE scope=?", (scope,)).fetchall()
+            if rows:
+                dump[t] = [dict(r) for r in rows]
+        except Exception:
+            continue
+    if not dump:
+        return None
+    try:
+        trash = DB_PATH.parent / ".trash"
+        trash.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        safe = str(scope).replace(":", "_").replace("/", "_").replace("\\", "_")
+        p = trash / f"purge_{safe}_{ts}.json"
+        p.write_text(json.dumps(dump, ensure_ascii=False, default=str), encoding="utf-8")
+        return p
+    except Exception:
+        return None
+
+
+def purge_scope(scope, subsystems=False, confirm=None):
+    """按用户/场景彻底删除：记忆/属性/事件/议题/索引/日志。
+
+    安全闸：必须显式传 confirm == scope 才执行，防误触（漏传/传错 → 直接返回 0，不删）。
+    删除前先把待删行归档到 .trash/ 下的 JSON，误删可手工恢复。
+    subsystems=True 时额外清关系/目标/咨询/意图等子系统状态表。
+    返回删除的总行数（confirm 未通过时为 0）。
+    """
+    if confirm != scope:
+        return 0
     with _lock:
         c = _connect()
         event_ids = [r[0] for r in c.execute("SELECT id FROM events WHERE scope=?", (scope,)).fetchall()]
         topic_ids = [r[0] for r in c.execute("SELECT id FROM topics WHERE scope=?", (scope,)).fetchall()]
+        tables = list(_MEM_SCOPE_TABLES)
+        if subsystems:
+            tables += list(_SUBSYS_SCOPE_TABLES)
+        _archive_scope(scope, tables + ["events", "topics"])
         for eid in event_ids:
             c.execute("DELETE FROM event_relations WHERE src=? OR dst=?", (eid, eid))
             c.execute("DELETE FROM entity_events WHERE event_id=?", (eid,))
@@ -2666,16 +2851,11 @@ def purge_scope(scope):
             c.execute("DELETE FROM topic_params WHERE topic_id=?", (tid,))
         for tid in topic_ids:
             c.execute("DELETE FROM topics WHERE id=?", (tid,))
-        c.execute("DELETE FROM memories WHERE scope=?", (scope,))
-        c.execute("DELETE FROM memory_meta WHERE scope=?", (scope,))
-        c.execute("DELETE FROM memory_attrs WHERE scope=?", (scope,))
-        c.execute("DELETE FROM bm25_terms WHERE scope=?", (scope,))
-        c.execute("DELETE FROM bm25_docs WHERE scope=?", (scope,))
-        c.execute("DELETE FROM memories_fts WHERE scope=?", (scope,))
-        c.execute("DELETE FROM vec_index WHERE scope=?", (scope,))
-        c.execute("DELETE FROM entities WHERE scope=?", (scope,))
-        c.execute("DELETE FROM sessions WHERE scope=?", (scope,))
-        c.commit()
+        removed = len(event_ids) + len(topic_ids)
+        for t in tables:
+            removed += c.execute(f"DELETE FROM {t} WHERE scope=?", (scope,)).rowcount
+        _maybe_commit()
+    return removed
 
 
 # ===== 结构化属性（偏好/画像类记忆）=====
@@ -2695,7 +2875,7 @@ def attr_set(scope, key, attr, value, confidence=0.7, updated_at=""):
                 updated_at or datetime.now().isoformat(timespec="seconds"),
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def attr_rows(scope=None, key=None, attr=None):
@@ -2725,7 +2905,7 @@ def attr_delete(scope, key=None):
             c.execute("DELETE FROM memory_attrs WHERE scope=?", (scope,))
         else:
             c.execute("DELETE FROM memory_attrs WHERE scope=? AND key=?", (scope, key))
-        c.commit()
+        _maybe_commit()
 
 
 # ===== 词法索引（FTS5 BM25，trigram 支持中文）=====
@@ -2753,7 +2933,7 @@ def lexicon_sync(scope, key):
             "INSERT INTO memories_fts(scope,key,fact) VALUES(?,?,?)",
             [(r[0], r[1], r[2]) for r in rows],
         )
-        c.commit()
+        _maybe_commit()
 
 
 def lexicon_rebuild() -> int:
@@ -2768,7 +2948,7 @@ def lexicon_rebuild() -> int:
             "INSERT INTO memories_fts(scope,key,fact) VALUES(?,?,?)",
             [(r[0], r[1], r[2]) for r in rows],
         )
-        c.commit()
+        _maybe_commit()
         return len(rows)
 
 
@@ -2825,7 +3005,7 @@ def history_add(scope, key, fact, action, reason="", old_value="", new_value="",
                 datetime.now().isoformat(timespec="seconds"),
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def history_rows(scope=None, key=None, limit=50):
@@ -2862,7 +3042,7 @@ def feedback_add(scope, key, kind, fact="", detail="", source="chat", weight=1.0
                 float(weight),
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def feedback_rows(scope=None, limit=50):
@@ -2914,7 +3094,7 @@ def relationship_upsert(
                 updated_at or datetime.now().isoformat(timespec="seconds"),
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def relationship_rows():
@@ -2936,7 +3116,7 @@ def policy_log_add(trigger, behavior, priority=None, detail=""):
                 str(detail)[:500],
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def policy_log_rows(limit=50):
@@ -2974,7 +3154,7 @@ def goal_add(scope, title, priority=3, deadline="", note="", motivation="", conf
                 ts,
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def goal_rows(scope=None, status=None, limit=50):
@@ -3018,7 +3198,7 @@ def goal_update(scope, title, progress=None, status=None, note=None, motivation=
             params.append(json.dumps(current_state, ensure_ascii=False)[:500])
         params += [scope, str(title)[:100]]
         c.execute(f"UPDATE goals SET {', '.join(sets)} WHERE scope=? AND title=?", params)
-        c.commit()
+        _maybe_commit()
 
 
 def consult_get(scope):
@@ -3049,7 +3229,7 @@ def consult_save(scope, topic, status, stage, answers, created_at=""):
                 ts,
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 # ===== v7：语言语义解释层 =====
@@ -3068,7 +3248,7 @@ def expr_log_add(raw_expression, normalized_meaning="", possible_intents=None, c
                 datetime.now().isoformat(timespec="seconds"),
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def expr_log_rows(limit=50):
@@ -3120,7 +3300,7 @@ def expr_profile_upsert(
                 datetime.now().isoformat(timespec="seconds"),
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 # ===== v10：Memory Trace Export =====
@@ -3175,7 +3355,7 @@ def trace_add(
                 str(context_hint)[:200],
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def trace_rows(scope=None, since=None, limit=100):
@@ -3202,7 +3382,7 @@ def trace_prune(days=7) -> int:
     with _lock:
         c = _connect()
         cur = c.execute("DELETE FROM memory_trace WHERE ts<?", (cutoff,))
-        c.commit()
+        _maybe_commit()
         return cur.rowcount
 
 
@@ -3222,7 +3402,7 @@ def trace_review_add(trace_id, score, scores=None, comment="", reviewer=""):
                 datetime.now().isoformat(timespec="seconds"),
             ),
         )
-        c.commit()
+        _maybe_commit()
 
 
 def trace_review_map(trace_ids):
@@ -3242,6 +3422,92 @@ def trace_review_recent(limit=100):
     with _lock:
         rows = _connect().execute(
             "SELECT * FROM trace_review ORDER BY created_at DESC, rowid DESC LIMIT ?", (max(1, int(limit)),)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ===== v33：对话质量评分（convreview）——用户消息+AI 回复一条记录 =====
+
+def conv_add(conversation_id="", scope="", ts="", user_text="", ai_text=""):
+    with _lock:
+        c = _connect()
+        c.execute(
+            "INSERT INTO conv_log(conversation_id,scope,ts,user_text,ai_text) VALUES(?,?,?,?,?)",
+            (
+                str(conversation_id)[:80],
+                str(scope)[:80],
+                str(ts)[:40],
+                str(user_text)[:500],
+                str(ai_text)[:800],
+            ),
+        )
+        _maybe_commit()
+
+
+def conv_rows(scope=None, since=None, limit=100):
+    with _lock:
+        sql = "SELECT * FROM conv_log"
+        conds, params = [], []
+        if scope:
+            conds.append("scope=?")
+            params.append(scope)
+        if since:
+            conds.append("ts>=?")
+            params.append(since)
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        return [dict(r) for r in _connect().execute(sql, params).fetchall()]
+
+
+def conv_prune(days=30) -> int:
+    """清理超过保留期的对话记录（默认 30 天），防表膨胀。"""
+    import datetime as _dt
+    cutoff = (_dt.datetime.now() - _dt.timedelta(days=max(1, int(days)))).isoformat(timespec="seconds")
+    with _lock:
+        c = _connect()
+        cur = c.execute("DELETE FROM conv_log WHERE ts<?", (cutoff,))
+        _maybe_commit()
+        return cur.rowcount
+
+
+def conv_review_add(conv_id, score, scores=None, comment="", reviewer=""):
+    with _lock:
+        c = _connect()
+        c.execute(
+            "INSERT INTO conv_review(conv_id,score,scores,comment,reviewer,created_at) VALUES(?,?,?,?,?,?) "
+            "ON CONFLICT(conv_id,reviewer) DO UPDATE SET "
+            "score=excluded.score, scores=excluded.scores, comment=excluded.comment, created_at=excluded.created_at",
+            (
+                int(conv_id),
+                max(1.0, min(5.0, float(score))),
+                json.dumps(scores or {}, ensure_ascii=False),
+                str(comment)[:300],
+                str(reviewer)[:50],
+                datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+        _maybe_commit()
+
+
+def conv_review_map(conv_ids):
+    """返回 {conv_id: review_row}，供导出时展示人工评分。"""
+    ids = [int(i) for i in conv_ids if i]
+    if not ids:
+        return {}
+    marks = ",".join("?" * len(ids))
+    with _lock:
+        rows = _connect().execute(
+            f"SELECT * FROM conv_review WHERE conv_id IN ({marks})", ids
+        ).fetchall()
+        return {r["conv_id"]: dict(r) for r in rows}
+
+
+def conv_review_recent(limit=100):
+    with _lock:
+        rows = _connect().execute(
+            "SELECT * FROM conv_review ORDER BY created_at DESC, rowid DESC LIMIT ?", (max(1, int(limit)),)
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -3305,7 +3571,7 @@ def restore_all(data, replace=False) -> dict:
             except Exception as e:
                 _stats_err(e)
                 pass
-        c.commit()
+        _maybe_commit()
     return counts
 
 

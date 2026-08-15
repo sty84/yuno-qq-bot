@@ -13,10 +13,7 @@ from plugins import _db, _shared
 
 
 def _cfg(key, default):
-    m = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("mind", {}) or {}
-    return m.get(key, default)
-
-
+    return _shared.core_cfg("mind", key, default)
 def _tokens(text) -> set:
     try:
         from memory import extract

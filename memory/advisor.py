@@ -6,6 +6,7 @@
 - 自我反思：定期把近期事件/关系/目标整理成洞察，写入 AI 记忆。
 """
 
+from memory._llmutil import parse_json_object
 import json
 import re
 from datetime import datetime
@@ -335,8 +336,7 @@ def _llm_review(belief, evidence):
             detail="decision",
         )
         raw = (resp.choices[0].message.content or "").strip()
-        start, end = raw.find("{"), raw.rfind("}")
-        data = json.loads(raw[start:end + 1]) if start >= 0 else {}
+        data = parse_json_object(raw) or {}
         action = data.get("action", "accept")
         if action not in ("accept", "revise", "reject"):
             action = "accept"

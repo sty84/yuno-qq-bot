@@ -19,7 +19,55 @@ def _target_group():
 
 def loops(make_ctx):
     return [outbox_loop(make_ctx), random_event_loop(make_ctx), appointment_loop(make_ctx),
-            sharing_loop(make_ctx), space_loop(make_ctx), inspection_loop(make_ctx)]
+            sharing_loop(make_ctx), space_loop(make_ctx), inspection_loop(make_ctx),
+            pollution_loop(make_ctx)]
+
+
+def _pollution_scan_due(now_ts, last_ts, interval_days=7):
+    """污染巡检是否到期：距上次执行超过 interval_days 天（默认每周一次）。"""
+    if not last_ts:
+        return True
+    try:
+        from datetime import datetime
+        last = datetime.fromisoformat(str(last_ts))
+        days = (now_ts - last).total_seconds() / 86400.0
+        return days >= float(interval_days)
+    except Exception:
+        return True
+
+
+async def pollution_loop(make_ctx):
+    """存量污染巡检（v2.3，防自我强化循环的存量侧闭环）：
+    每 6 小时醒一次，距上次扫描 >=7 天则对 source=user 记忆做反向出处校验并
+    --apply（幂等：无污染时删除 0 降级 0）。结果写 bot 日志；有处理动作时
+    也记一条 kv 供人工查看。不做主动播报（运维动作，不打扰用户）。"""
+    while True:
+        _shared.reload_if_changed()
+        try:
+            from datetime import datetime
+            now = datetime.now()
+            last = _db.kv_get("memory", "pollution_last_scan", "")
+            if _pollution_scan_due(now, last, interval_days=7):
+                try:
+                    from tools import cmd_pollution_scan
+                    report = await asyncio.to_thread(cmd_pollution_scan, "", True)
+                except Exception as e:
+                    print(f"[污染巡检] 扫描失败：{e}")
+                    _stats_err(e)
+                    report = ""
+                _db.kv_set("memory", "pollution_last_scan", now.isoformat(timespec="seconds"))
+                summary = (report or "").splitlines()
+                head = summary[0] if summary else report
+                # 有实际动作：删除/降级数非 0（报告总含"已执行：删除 N，降级 M"）
+                acted = bool(report) and "删除 0，降级 0" not in report
+                print(f"[污染巡检] {now:%Y-%m-%d %H:%M} {head}"
+                      + (" · 有处理动作" if acted else " · 无污染，稳态"))
+                if acted:
+                    _db.kv_set("memory", "pollution_last_report", str(report)[:2000])
+        except Exception as e:
+            print(f"pollution loop failed: {e}")
+            _stats_err(e)
+        await asyncio.sleep(6 * 3600)
 
 
 async def outbox_loop(make_ctx):

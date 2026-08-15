@@ -75,10 +75,7 @@ _BRACKET_RE = re.compile(r"[()（）【】\[\]]")
 
 
 def _cfg(key, default):
-    slp = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("sleep", {}) or {}
-    return slp.get(key, default)
-
-
+    return _shared.core_cfg("sleep", key, default)
 def _today() -> str:
     return date.today().isoformat()
 
@@ -88,10 +85,7 @@ def _now_ts() -> str:
 
 
 def _cfg_sleep(key, default):
-    slp = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("sleep", {}) or {}
-    return slp.get(key, default)
-
-
+    return _shared.core_cfg("sleep", key, default)
 URGENT_WORDS = (
     "急", "快", "疼", "痛", "难受", "救命", "出事", "麻烦", "重要", "怎么办",
     "面试", "合同", "开会", "工作", "马上", "立刻", "紧急",

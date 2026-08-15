@@ -51,10 +51,7 @@ FALLBACK_MESSAGES = {
 
 
 def _cfg(key, default):
-    s = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("sharing", {}) or {}
-    return s.get(key, default)
-
-
+    return _shared.core_cfg("sharing", key, default)
 def _threshold() -> float:
     """分享阈值：Persona Pack 优先（sharing_threshold），config 兜底，最后默认 0.6。"""
     try:

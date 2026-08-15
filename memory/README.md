@@ -44,6 +44,19 @@ AI 自身（`ai` / `ai:<id>`）、人物档案（`char:<名>`）**同表同格�
 
 派生索引（`bm25_*` / `vec_index` / `memories_fts`）不参与导出，由 grow 重建。
 
+数据层工程化（v2.3 工程轮）：
+
+- **写事务**：`_db.transaction()` 上下文管理器——事务内所有 helper 的提交点挂起，
+  `controller.ingest` 主写段（合并/替换/事件图/议题/词法/多主体/巩固/关系）单事务原子写，
+  中途失败整体回滚，不留"事实已存但图/索引/议题缺失"的半成品；嵌套安全。
+- **检索下推**：`_db.memory_rows_by_facts(scope, facts)` 把 `WHERE fact IN (...)` 下推 SQL，
+  `reasoning._retrieve_single` 不再全表拉取后 Python 过滤；隐式反馈改 `meta_touch_many`
+  批量提交（一次事务 vs 逐条 commit）。
+- **公共助手**：`plugins._shared.core_cfg(section, key, default)` 统一配置读取（各模块
+  `_cfg` 转发）；`memory/_llmutil.parse_json_object` 统一 LLM JSON 提取（9 处收敛）；
+  `emotion.vad_centroid` 统一 VAD 加权质心（议题质心与用户情绪估计共用，逐位等价）。
+- **观测**：`llm_cost_clear()` 清空成本表（测试隔离/运维重置）。
+
 ## 3. 一条消息的完整旅程
 
 ```
@@ -101,7 +114,7 @@ AI 自身（`ai` / `ai:<id>`）、人物档案（`char:<名>`）**同表同格�
 ### lexical / vecindex —— 检索通道
 
 - **BM25**（真分词倒排，k1=1.5, b=0.75）：专名/数字的主通道；FTS5 trigram 兜底；LIKE 最后降级。
-- **IVF 向量索引**（自研）：bge-small-zh-v1.5（512 维）→ kmeans 质心 → nprobe 探测打分；
+- **IVF 向量索引**（自研）：bge-large-zh-v1.5（1024 维）→ kmeans 质心 → nprobe 探测打分；
   `memory-index --tune` 网格调 nlist/nprobe；nlist=0 / nprobe=0 时自动按 √n 缩放（v31）。
 - **规则直查**：结构化属性问题（"喜欢什么"→preference）确定性命中。
 
@@ -237,7 +250,8 @@ AI 自身（`ai` / `ai:<id>`）、人物档案（`char:<名>`）**同表同格�
 2. **阈值未校准**：关系阶段、遗忘半衰期、表达画像阈值都是经验值，需真实数据校准。
 3. **检索无数字基线**：评测管道就绪但 probes/评分还在积累，权重调整暂无数字依据。
 4. **单 SQLite + 内存态**：`_chat_busy` / 缓存 / 节流状态重启即失；大流量需评估迁移
-   PostgreSQL+pgvector（数据层已收敛在 `_db`，迁移路径清晰）。
+   PostgreSQL+pgvector（数据层已收敛在 `_db`，迁移路径清晰）。写入已事务化，半成品
+   状态已消除。
 5. **prompt 级约束的极限**：防编造、防模板、防夸张是提示词层面，无法 100% 根除；
    彻底解决依赖 AI 味抽查集 + 训练。
 

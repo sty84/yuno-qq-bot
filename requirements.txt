@@ -1,5 +1,6 @@
 qq-botpy>=1.1.5
-openai>=1.30.0
+# openai 锁定 1.x：3.0 起初始化即校验 api_key 非空，.env 未填 key 时 import 会崩溃
+openai>=1.30.0,<2.0
 python-dotenv>=1.0.0
 mcp>=1.0.0
 fastapi>=0.100
@@ -8,5 +9,5 @@ uvicorn>=0.23
 #   pip install torch --index-url https://download.pytorch.org/whl/cpu
 # 否则会随 sentence-transformers 安装全量（含 CUDA）torch，体积约 2.5GB
 sentence-transformers>=2.7.0
-# 可选：jieba 用于 BM25 中文分词（纯 Python，装了就自动启用，否则用二元组回退）
-# jieba>=0.42.1
+# jieba 用于 BM25 中文分词 + 中文专名识别（纯 Python 轻量，无外部依赖）
+jieba>=0.42.1

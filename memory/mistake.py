@@ -37,10 +37,7 @@ HALF_LIFE_DAYS = 7.0
 
 
 def _cfg(key, default):
-    core = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("mistake", {}) or {}
-    return core.get(key, default)
-
-
+    return _shared.core_cfg("mistake", key, default)
 def _records(scope):
     return _db.kv_get(KV_NS, f"mistakes:{scope}", []) or []
 

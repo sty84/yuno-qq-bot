@@ -41,8 +41,16 @@ def test_office_pack():
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, repo)
 
+    import plugins._shared as _shared_mod
+    # 套件顺序下 _shared 可能已被其他测试模块先导入，CONFIG_PATH 在模块级冻结 →
+    # 显式重定向并重载，确保 office pack 生效、数据目录落在临时目录（测试隔离）
+    _shared_mod.CONFIG_PATH = cfg_path
+    _shared_mod.reload_config()
+
     from agent import persona
     from memory import pack, schedule, living
+    from plugins import _db
+    _db.init(tmp, force=True)  # 强制绑定本测试临时库
 
     checks = []
 

@@ -45,16 +45,59 @@ _TIME_RE = re.compile(r"(凌晨|早上|上午|中午|下午|傍晚|晚上)?\s*(\
 
 
 def _cfg(key, default):
-    core = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("appointment", {}) or {}
-    return core.get(key, default)
-
-
+    return _shared.core_cfg("appointment", key, default)
 def _zone(scope):
     try:
         return ZoneInfo(tz_mod.user_tz(scope))
     except Exception as e:
         _stats_err(e)
         return ZoneInfo("Asia/Shanghai")
+
+
+def _is_appointment_question(text: str) -> bool:
+    """疑问句式（问约定，不是约定陈述）。含"约/见/定"类动词 + 疑问词 → 判定为询问。
+    例：'你记得我们约了什么吗' / '约过吗' / '我们约的什么' / '月底演出定了吗'。
+    陈述约定（'明天下午三点见吧' / '月底演出时间定了'）不含疑问词，不受影响。"""
+    t = str(text or "").strip()
+    if not t:
+        return False
+    # 疑问词：句末/句中问法。注意"什么时间/几点"也是问时间不是定约定
+    for w in ("什么", "吗", "呢", "是不是", "还记得", "记不记得", "有没有", "啥", "几点", "什么时候"):
+        if w in t:
+            return True
+    return False
+
+
+# 约定归属（对话暴露的 bug：'我们明天下午三点见吧'被转述成'用户有约'，丢了和 AI 的关系）
+_EXTERNAL_MARK = ("我有约", "约了朋友", "约了别人", "约了同事", "和别人", "和别人约", "约了他", "约了她",
+                  "约了他们", "约了她们", "家里人", "同学约", "同事约")
+
+
+def _with_ai_of(text: str) -> bool:
+    """约定归属：和 AI 约（我们/见你/找你/一起…） vs 用户外部日程（我有约/约了朋友…）。
+    c2c 场景下"约"默认是和 AI 说的；命中明显外部标记才判 False。"""
+    t = str(text or "")
+    return not any(w in t for w in _EXTERNAL_MARK)
+
+
+_CONTENT_WORDS = ("见面", "打游戏", "碰头", "集合", "吃饭", "聚餐", "面试", "考试", "演出",
+                  "排练", "会议", "看电影", "逛街", "运动", "跑步", "打球", "唱歌", "喝酒", "桌游")
+
+
+def _content_of(text: str) -> str:
+    """约定内容：优先提取核心动词（见面/打游戏/碰头…），否则去时间词后的剩余。
+    '明天下午三点见吧'→'见面'；'一起打游戏'→'打游戏'；'后天早上碰头'→'碰头'。"""
+    t = str(text or "")
+    for w in _CONTENT_WORDS:
+        if w in t:
+            return w
+    # 去钟点（三点/三点半/3点）→ 去时间词/人称/语气词 → 剩余即内容
+    t = re.sub(r"[一二两三四五六七八九十0-9]+\s*点(?:\s*半)?", "", t)
+    for w in ("明天", "后天", "今天", "昨天", "上午", "下午", "晚上", "中午", "凌晨", "傍晚",
+              "周", "号", "月", "吧", "啊", "呀", "呢", "了", "我们", "你", "我"):
+        t = t.replace(w, "")
+    t = t.strip("，。！？,.!? ")
+    return t[:20]
 
 
 def _parse_dt(text, scope):
@@ -68,8 +111,8 @@ def _parse_dt(text, scope):
         if g in ("今天", "明天", "后天"):
             day = now.date() + timedelta(days={"今天": 0, "明天": 1, "后天": 2}[g])
         elif g == "月底":
-            import calendar
-            day = now.date().replace(day=calendar.monthrange(now.year, now.month)[1])
+            # "月底"是模糊时间（可能指最后一个周日/某一天），不推断成具体哪一天，避免编造"31日"这类错日期
+            return None, False
         elif m_date.group(2):
             wd = WEEKDAYS[m_date.group(2)]
             day = now.date() + timedelta(days=(wd - now.weekday()) % 7 or 7)
@@ -131,6 +174,11 @@ def extract(scope, text) -> dict:
     t = str(text or "").strip()
     if not t or not any(v in t for v in APP_VERBS):
         return {"added": 0}
+    # 问句过滤（对话暴露的 bug）："你记得我们约了什么吗"是"问约定"，不是约定陈述——
+    # 之前会被当成约定存成默认 12:00 的假约定，导致错误催约。疑问句式一律不存
+    # （用户真约了会说陈述句；确认句"是不是约了X"也不存，避免编造约定）。
+    if _is_appointment_question(t):
+        return {"added": 0, "skipped": "疑问句式"}
     # 证据门控 v2：含已确认虚构词（黑名单）的"约定"直接拒绝入库
     if any(w in t for w in _banned_words()):
         return {"added": 0, "rejected": "黑名单"}
@@ -148,6 +196,8 @@ def extract(scope, text) -> dict:
         "time": ts,
         "has_time": bool(has_time),
         "text": t[:80],
+        "content": _content_of(t),
+        "with_ai": _with_ai_of(t),
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "status": "waiting",
         "poked": 0,
@@ -375,7 +425,8 @@ def check_and_poke(now=None) -> list:
 
 
 def context_block(scope) -> str:
-    """待履约约定提示（注入上下文，AI 聊天时自然记得）。"""
+    """待履约约定提示（注入上下文，AI 聊天时自然记得）。
+    带归属（和你约的 vs 用户自己的日程）——修复"我们约了什么"被答成"你有约"的语义错位。"""
     if not scope:
         return ""
     appts = [a for a in _appts() if a.get("scope") == scope and a.get("status") == "waiting"]
@@ -390,7 +441,10 @@ def context_block(scope) -> str:
         except Exception as e:
             _stats_err(e)
             state = "约定待履约"
-        lines.append(f"· {a['text']}（约在 {_when_text(a)}，{state}）")
+        if a.get("with_ai", True):
+            lines.append(f"· 你和用户约了「{a.get('content') or a['text']}」（约在 {_when_text(a)}，{state}）——用户问'我们约了什么'时按这条答")
+        else:
+            lines.append(f"· 用户自己有约：{a['text']}（约在 {_when_text(a)}，{state}）——这是用户自己的日程，不是你俩的约定")
     return "【待履约约定】\n" + "\n".join(lines)
 
 

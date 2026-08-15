@@ -53,10 +53,7 @@ def _event_time_map(scopes) -> dict:
 
 
 def _cfg(key, default):
-    core = _shared.CONFIG.get("memory", {}).get("core", {}) or {}
-    return core.get(key, default)
-
-
+    return _shared.core_cfg("", key, default)
 def _weights() -> dict:
     w = _cfg("weights", {}) or {}
     return {
@@ -92,7 +89,7 @@ def _rewrite_enabled() -> bool:
         return True
 
 
-def rewrite_query(query, scopes=None) -> str:
+def rewrite_query(query) -> str:
     """LLM 查询改写（治本）：宽泛/指代查询 → 具体名词短语，再走检索。
     已具体不改写（省 token）；LLM 失败降级原句；同 query 缓存不重复调用。"""
     global _rewrite_cache
@@ -364,9 +361,10 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
     if candidates:
         for scope in all_scopes:
             privacy_th = float(trace.adjustments().get("privacy_threshold", 0.8))
+            # ② 检索下推：fact IN (...) 下推 SQL，不再全表拉取后 Python 过滤
             rows += [
                 r
-                for r in _db.memory_rows(scope, exclude_status=("superseded",))
+                for r in _db.memory_rows_by_facts(scope, candidates, exclude_status=("superseded",))
                 if r["fact"] in candidates
                 and _visible(r, scopes)
                 and not str(r.get("fact", "")).startswith("enc:")
@@ -375,6 +373,8 @@ def _retrieve_single(query_text, scopes, top_k=5, min_score=0.25, extra_scopes=N
                     str(r.get("scope") or "").startswith("ai")
                     and str(r.get("key") or "") in AI_META_EXCLUDE_KEYS
                 )
+                # 人物档案（char:）是静态设定，不进普通记忆检索（避免抢占「你是谁」等查询）
+                and not str(r.get("scope") or "").startswith("char:")
                 and (not loc_mark or loc_mark in str(r.get("fact", "")))
                 and float(r.get("privacy", 0.0)) < privacy_th
             ]
@@ -547,7 +547,7 @@ def retrieve(
     orig_query = query_text
     if _rewrite_enabled():
         # LLM 查询改写（v2.3 改动 2）：宽泛/指代查询 → 具体名词；已具体/失败/缓存直接返回原句
-        query_text = rewrite_query(query_text, scopes)
+        query_text = rewrite_query(query_text)
     if window is None and not _cfg("ablation_disable_time", False):
         try:
             from memory import time_extract
@@ -558,6 +558,35 @@ def retrieve(
                 window = (te["start"], te["end"])
         except Exception as e:
             _stats_err(e)
+    # 空间自动提取：查询含地点词（排练室/客厅…）→ 限定带 [地点：X] 标签的空间记忆
+    if location is None:
+        try:
+            from memory import space as _space_mod
+            from memory import pack as _pack_mod
+            _places = list(_space_mod.memorable_places())
+            _layout = (_pack_mod.world() or {}).get("layout") or {}
+            for _k in _layout.keys():
+                if _k and _k not in _places:
+                    _places.append(_k)
+            for _p in _places:
+                if _p and str(_p) in query_text:
+                    location = _p
+                    break
+        except Exception as e:
+            _stats_err(e)
+    # 主体自动识别：查询含已注册主体名（队友/NPC）→ 扩展 npc scope（多主体记忆）
+    try:
+        from memory import subjects as _subj_mod
+        _names = _subj_mod.detect(query_text)
+        if _names:
+            _scopes = list(scopes or [])
+            for _n in _names:
+                _ns = _subj_mod.scope_of(_n)
+                if _ns not in _scopes:
+                    _scopes.append(_ns)
+            scopes = _scopes
+    except Exception as e:
+        _stats_err(e)
     variants = extract.expand(query_text, recent) if expand_query else [query_text]
     if len(variants) == 1:
         hits = _retrieve_single(query_text, scopes, top_k, min_score, extra_scopes, location=location, window=window)
@@ -607,15 +636,18 @@ def retrieve(
             _stats_err(e)
     if min_score >= 0.05 and (_cfg("telemetry", {}) or {}).get("query_log", True):
         _db.query_log_add(orig_query, scopes, top_k, [f for f, _s, _sc in hits])
-    # 隐式反馈：只对真正返回的记忆计一次调用
+    # 隐式反馈：只对真正返回的记忆计一次调用（② 批量：fact IN 下推 + 一次事务提交）
+    hit_facts = [f for _s, f, _scope in hits]
     rows = {}
     for scope in list(scopes) + list(extra_scopes or []):
-        for r in _db.memory_rows(scope):
+        for r in _db.memory_rows_by_facts(scope, hit_facts):
             rows.setdefault(r["fact"], (r["scope"], r["key"]))
+    items = []
     for _s, fact, _scope in hits:
         info = rows.get(fact)
         if info:
-            policy.touch(info[0], info[1], fact)
+            items.append((info[0], info[1], fact, 0.5, ""))
+    _db.meta_touch_many(items)
     return hits
 
 
@@ -772,7 +804,7 @@ def llm_rerank(query, candidates, top_k, paths=None):
         if picked:
             return [(f, 1.0 - i * 0.01) for i, f in enumerate(picked[:top_k])]
     except Exception as e:
-        print(f"LLM 重排失败，回退轻量重排：{e}")
+        _stats_err(e)
     return light_rerank(query, candidates, top_k)
 
 
@@ -784,16 +816,32 @@ def cross_rerank(query, candidates, top_k, topic_facts=None):
     global _cross
     try:
         if _cross is None:
+            import os
+            import pathlib
             from sentence_transformers import CrossEncoder
             model = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("rerank", {}).get(
                 "cross_model", "BAAI/bge-reranker-base"
             )
-            _cross = CrossEncoder(str(model))
+            # 本地模型目录优先（避免联网下载被墙）；相对路径按项目根目录解析
+            model_path = pathlib.Path(str(model))
+            if not model_path.is_absolute():
+                model_path = pathlib.Path(__file__).resolve().parent.parent / model_path
+            if model_path.is_dir():
+                os.environ.setdefault("HF_HUB_OFFLINE", "1")
+                os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+                model = str(model_path)
+            device = None  # None = 让 CrossEncoder 自选（新版会走 GPU）；显式检测更稳妥
+            try:
+                import torch
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+            except Exception:
+                device = "cpu"
+            _cross = CrossEncoder(str(model), device=device)
         scores = _cross.predict([(str(query), str(c)) for c in candidates])
         ranked = sorted(zip(candidates, scores), key=lambda x: -float(x[1]))[: max(1, int(top_k))]
         return [(f, round(float(s), 4)) for f, s in ranked]
     except Exception as e:
-        print(f"CrossEncoder 重排不可用，回退轻量重排：{e}")
+        _stats_err(e)
         return light_rerank(query, candidates, top_k, topic_facts)
 
 

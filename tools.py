@@ -59,7 +59,8 @@ def _sync_notify(results, notify: bool) -> list[str]:
     return messages
 
 
-def cmd_health(notify: bool) -> str:
+def cmd_health(notify: bool):
+    """独立健康检查：返回 (退出码, 文本)；有服务离线时退出码 1（供 cron 门控）。"""
     _capability, _db, _shared = _plugins()
     _shared.reload_if_changed()
     results = _capability.check_all()
@@ -69,7 +70,8 @@ def cmd_health(notify: bool) -> str:
     messages = _sync_notify(results, notify)
     if messages:
         lines.append("播报：" + "；".join(messages))
-    return "\n".join(lines) or "服务注册表为空。"
+    text = "\n".join(lines) or "服务注册表为空。"
+    return (1 if any(not ok for _, ok, _ in results) else 0), text
 
 
 # ===== backup =====
@@ -159,6 +161,46 @@ def cmd_emotion_log(days: int = 14, out: str = "") -> str:
     return f"已导出 {len(rows)} 条 → {out}"
 
 
+def cmd_emotion_train(file: str, out: str = "") -> str:
+    """训练本地情绪分类器（bge-large 编码 + 逻辑回归），替换 analysis 的 LLM 兜底。
+    训练集 JSON：[{"text":"气死我了","emotion":"愤怒"}, ...]，emotion ∈ 9 类（开心/低落/焦虑/兴奋/愤怒/恐惧/惊讶/厌恶/平静）。
+    产物：data/models/emotion_clf.pkl，emotion.py 检测到即自动启用（回退 LLM）。"""
+    import pathlib
+    import pickle
+    from plugins import _shared
+
+    try:
+        with open(file, encoding="utf-8") as f:
+            rows = json.load(f)
+    except Exception as e:
+        return f"训练集读取失败：{e}"
+    texts, labels = [], []
+    for r in rows:
+        t = str(r.get("text", "")).strip()
+        l = str(r.get("emotion", "")).strip()
+        if t and l:
+            texts.append(t)
+            labels.append(l)
+    if len(texts) < 30:
+        return f"训练样本太少（{len(texts)} 条），建议 ≥300 条覆盖长尾情绪"
+
+    from sentence_transformers import SentenceTransformer
+    import torch
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = SentenceTransformer("BAAI/bge-large-zh-v1.5", device=device)
+    X = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+
+    from sklearn.linear_model import LogisticRegression
+    clf = LogisticRegression(max_iter=1000).fit(X, labels)
+    acc = clf.score(X, labels)
+
+    out_path = pathlib.Path(out) if out else _shared.DATA_DIR / "models" / "emotion_clf.pkl"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "wb") as f:
+        pickle.dump({"clf": clf, "labels": sorted(set(labels))}, f)
+    return f"训练完成：{len(texts)} 条，训练集准确率 {acc:.3f}，已保存 → {out_path}"
+
+
 def cmd_config_validate() -> str:
     """校验 config.json：未知段、数值字段类型、窗口类字段长度、分享参数取值。"""
     _capability, _db, _shared = _plugins()
@@ -171,6 +213,7 @@ def cmd_config_validate() -> str:
         "persona", "world", "trace", "emotion", "sleep", "schedule", "weather",
         "environment", "sharing", "living", "space", "interaction", "weights",
         "vector_index", "policy", "mind", "sensors", "agents", "persona_pack",
+        "active_edit",
     }
     for k in core:
         if k.startswith("_") or k in KNOWN:
@@ -196,13 +239,13 @@ def cmd_config_validate() -> str:
             except (TypeError, ValueError):
                 errors.append(f"memory.core.sharing.{k} 应为数字，当前 {v!r}")
     if not errors and not warnings:
-        return "config-validate：全部通过"
+        return 0, "config-validate：全部通过"
     lines = ["config-validate 报告"]
     for e in errors:
         lines.append("ERROR " + e)
     for w in warnings:
         lines.append("WARN " + w)
-    return "\n".join(lines)
+    return (1 if errors else 0), "\n".join(lines)
 
 
 def cmd_memory_eval(path: str, k: int, save: bool, dataset: str = "") -> str:
@@ -223,7 +266,9 @@ def cmd_memory_eval(path: str, k: int, save: bool, dataset: str = "") -> str:
     if probes is None:
         try:
             with open(path, encoding="utf-8") as f:
-                probes = json.load(f)
+                raw = json.load(f)
+            # 兼容 {"items":[...]} 包装（带说明的评测集文件）与裸列表
+            probes = raw.get("items") if isinstance(raw, dict) else raw
         except Exception as e:
             return f"评测集读取失败：{e}"
     result = memory.run_eval(probes, k=k)
@@ -239,7 +284,9 @@ def cmd_eval_dataset_save(name: str, path: str) -> str:
     from plugins import _db
     try:
         with open(path, encoding="utf-8") as f:
-            probes = json.load(f)
+            raw = json.load(f)
+        # 兼容 {"items":[...]} 包装（带说明）与裸列表
+        probes = raw.get("items") if isinstance(raw, dict) else raw
     except Exception as e:
         return f"评测集读取失败：{e}"
     _db.kv_set(
@@ -307,7 +354,7 @@ def cmd_memory_clear_user(uid: str) -> str:
     """按用户彻底清除（隐私权）：记忆/事件/议题/属性/索引。"""
     from plugins import _db
     scope = f"c2c:{uid}"
-    _db.purge_scope(scope)
+    _db.purge_scope(scope, subsystems=True, confirm=scope)
     removed_appts = 0
     try:
         from memory import appointment
@@ -379,6 +426,101 @@ def cmd_memory_probes(limit: int, out: str) -> str:
     dest.write_text(json.dumps(probes, ensure_ascii=False, indent=2), encoding="utf-8")
     _db.query_log_mark_exported([r["id"] for r in rows])
     return f"已导出 {len(probes)} 条评测集到 {dest}（下次 memory-grow 自动跑 eval 对比 baseline）"
+
+
+def cmd_persona_probes(out: str = "") -> str:
+    """从 ai scope 身份/偏好记忆自动生成评测探针（换人设后无需手写「你是谁」类探针）。"""
+    from plugins import _db
+    probes = []
+
+    def _add(key, queries, category):
+        facts = [r["fact"] for r in _db.memory_rows("ai") if r.get("key") == key]
+        if not facts:
+            return
+        for q in queries:
+            probes.append(
+                {"query": q, "expected": [f[:24] for f in facts[:3]], "scope": "ai", "category": category}
+            )
+
+    _add("identity", ["你是谁", "你是做什么的"], "identity")
+    _add("experience_persona", ["你是怎么出道的"], "identity")
+
+    # 偏好按喜欢/讨厌方向区分，expected 各取对应方向的 fact 子串
+    pref = [r["fact"] for r in _db.memory_rows("ai") if r.get("key") == "preference"]
+    likes = [f for f in pref if "喜欢" in f]
+    dislikes = [f for f in pref if "讨厌" in f or "不喜欢" in f]
+    if likes:
+        probes.append({"query": "你喜欢什么", "expected": [f[:24] for f in likes], "scope": "ai", "category": "attribute"})
+    if dislikes:
+        probes.append({"query": "你讨厌什么", "expected": [f[:24] for f in dislikes], "scope": "ai", "category": "attribute"})
+
+    if not probes:
+        return "ai scope 没有 identity/preference 记忆（先同步 persona）"
+
+    dest = pathlib.Path(out) if out else _shared.DATA_DIR / "probes_persona.json"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(probes, ensure_ascii=False, indent=2), encoding="utf-8")
+    return f"已从 persona 记忆生成 {len(probes)} 条评测探针 -> {dest}"
+
+
+def cmd_init(pack_name: str = "") -> str:
+    """一键初始化新实例（换人设/换用户后开箱即用）：
+    播种人设 → 向量化 → 建 BM25/向量索引 → 生成 persona 评测探针 → 落基线。"""
+    from plugins import _db, _shared
+    from memory import embedder, lexical, vecindex
+    import agent
+    import memory
+
+    steps = []
+    if pack_name:
+        try:
+            steps.append("切 pack: " + cmd_persona_switch(pack_name))
+        except Exception as e:
+            steps.append(f"切 pack 失败: {e}")
+
+    # 1. 播种人设（persona.md → ai scope 结构化字段）
+    try:
+        steps.append("人设: " + str(agent.persona.sync_identity()))
+    except Exception as e:
+        steps.append(f"人设失败: {e}")
+
+    # 2. 向量化缺少 embedding 的记忆
+    rows = [r for r in _db.memory_rows() if not _db.vec_loads(r.get("embedding"))]
+    embedded = 0
+    if embedder.enabled() and rows:
+        for i in range(0, len(rows), 64):
+            part = rows[i:i + 64]
+            vecs = embedder.embed([r["fact"] for r in part])
+            if not vecs:
+                break
+            for r, vec in zip(part, vecs):
+                _db.memory_update_embedding(r["scope"], r["key"], r["fact"], vec)
+                embedded += 1
+    steps.append(f"向量化: {embedded} 条")
+
+    # 3. 建索引
+    steps.append(f"BM25 索引: {lexical.bm25_rebuild()} 文档")
+    steps.append(f"向量索引: {vecindex.build() if embedder.enabled() else '跳过（embedder 未启用）'}")
+
+    # 4. 生成 persona 探针 + 落基线
+    try:
+        probes_path = _shared.DATA_DIR / "probes.json"
+        cmd_persona_probes(str(probes_path))
+        probes = json.loads(probes_path.read_text(encoding="utf-8"))
+        result = memory.run_eval(probes, k=5)
+        _db.kv_set("memory", "eval_baseline", result)
+        steps.append(f"基线: recall={result.get('recall_at_k')}（{len(probes)} 条探针）")
+    except Exception as e:
+        steps.append(f"基线跳过: {e}")
+
+    return "\n".join(steps)
+
+
+def cmd_memory_merge(scope: str = "", window: int = 10) -> str:
+    """时序引导碎片合并：把同一时间窗口（valid_from 事件时间）内的孤立短事实合并成完整事实。"""
+    from memory.backfill import merge_fragments
+    n = merge_fragments(scope or None, window_minutes=window)
+    return f"碎片合并：写入 {n} 条完整事实"
 
 
 def cmd_memory_calibrate(file: str, k: int) -> str:
@@ -478,6 +620,47 @@ def cmd_memory_trace_adjust() -> str:
     """查看评分驱动的行为调整（v11）。"""
     import memory
     return json.dumps(memory.trace_adjustments(force=True), ensure_ascii=False, indent=2)
+
+
+def cmd_memory_conv_md(scope: str, since: str, limit: int) -> str:
+    """导出对话评分报告（v33，Markdown 人工阅读用）。"""
+    from plugins import _db
+    import memory
+    rows = _db.conv_rows(scope or None, since or None, limit)
+    reviews = _db.conv_review_map([r["id"] for r in rows])
+    return memory.conv_markdown(rows, reviews)
+
+
+def cmd_memory_conv_review(
+    conv_id: int,
+    remember=None,
+    natural=None,
+    emotional=None,
+    proactive=None,
+    boundary=None,
+    comment: str = "",
+    reviewer: str = "",
+) -> str:
+    """人工评分对话（v33）：五维 1~5，低分写审计+归因（不自动调参）。"""
+    import memory
+    scores = {
+        k: v
+        for k, v in {
+            "remember": remember,
+            "natural": natural,
+            "emotional": emotional,
+            "proactive": proactive,
+            "boundary": boundary,
+        }.items()
+        if v is not None
+    }
+    return memory.conv_score(int(conv_id), scores, comment, reviewer)
+
+
+def cmd_memory_conv_report() -> str:
+    """查看对话五维诊断（v33）：维度均值 + 低分归因方向。"""
+    import memory
+    return json.dumps(memory.conv_report(force=True), ensure_ascii=False, indent=2)
 
 
 def cmd_data_dump_json(out: str) -> str:
@@ -823,6 +1006,100 @@ def cmd_memory_source_backfill() -> str:
     """证据门控：历史记忆 source 归一（ingest→user / persona→pack），幂等。"""
     from plugins import _db
     return json.dumps(_db.memory_source_normalize(), ensure_ascii=False, indent=2)
+
+
+def cmd_pollution_scan(scope: str = "", apply: bool = False) -> str:
+    """存量污染扫描（2026-08-16）：对库内 source=user 的记忆做反向出处校验——
+    事实的内容词必须在用户历史消息（conv_log.user_text + sessions.summary）里有
+    字面出处。分级：
+      strong   陈述句出处 >=2/3 → 用户亲口说过 → 保留
+      partial  部分出处 → 推断/概括 → 降级为 ai_edit
+      weak     仅问句命中 → 语义反转（"你玩过吗"→"用户玩过"）→ 降级
+      none     无出处 → 提取幻觉固化 → 删除候选
+    --apply 才真正执行降级/删除（core 身份记忆保护：只降级不删除）；
+    默认 dry-run 只报告。修复目标：早前"颜色是橘色"式污染在库里积压的同类条目，
+    让假来源声明不再有 source=user 的"证据"可引用。"""
+    import re as _re
+    from plugins import _db
+    from memory import controller as ctl
+    # 1) 出处池：用户历史消息（conv_log 全文 + sessions 摘要）
+    rows = _db.conv_rows(limit=10 ** 6)
+    msgs = [(r.get("user_text") or "").strip() for r in rows]
+    for s in _db.session_rows(limit=10 ** 6):
+        sm = (s.get("summary") or "").strip()
+        if sm:
+            msgs.append(sm)
+    msgs = [m for m in msgs if m]
+    quest = _re.compile(r"[？?]|吗$|呢$|么$|是不是|有没有|什么|多少|哪|几号|如何|怎么|累不累|对不对")
+    stmt_msgs = [m for m in msgs if not quest.search(m)]
+    quest_msgs = [m for m in msgs if quest.search(m)]
+    # 2) 待检记忆：source=user 且 active
+    rows = _db.memory_rows(scope=scope or None)
+    cand = [r for r in rows if (r.get("source") or "") == "user" and (r.get("status") or "") == "active"]
+    if not cand:
+        return "污染扫描：无 source=user 的记忆"
+    # 3) 逐条分级
+    buckets = {"strong": [], "partial": [], "weak": [], "none": [], "empty": []}
+    for r in cand:
+        lv = ctl.pollution_level(r["fact"], stmt_msgs, quest_msgs)
+        buckets.setdefault(lv, []).append(r)
+    # 4) 报告
+    lines = [f"污染扫描：user 记忆 {len(cand)} 条（出处池：陈述 {len(stmt_msgs)} / 问句 {len(quest_msgs)}）"]
+    if apply:
+        n_del = n_dem = 0
+        # weak（仅问句）与 none（无出处）都是"用户从未陈述过"→ 删除；
+        # partial（部分出处，用户说过大部分）→ 降级；core 身份记忆只降不删
+        for r in buckets["none"] + buckets["weak"] + buckets["partial"]:
+            if (r.get("mclass") or "") == "core":
+                _db.memory_set_source(r["scope"], r["key"], r["fact"], "ai_edit")
+                _db.audit_add("pollution_demote", f"core保护降级 {r['fact'][:40]}", "auto")
+                n_dem += 1
+                continue
+            if r in buckets["none"] or r in buckets["weak"]:
+                _db.memory_delete(r["scope"], r["key"], r["fact"])
+                _db.audit_add("pollution_del", f"无陈述出处删除 {r['fact'][:40]}", "auto")
+                n_del += 1
+            else:
+                _db.memory_set_source(r["scope"], r["key"], r["fact"], "ai_edit")
+                _db.audit_add("pollution_demote", f"部分支撑降级 {r['fact'][:40]}", "auto")
+                n_dem += 1
+        lines.append(f"已执行：删除 {n_del}，降级 {n_dem}")
+    for lv, label in (("strong", "保留（有陈述出处）"), ("partial", "降级候选（部分出处）"),
+                      ("weak", "降级候选（仅问句→语义反转）"), ("none", "删除候选（无出处）"),
+                      ("empty", "无法判定（无内容词）")):
+        items = buckets.get(lv, [])
+        if not items:
+            continue
+        lines.append(f"  [{lv}] {label} × {len(items)}")
+        for r in items[:12]:
+            lines.append(f"    · ({r.get('confidence', '?')}) {r['fact'][:56]}")
+        if len(items) > 12:
+            lines.append(f"    … 其余 {len(items) - 12} 条")
+    return "\n".join(lines)
+
+
+def cmd_conflict_scan(scope: str = "", apply: bool = False) -> str:
+    """存量矛盾扫描（v2.3 P0-2）：同 scope 内 active 记忆中同实体（"X是Y"主语）不同
+    属性值且无上下位包含 → 矛盾候选。--apply 时低置信一方降权 + 标 contested
+    （core 只降权不标），audit 留痕。默认 dry-run。"""
+    from memory import controller as ctl
+    text, conflicts = ctl.conflict_scan(scope, apply)
+    return text
+
+
+def cmd_calendar_check(scope: str = "", apply: bool = False) -> str:
+    """存量日历校验（v2.3 P1-2）：库内"X号是周Y"事实与当月真实日历比对
+    （"31号是周日"在 2026-08 实际是周一 → 错误事实）。--apply 降权+contested。"""
+    from memory import controller as ctl
+    text, bad = ctl.calendar_check(scope, apply)
+    return text
+
+
+def cmd_calibrate_feedback() -> str:
+    """校准闭环（v2.3 P2）：用户纠错调查结论（feedback investigate:*）回流为
+    置信度校准映射——update=证伪/keep=证实/uncertain=弱样本，分桶统计实际正确率。"""
+    import memory
+    return json.dumps(memory.calibrate_from_feedback(), ensure_ascii=False, indent=2)
 
 
 def cmd_appointment_clean() -> str:
@@ -1175,10 +1452,12 @@ SCENARIO_RUBRIC = (
 )
 
 
-def scenario_replay(path: str = "", score: bool = False, scenario_id=None) -> dict:
+def scenario_replay(path: str = "", score: bool = False, scenario_id=None, review_export: bool = False) -> dict:
     """场景回放（可只回放单个场景），score=True 时附 DeepSeek 五维评分。
     场景集：data/eval/scenarios.json = [{"id","scope","messages":[{"user":...}],"expected":[...]}]。
-    返回 {"replayed","scenarios"}；score=True 时附加 {"scored","avg"}。供 CLI 与 webapp 共用。
+    返回 {"replayed","scenarios"}；score=True 时附加 {"scored","avg"}。
+    review_export=True 时把回放对话写入 conv_log（scope=c2c:scenario:<id>），
+    供"对话质量评分"（v33 convreview）队列人工评分。供 CLI 与 webapp 共用。
     """
     from plugins import _shared
     p = path or str(_shared.DATA_DIR / "eval" / "scenarios.json")
@@ -1215,7 +1494,24 @@ def scenario_replay(path: str = "", score: bool = False, scenario_id=None) -> di
             history.append({"role": "assistant", "content": reply})
             replies.append({"user": str(m["user"]), "ai": reply})
         results.append({"id": sc.get("id"), "scope": scope, "replies": replies})
+    exported = 0
+    if review_export:
+        try:
+            import memory.convreview as _cr
+            for r in results:
+                for x in r["replies"]:
+                    _cr.record(
+                        scope=f"c2c:scenario:{r['id']}",
+                        text=x["user"],
+                        reply=x["ai"],
+                        conversation_id=f"scenario:{r['id']}",
+                    )
+                    exported += 1
+        except Exception:
+            exported = 0
     out = {"replayed": len(results), "scenarios": results}
+    if review_export:
+        out["review_exported"] = exported
     if not score:
         return out
     scored = []
@@ -1252,14 +1548,194 @@ def scenario_replay(path: str = "", score: bool = False, scenario_id=None) -> di
     return out
 
 
-def cmd_scenario_eval(path: str = "", score: bool = False) -> str:
-    """场景回放评分：重放多轮对话（agent.ask 逐条），--score 用 DeepSeek 五维 rubric 打分。"""
-    res = scenario_replay(path, score=score)
+def cmd_scenario_eval(path: str = "", score: bool = False, review_export: bool = False) -> str:
+    """场景回放评分：重放多轮对话（agent.ask 逐条），--score 用 DeepSeek 五维 rubric 打分；
+    --review-export 把回放对话写入 conv_log 供人工评分（v33 convreview）。"""
+    res = scenario_replay(path, score=score, review_export=review_export)
     if res.get("error"):
         return res["error"]
     if score:
         return json.dumps({"scored": res["scored"], "avg": res["avg"]}, ensure_ascii=False, indent=2)
-    return json.dumps({"replayed": res["replayed"], "scenarios": res["scenarios"]}, ensure_ascii=False, indent=2)
+    return json.dumps(
+        {"replayed": res["replayed"], "scenarios": res["scenarios"], "review_exported": res.get("review_exported", 0)},
+        ensure_ascii=False, indent=2,
+    )
+
+
+def _emit(result) -> int:
+    """统一输出：cmd 返回 str 或 (code, text)；非零 code 供 cron/脚本门控。"""
+    if isinstance(result, tuple):
+        code, text = result
+    else:
+        code, text = 0, result
+    print(text)
+    return int(code)
+
+
+def cmd_persona_freshcheck(pack: str = "") -> str:
+    """新 pack 可迁移性验收（2026-08-15 起）：在完全干净的临时环境（空库+该 pack）
+    跑核心链路——身份 stable 分类/core 升迁/常驻注入、记忆检索、约定（归属+内容+问句过滤）、
+    防编造（来源声称硬门+会话内证据）、情绪词表、概念分类回归。
+    子进程隔离：不碰当前库。离线（stub LLM），无网络依赖。"""
+    import subprocess
+    import sys
+    import json as _json
+
+    pack = (pack or "").strip()
+    script = r"""
+import os, sys, tempfile, json, types
+tmp = tempfile.mkdtemp(prefix="yuno_fresh_")
+cfg = {
+    "memory": {"embedder": {"provider": "none"}, "core": {
+        "enabled": True,
+        "persona_pack": {"pack": "__PACK__"},
+        "living": {"enabled": True, "bootstrap": True},
+        "space": {"enabled": True},
+        "mind": {"enabled": True},
+    }}
+}
+cfg_path = os.path.join(tmp, "config.json")
+with open(cfg_path, "w", encoding="utf-8") as f:
+    json.dump(cfg, f)
+os.environ["CONFIG_PATH"] = cfg_path
+class _OpenAI:
+    def __init__(self, *a, **k):
+        self.chat = types.SimpleNamespace(completions=None)
+stub = types.ModuleType("openai"); stub.OpenAI = _OpenAI
+sys.modules["openai"] = stub
+sys.path.insert(0, os.getcwd())
+import memory
+from plugins import _db, _shared
+from memory import policy, context, reasoning, appointment as ap, analysis
+from agent import evidence_gate as eg
+scope = "c2c:fresh"
+out = {"pack": "__PACK__", "data_dir": str(_shared.DATA_DIR)}
+# 1) 身份：stable 分类 + core 升迁 + 常驻注入
+identity = "我是本环境的测试用户，职业是程序员"
+memory.add_fact(scope, "", identity, importance=0.9, confidence=0.85, source="user")
+out["identity_stable"] = policy.fact_class(scope, "", identity) == "stable"
+policy.promote_core(scope)
+out["identity_injected"] = "程序员" in context.core_memory_block(scope)
+# 2) 记忆检索
+memory.add_fact(scope, "", "我养了一只布偶猫叫团子", importance=0.7, confidence=0.8, source="user")
+hits = reasoning.retrieve("我的猫叫什么", [scope], top_k=3, min_score=0.0)
+out["retrieve"] = bool(hits) and "团子" in hits[0][0]
+# 3) 约定：with_ai + content + 问句过滤
+r = ap.extract(scope, "我们明天晚上一起打游戏吧")
+a = r.get("appointment") or {}
+out["appt_with_ai"] = r.get("added") == 1 and a.get("with_ai") is True and a.get("content") == "打游戏"
+out["appt_question_skip"] = ap.extract(scope, "你记得我们约了什么吗").get("skipped") is not None
+ap.clear_scope(scope)
+# 4) 防编造：来源声称硬门 + 会话内证据
+out["gate_source_claim"] = eg.contains_unsupported_claim(
+    "你说过喜欢蓝色", evidence=["我养了一只布偶猫叫团子"], banned=[]) is not None
+out["gate_session_evidence"] = eg.contains_unsupported_claim(
+    "对，猫叫团子", evidence=["我养了一只布偶猫叫团子"], banned=[]) is None
+# 5) 情绪词表（通用）
+out["emotion_fear"] = analysis.analyze("好可怕").get("emotion") == "恐惧"
+out["emotion_disgust"] = analysis.analyze("恶心死了").get("emotion") == "厌恶"
+# 6) 概念分类回归
+out["class_process"] = policy.fact_class(scope, "", "今天工作很累") == "process"
+out["class_stable"] = policy.fact_class(scope, "", "我在腾讯工作") == "stable"
+print(json.dumps(out, ensure_ascii=False, indent=2))
+""".replace("__PACK__", pack or "yuno")
+    r = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True, text=True, cwd=str(ROOT), timeout=180,
+    )
+    if r.returncode != 0:
+        return f"验收失败：{r.stderr[-500:]}"
+    try:
+        res = _json.loads(r.stdout[r.stdout.index("{"):])
+    except Exception as e:
+        return f"解析失败：{e}\n{r.stdout[-300:]}"
+    fails = [k for k, v in res.items() if v is False]
+    lines = [f"  {k}: {v}" for k, v in res.items() if k not in ("pack", "data_dir")]
+    summary = f"pack={res.get('pack')} · 全过 {len(res) - 2 - len(fails)}/{len(res) - 2}"
+    text = (summary + (" · 失败项: " + ", ".join(fails) if fails else "") + "\n" + "\n".join(lines))
+    return (1 if fails else 0), text  # CI 门控：有失败项退出码 1
+
+
+
+def _rubric_judge(query, reply, expected, category) -> dict:
+    """LLM rubric 自动判分（v2.3 P1-1）：四维 0-2 分（准确性/合理性/人设/防编造）+ 总评。
+    返回 {"scores": {…}, "total": 0-8, "comment": 一句话}。"""
+    from plugins import _shared
+    prompt = (
+        "你是回复质量评审。评分（每维 0-2 分，整数）：\n"
+        "准确：内容与事实/记忆相符，不编造；合理：逻辑与语境自洽；\n"
+        "人设：符合千石由乃人设（慵懒、音乐人、乐队成员）；防编造：不虚构没说过的事。\n"
+        f"题目类别：{category}\n用户问题：{query}\n预期要点：{expected}\n"
+        f"实际回复：{reply}\n"
+        "输出 JSON：{\"accuracy\":0-2,\"reasonableness\":0-2,\"persona\":0-2,\"no_fabrication\":0-2,\"comment\":\"一句话\"}"
+    )
+    try:
+        import json as _json
+        out = _shared.ask_deepseek(prompt, module="reply_judge", max_tokens=300)
+        data = _json.loads(out[out.index("{"):out.rindex("}") + 1])
+        scores = {k: max(0, min(2, int(data.get(k, 0)))) for k in
+                  ("accuracy", "reasonableness", "persona", "no_fabrication")}
+        return {"scores": scores, "total": sum(scores.values()),
+                "comment": str(data.get("comment", ""))[:80]}
+    except Exception as e:
+        return {"scores": {}, "total": -1, "comment": f"判分失败:{e}"}
+
+
+def cmd_reply_check(scope: str = "", limit: int = 0, save: bool = False, score: bool = False):
+    """回复质量评测（2026-08-15）：逐题调 agent.ask（真实 LLM），输出回复 + 预期供人工判分。
+    题集：data/reply_probes.json（独立题，无前置依赖）。learn=False 不写记忆。
+    --save 记录本轮结果到 data/reply_eval_history.jsonl。
+    --score（v2.3 P1-1）：LLM rubric 四维自动判分（准确/合理/人设/防编造 0-2），
+    结果写回 history 的 results[].scores，摘要含平均分——回复质量可量化、可跨轮对比。"""
+    import json as _json
+    import pathlib as _pl
+
+    probes_path = ROOT / "data" / "reply_probes.json"
+    if not probes_path.exists():
+        return 1, f"题集不存在：{probes_path}"
+    probes = _json.loads(probes_path.read_text(encoding="utf-8"))["items"]
+    if limit:
+        probes = probes[:int(limit)]
+    if not scope:
+        return 1, "需要 --scope（如 c2c:xxxx 或 c2c:B889...）"
+    import agent
+    lines, results = [], []
+    for i, it in enumerate(probes, 1):
+        try:
+            reply, meta = agent.ask(str(it["query"]), scopes=[scope], learn=False)
+        except Exception as e:
+            reply = f"<调用失败: {e}>"
+        lines.append(f"[{i:02d}] {it['category']}｜{it['query']}")
+        lines.append(f"     预期: {it['expected']}")
+        lines.append(f"     回复: {str(reply or '')[:120]}")
+        row = {"query": it["query"], "reply": (reply or "")[:200],
+               "expected": it["expected"], "category": it["category"]}
+        if score and not str(reply or "").startswith("<调用失败"):
+            j = _rubric_judge(it["query"], (reply or "")[:200], it["expected"], it["category"])
+            row["scores"] = j["scores"]
+            row["score_total"] = j["total"]
+            row["score_comment"] = j["comment"]
+            lines.append(f"     评分: {j['total']}/8 ({j['scores']}) {j['comment']}")
+        results.append(row)
+    if score:
+        totals = [r["score_total"] for r in results if r.get("score_total", -1) >= 0]
+        if totals:
+            avg = sum(totals) / len(totals)
+            dims = {}
+            for k in ("accuracy", "reasonableness", "persona", "no_fabrication"):
+                vals = [r["scores"][k] for r in results if r.get("scores") and k in r["scores"]]
+                if vals:
+                    dims[k] = round(sum(vals) / len(vals), 2)
+            lines.append(f"平均 {avg:.2f}/8 · 维度 {dims}")
+    if save:
+        import datetime
+        hist = ROOT / "data" / "reply_eval_history.jsonl"
+        row = {"ts": datetime.datetime.now().isoformat(timespec="seconds"),
+               "scope": scope, "results": results}
+        with open(hist, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(row, ensure_ascii=False) + "\n")
+        lines.append(f"（已记录 {len(results)} 题到 {hist.name}）")
+    return 0, "\n".join(lines)
 
 
 def main() -> int:
@@ -1268,10 +1744,10 @@ def main() -> int:
 
     p = sub.add_parser("health", help="独立健康检查")
     p.add_argument("--notify", action="store_true", help="状态变化时播报到 QQ")
-    p.set_defaults(func=lambda a: print(cmd_health(a.notify)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_health(a.notify)) or 0)
 
     sub.add_parser("backup", help="每日 SQLite 备份").set_defaults(
-        func=lambda a: print(cmd_backup()) or 0
+        func=lambda a: _emit(cmd_backup()) or 0
     )
 
     p = sub.add_parser("recover", help="一键恢复服务")
@@ -1280,106 +1756,124 @@ def main() -> int:
 
     p = sub.add_parser("memory-embed", help="为缺少向量的记忆回填 embedding")
     p.add_argument("--batch", type=int, default=64)
-    p.set_defaults(func=lambda a: print(cmd_memory_embed(a.batch)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_embed(a.batch)) or 0)
 
     p = sub.add_parser("memory-grow", help="成长/维护：向量+事件图+巩固+修剪+词法索引")
     p.add_argument("--dry-run", action="store_true", help="只出统计不写库")
-    p.set_defaults(func=lambda a: print(cmd_memory_grow(a.dry_run)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_grow(a.dry_run)) or 0)
 
     p = sub.add_parser("memory-sleep", help="睡眠/梦境：浅睡+深睡巩固当天对话，REM 做梦")
     p.add_argument("--force", action="store_true", help="强制再跑一夜（跳过当日已睡检查）")
-    p.set_defaults(func=lambda a: print(cmd_memory_sleep(a.force)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_sleep(a.force)) or 0)
 
     p = sub.add_parser("memory-eval", help="评测召回率/MRR（--file 或 --dataset）")
     p.add_argument("--file", default="", help="评测集 JSON 路径")
     p.add_argument("--dataset", default="", help="命名评测集（memory-eval-dataset 保存）")
     p.add_argument("--k", type=int, default=5)
     p.add_argument("--save", action="store_true", help="把结果存为 baseline")
-    p.set_defaults(func=lambda a: print(cmd_memory_eval(a.file, a.k, a.save, a.dataset)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_eval(a.file, a.k, a.save, a.dataset)) or 0)
 
     p = sub.add_parser("memory-eval-dataset", help="保存命名评测集（版本对比用）")
     p.add_argument("name", help="评测集名称（如 v1）")
     p.add_argument("--file", required=True, help="评测集 JSON 路径")
-    p.set_defaults(func=lambda a: print(cmd_eval_dataset_save(a.name, a.file)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_eval_dataset_save(a.name, a.file)) or 0)
 
     p = sub.add_parser("memory-route", help="诊断：显示一条消息的分类路由")
     p.add_argument("text")
-    p.set_defaults(func=lambda a: print(cmd_memory_route(a.text)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_route(a.text)) or 0)
 
     p = sub.add_parser("memory-topics", help="列出议题（大类→议题→参数）")
     p.add_argument("--scope", default="", help="限定场景，如 c2c:xxx")
     p.add_argument("--limit", type=int, default=50)
-    p.set_defaults(func=lambda a: print(cmd_memory_topics(a.scope, a.limit)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_topics(a.scope, a.limit)) or 0)
 
     p = sub.add_parser("memory-index", help="重建/调优自研 IVF 向量索引")
     p.add_argument("--tune", action="store_true", help="用评测集做 nlist/nprobe 对照实验")
     p.add_argument("--file", default="", help="评测集 JSON 路径（--tune 时必填）")
     p.add_argument("--nlist", default="4,8,16", help="候选 nlist 列表")
     p.add_argument("--nprobe", default="1,2,4", help="候选 nprobe 列表")
-    p.set_defaults(func=lambda a: print(cmd_memory_index(a.tune, a.file, a.nlist, a.nprobe)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_index(a.tune, a.file, a.nlist, a.nprobe)) or 0)
 
     p = sub.add_parser("memory-clear-user", help="按用户彻底清除记忆（隐私权）")
     p.add_argument("uid")
-    p.set_defaults(func=lambda a: print(cmd_memory_clear_user(a.uid)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_clear_user(a.uid)) or 0)
 
     p = sub.add_parser("memory-probes", help="把查询日志导出为评测集")
     p.add_argument("--limit", type=int, default=200)
     p.add_argument("--out", default="", help="输出路径（默认 DATA_DIR/probes.json，即 persona-<pack> 活库）")
-    p.set_defaults(func=lambda a: print(cmd_memory_probes(a.limit, a.out)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_probes(a.limit, a.out)) or 0)
+
+    p = sub.add_parser("persona-probes", help="从 persona 记忆自动生成评测探针（换人设后无需手写）")
+    p.add_argument("--out", default="", help="输出路径（默认 DATA_DIR/probes_persona.json）")
+    p.set_defaults(func=lambda a: _emit(cmd_persona_probes(a.out)) or 0)
+
+    p = sub.add_parser("init", help="一键初始化新实例：播种人设+向量化+建索引+生成评测集+落基线")
+    p.add_argument("--pack", default="", help="Persona Pack 名（默认 config 里的 persona_pack）")
+    p.set_defaults(func=lambda a: _emit(cmd_init(a.pack)) or 0)
+
+    p = sub.add_parser("memory-merge", help="时序引导碎片合并：同一时间窗口内的孤立短事实合并成完整事实")
+    p.add_argument("--scope", default="", help="限定 scope（默认全部）")
+    p.add_argument("--window", type=int, default=10, help="时间窗口（分钟），默认 10")
+    p.set_defaults(func=lambda a: _emit(cmd_memory_merge(a.scope, a.window)) or 0)
 
     p = sub.add_parser("memory-calibrate", help="用评测集训练置信度标定")
     p.add_argument("--file", required=True, help="评测集 JSON 路径")
     p.add_argument("--k", type=int, default=5)
-    p.set_defaults(func=lambda a: print(cmd_memory_calibrate(a.file, a.k)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_calibrate(a.file, a.k)) or 0)
 
     sub.add_parser("config-validate", help="校验 config.json：未知段/类型错误/取值越界").set_defaults(
-        func=lambda a: print(cmd_config_validate()) or 0
+        func=lambda a: _emit(cmd_config_validate()) or 0
     )
 
     p = sub.add_parser("emotion-eval", help="情绪判断评测：分类准确率 + VAD MAE")
     p.add_argument("--file", default="", help="评测集 JSON（默认 data/emotion_probes.json）")
-    p.set_defaults(func=lambda a: print(cmd_emotion_eval(a.file)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_emotion_eval(a.file)) or 0)
 
     p = sub.add_parser("emotion-log", help="导出情绪判断日志（训练数据原料）")
     p.add_argument("--days", type=int, default=14)
     p.add_argument("--out", default="", help="输出 jsonl 路径（不填只打印条数）")
-    p.set_defaults(func=lambda a: print(cmd_emotion_log(a.days, a.out)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_emotion_log(a.days, a.out)) or 0)
+
+    p = sub.add_parser("emotion-train", help="训练本地情绪分类器（bge-large 编码 + 逻辑回归）")
+    p.add_argument("--file", required=True, help="标注训练集 JSON：[{text, emotion}]")
+    p.add_argument("--out", default="", help="输出 pickle 路径（默认 DATA_DIR/models/emotion_clf.pkl）")
+    p.set_defaults(func=lambda a: _emit(cmd_emotion_train(a.file, a.out)) or 0)
 
     p = sub.add_parser("memory-sessions", help="查看会话")
     p.add_argument("--scope", default="")
     p.add_argument("--limit", type=int, default=20)
-    p.set_defaults(func=lambda a: print(cmd_memory_sessions(a.scope, a.limit)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_sessions(a.scope, a.limit)) or 0)
 
     p = sub.add_parser("memory-history", help="查看记忆变更历史（v3）")
     p.add_argument("--scope", default="", help="限定场景（如 c2c:xxx）")
     p.add_argument("--limit", type=int, default=30)
-    p.set_defaults(func=lambda a: print(cmd_memory_history(a.scope, a.limit)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_history(a.scope, a.limit)) or 0)
 
     p = sub.add_parser("memory-feedback", help="查看用户反馈日志（v3）")
     p.add_argument("--scope", default="", help="限定场景（如 c2c:xxx）")
     p.add_argument("--limit", type=int, default=30)
-    p.set_defaults(func=lambda a: print(cmd_memory_feedback(a.scope, a.limit)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_feedback(a.scope, a.limit)) or 0)
 
     p = sub.add_parser("relationship", help="查看 AI 与用户关系状态（v3）")
     p.add_argument("--scope", default="", help="限定场景（如 c2c:xxx），省略则列出全部")
-    p.set_defaults(func=lambda a: print(cmd_relationship(a.scope)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_relationship(a.scope)) or 0)
 
     p = sub.add_parser("memory-governance", help="Memory Governance 报告（v3.1 §9）")
     p.add_argument("--scope", default="")
-    p.set_defaults(func=lambda a: print(cmd_memory_governance(a.scope)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_governance(a.scope)) or 0)
 
     p = sub.add_parser("memory-trace", help="导出记忆处理轨迹 JSON（v10）")
     p.add_argument("--scope", default="")
     p.add_argument("--since", default="", help="起始时间，如 2026-08-01")
     p.add_argument("--limit", type=int, default=100)
     p.add_argument("--out", default="", help="输出文件路径")
-    p.set_defaults(func=lambda a: print(cmd_memory_trace(a.scope, a.since, a.limit, a.out)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_trace(a.scope, a.since, a.limit, a.out)) or 0)
 
     p = sub.add_parser("memory-trace-md", help="导出记忆处理轨迹 Markdown（v10）")
     p.add_argument("--scope", default="")
     p.add_argument("--since", default="")
     p.add_argument("--limit", type=int, default=50)
-    p.set_defaults(func=lambda a: print(cmd_memory_trace_md(a.scope, a.since, a.limit)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_trace_md(a.scope, a.since, a.limit)) or 0)
 
     p = sub.add_parser("memory-trace-review", help="人工评分轨迹（v11，多维度）")
     p.add_argument("trace_id", type=int)
@@ -1391,7 +1885,7 @@ def main() -> int:
     p.add_argument("--comment", default="")
     p.add_argument("--reviewer", default="")
     p.set_defaults(
-        func=lambda a: print(
+        func=lambda a: _emit(
             cmd_memory_trace_review(
                 a.trace_id, a.extraction, a.decision, a.confidence, a.provenance, a.privacy,
                 a.comment, a.reviewer,
@@ -1401,22 +1895,50 @@ def main() -> int:
     )
 
     p = sub.add_parser("memory-trace-adjust", help="查看评分驱动的行为调整（v11）")
-    p.set_defaults(func=lambda a: print(cmd_memory_trace_adjust()) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_trace_adjust()) or 0)
+
+    p = sub.add_parser("memory-conv-md", help="导出对话评分报告 Markdown（v33）")
+    p.add_argument("--scope", default="")
+    p.add_argument("--since", default="")
+    p.add_argument("--limit", type=int, default=50)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_conv_md(a.scope, a.since, a.limit)) or 0)
+
+    p = sub.add_parser("memory-conv-review", help="人工评分对话（v33，五维 1~5）")
+    p.add_argument("conv_id", type=int)
+    p.add_argument("--remember", type=float, help="记得（引用历史不穿帮）1~5")
+    p.add_argument("--natural", type=float, help="自然（像人话不机械）1~5")
+    p.add_argument("--emotional", type=float, help="有情绪（情绪连贯）1~5")
+    p.add_argument("--proactive", type=float, help="主动（会主动分享/推进）1~5")
+    p.add_argument("--boundary", type=float, help="边界（不乱编不泄密）1~5")
+    p.add_argument("--comment", default="")
+    p.add_argument("--reviewer", default="")
+    p.set_defaults(
+        func=lambda a: _emit(
+            cmd_memory_conv_review(
+                a.conv_id, a.remember, a.natural, a.emotional, a.proactive, a.boundary,
+                a.comment, a.reviewer,
+            )
+        )
+        or 0
+    )
+
+    p = sub.add_parser("memory-conv-report", help="查看对话五维诊断（v33，只诊断不调参）")
+    p.set_defaults(func=lambda a: _emit(cmd_memory_conv_report()) or 0)
 
     p = sub.add_parser("data-export", help="全量数据打包导出（v12）")
     p.add_argument("--out", default="")
     p.add_argument("--with-config", action="store_true", help="附带 config.json")
-    p.set_defaults(func=lambda a: print(cmd_data_export(a.out, a.with_config)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_data_export(a.out, a.with_config)) or 0)
 
     p = sub.add_parser("data-import", help="导入数据（v12）")
     p.add_argument("file")
     p.add_argument("--replace", action="store_true", help="覆盖目标表（或替换整个库）")
     p.add_argument("--dry-run", action="store_true", help="只预览不写入")
-    p.set_defaults(func=lambda a: print(cmd_data_import(a.file, a.replace, a.dry_run)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_data_import(a.file, a.replace, a.dry_run)) or 0)
 
     p = sub.add_parser("data-dump-json", help="全表 JSON 转储（v12）")
     p.add_argument("--out", default="")
-    p.set_defaults(func=lambda a: print(cmd_data_dump_json(a.out)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_data_dump_json(a.out)) or 0)
 
     p = sub.add_parser("goal", help="目标规划（v6/v9）")
     gsub = p.add_subparsers(dest="action", required=True)
@@ -1432,7 +1954,7 @@ def main() -> int:
     gd.add_argument("title")
     gd.add_argument("--scope", default="")
     p.set_defaults(
-        func=lambda a: print(
+        func=lambda a: _emit(
             cmd_goal(
                 a.action,
                 getattr(a, "title", ""),
@@ -1448,100 +1970,131 @@ def main() -> int:
     p = sub.add_parser("consult", help="决策顾问单轮（v6）")
     p.add_argument("text")
     p.add_argument("--scope", default="cli")
-    p.set_defaults(func=lambda a: print(cmd_consult(a.text, a.scope)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_consult(a.text, a.scope)) or 0)
 
     p = sub.add_parser("expression", help="表达分析 + 用户画像（v7）")
     p.add_argument("text")
     p.add_argument("--scope", default="cli")
-    p.set_defaults(func=lambda a: print(cmd_expression(a.text, a.scope)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_expression(a.text, a.scope)) or 0)
 
     p = sub.add_parser("world", help="用户中心世界模型快照（v8）")
     p.add_argument("--scope", default="cli")
-    p.set_defaults(func=lambda a: print(cmd_world(a.scope)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_world(a.scope)) or 0)
 
     p = sub.add_parser("character", help="输入人物名称，自动搜索设定/经历并存入记忆")
     p.add_argument("name", help="人物名称（如：千石由乃）")
-    p.set_defaults(func=lambda a: print(cmd_character_build(a.name)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_character_build(a.name)) or 0)
 
     p = sub.add_parser("character-sync", help="把编辑后的 md 档案同步回记忆库")
     p.add_argument("arg", help="人物名或 md 文件路径")
-    p.set_defaults(func=lambda a: print(cmd_character_sync(a.arg)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_character_sync(a.arg)) or 0)
 
     p = sub.add_parser("mind-status", help="心智状态快照（mind_state + 意图 + 程序记忆）")
     p.add_argument("--scope", default="", help="场景 scope（可选）")
-    p.set_defaults(func=lambda a: print(cmd_mind_status(a.scope)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_mind_status(a.scope)) or 0)
 
     p = sub.add_parser("procedures-list", help="列出程序记忆（System 1 习惯）")
-    p.set_defaults(func=lambda a: print(cmd_procedures_list()) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_procedures_list()) or 0)
 
     p = sub.add_parser("living-bootstrap", help="人设→场景生成：按 persona 补齐家里物品（只新增不覆盖）")
-    p.set_defaults(func=lambda a: print(cmd_living_bootstrap()) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_living_bootstrap()) or 0)
 
     p = sub.add_parser("space-eval", help="空间评测：X在哪命中 / 时刻召回 / 找东西模拟")
     p.add_argument("--save", action="store_true", help="把结果存为 baseline")
     p.add_argument("--compare", action="store_true", help="与上次 baseline 对比")
-    p.set_defaults(func=lambda a: print(cmd_space_eval(save=a.save, compare=a.compare)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_space_eval(save=a.save, compare=a.compare)) or 0)
 
     p = sub.add_parser("floorplan-render", help="渲染平面图 SVG 预览 + 房间几何事实表")
     p.add_argument("--pack", default="", help="Persona pack 名（默认当前激活）")
     p.add_argument("--out", default="", help="SVG 输出路径（默认 data/floorplans/<pack>.svg）")
-    p.set_defaults(func=lambda a: print(cmd_floorplan_render(a.pack, a.out)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_floorplan_render(a.pack, a.out)) or 0)
 
     p = sub.add_parser("time-eval", help="时间感知评测：时间段召回 / 时间线序列 / 日期精确度")
     p.add_argument("--save", action="store_true", help="把结果存为 baseline")
     p.add_argument("--compare", action="store_true", help="与上次 baseline 对比")
-    p.set_defaults(func=lambda a: print(cmd_time_eval(save=a.save, compare=a.compare)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_time_eval(save=a.save, compare=a.compare)) or 0)
 
     p = sub.add_parser("subjects-status", help="多主体记忆：列出已注册主体及各视角数据量")
-    p.set_defaults(func=lambda a: print(cmd_subjects_status()) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_subjects_status()) or 0)
 
     p = sub.add_parser("subjects-eval", help="多主体评测：写入成功 / 隐私门控 / 对话引用")
     p.add_argument("--save", action="store_true", help="把结果存为 baseline")
     p.add_argument("--compare", action="store_true", help="与上次 baseline 对比")
-    p.set_defaults(func=lambda a: print(cmd_subjects_eval(save=a.save, compare=a.compare)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_subjects_eval(save=a.save, compare=a.compare)) or 0)
 
     p = sub.add_parser("consistency-eval", help="双轨制一致性：失效队列长度 + 重算数")
-    p.set_defaults(func=lambda a: print(cmd_consistency_eval()) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_consistency_eval()) or 0)
 
     p = sub.add_parser("policy-classify", help="事实分类探针：含关键词但其实是过程/指令的句子误判率")
-    p.set_defaults(func=lambda a: print(cmd_policy_classify()) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_policy_classify()) or 0)
 
     p = sub.add_parser("revive-status", help="主动消息决策：泊松概率 + 贝叶斯用户状态（只读）")
     p.add_argument("--scope", default="", help="用户 scope（如 c2c:xxx / group:xxx）")
-    p.set_defaults(func=lambda a: print(cmd_revive_status(a.scope)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_revive_status(a.scope)) or 0)
 
     p = sub.add_parser("bandit-status", help="回应策略 bandit 后验：各策略均值 + 上次选择")
     p.add_argument("--scope", default="", help="用户 scope")
-    p.set_defaults(func=lambda a: print(cmd_bandit_status(a.scope)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_bandit_status(a.scope)) or 0)
 
     p = sub.add_parser("topic-vad-backfill", help="旧议题补近似 VAD/复合情绪（幂等）")
-    p.set_defaults(func=lambda a: print(cmd_topic_vad_backfill()) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_topic_vad_backfill()) or 0)
 
     p = sub.add_parser("memory-source-backfill", help="证据门控：历史记忆 source 归一（ingest→user / persona→pack）")
-    p.set_defaults(func=lambda a: print(cmd_memory_source_backfill()) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_memory_source_backfill()) or 0)
+
+    p = sub.add_parser("pollution-scan", help="存量污染扫描：source=user 记忆反向出处校验（--apply 执行降级/删除）")
+    p.add_argument("--scope", default="", help="只扫该 scope（默认全部）")
+    p.add_argument("--apply", action="store_true", help="执行降级（partial/weak→ai_edit）与删除（none）；默认 dry-run")
+    p.set_defaults(func=lambda a: _emit(cmd_pollution_scan(a.scope, a.apply)) or 0)
+
+    p = sub.add_parser("conflict-scan", help="存量矛盾扫描：同实体不同属性值冲突检测（--apply 降权+contested）")
+    p.add_argument("--scope", default="", help="只扫该 scope（默认全部）")
+    p.add_argument("--apply", action="store_true", help="低置信方降权并标 contested；默认 dry-run")
+    p.set_defaults(func=lambda a: _emit(cmd_conflict_scan(a.scope, a.apply)) or 0)
+
+    p = sub.add_parser("calendar-check", help="存量日历校验：'X号是周Y'事实与真实日历比对（--apply 降权）")
+    p.add_argument("--scope", default="", help="只扫该 scope（默认全部）")
+    p.add_argument("--apply", action="store_true", help="日历不符事实降权+contested；默认 dry-run")
+    p.set_defaults(func=lambda a: _emit(cmd_calendar_check(a.scope, a.apply)) or 0)
+
+    sub.add_parser("calibrate-feedback", help="校准闭环：用户纠错结论回流置信度标定").set_defaults(
+        func=lambda a: _emit(cmd_calibrate_feedback()) or 0
+    )
 
     p = sub.add_parser("appointment-clean", help="巡检清理：含黑名单词的约定条目标记 done（防催约复活编造）")
-    p.set_defaults(func=lambda a: print(cmd_appointment_clean()) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_appointment_clean()) or 0)
 
     p = sub.add_parser("persona-smoke", help="Persona Pack 冒烟：加载校验 + 房间连通 + 模板渲染 + 硬编码扫描")
-    p.set_defaults(func=lambda a: print(cmd_persona_smoke()) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_persona_smoke()) or 0)
+
+    p = sub.add_parser("reply-check", help="回复质量评测：逐题真实 LLM 跑，--score 自动 rubric 判分")
+    p.add_argument("--scope", default="", help="场景（c2c:xxx 或 group:xxx）")
+    p.add_argument("--limit", type=int, default=0, help="只跑前 N 题")
+    p.add_argument("--save", action="store_true", help="记录到 data/reply_eval_history.jsonl")
+    p.add_argument("--score", action="store_true", help="LLM 四维 rubric 自动判分（准确/合理/人设/防编造）")
+    p.set_defaults(func=lambda a: _emit(cmd_reply_check(a.scope, a.limit, a.save, a.score)) or 0)
+
+    p = sub.add_parser("persona-freshcheck", help="新 pack 可迁移性验收：干净环境跑核心链路（身份/检索/约定/防编造/情绪）")
+    p.add_argument("--pack", default="", help="pack 名（默认当前 config 的 pack）")
+    p.set_defaults(func=lambda a: _emit(cmd_persona_freshcheck(a.pack)) or 0)
 
     p = sub.add_parser("persona-switch", help="切换 Persona Pack（校验 pack 文件并写 config）")
     p.add_argument("--pack", required=True, help="pack 名（personas/<名>/）")
-    p.set_defaults(func=lambda a: print(cmd_persona_switch(a.pack)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_persona_switch(a.pack)) or 0)
 
     p = sub.add_parser("ablation", help="机制消融矩阵：单开关 × probes，输出贡献表并写实验日志")
     p.add_argument("--save", action="store_true", help="把矩阵落成 ablation_baseline.json（第一次跑=改前基线）")
-    p.set_defaults(func=lambda a: print(cmd_ablation(a.save)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_ablation(a.save)) or 0)
 
     p = sub.add_parser("experiments", help="实验日志：基线前后与回归标记")
     p.add_argument("--limit", type=int, default=50)
-    p.set_defaults(func=lambda a: print(cmd_experiments(a.limit)) or 0)
+    p.set_defaults(func=lambda a: _emit(cmd_experiments(a.limit)) or 0)
 
     p = sub.add_parser("scenario-eval", help="场景回放评分：重放多轮对话，--score 用 LLM 五维评分")
     p.add_argument("--file", default="", help="场景集 JSON（默认 data/eval/scenarios.json）")
     p.add_argument("--score", action="store_true", help="用 DeepSeek 按五维 rubric 打分")
-    p.set_defaults(func=lambda a: print(cmd_scenario_eval(a.file, a.score)) or 0)
+    p.add_argument("--review-export", action="store_true", help="把回放对话写入 conv_log 供人工评分（v33）")
+    p.set_defaults(func=lambda a: _emit(cmd_scenario_eval(a.file, a.score, a.review_export)) or 0)
 
     sub.add_parser("mcp", help="启动 MCP Server").set_defaults(func=lambda a: cmd_mcp())
 

@@ -62,11 +62,11 @@ def link_fact(scope, key, fact, category, confidence=0.7, an=None) -> int:
         ]
         _db.topic_param_add(tid, "vad", json.dumps(vad, ensure_ascii=False), confidence, ts)
         from memory import emotion as emotion_mod
-        compound = emotion_mod._compound_of(fact, an.get("emotion") or "", vad)
+        compound = emotion_mod.compound_of(fact, an.get("emotion") or "")
         if compound:
             _db.topic_param_add(tid, "compound", compound, confidence, ts)
-    except Exception:
-        pass
+    except Exception as e:
+        _stats_err(e)
     _db.topic_param_add(
         tid, "playful",
         "true" if an.get("playful") else "false",
@@ -77,15 +77,21 @@ def link_fact(scope, key, fact, category, confidence=0.7, an=None) -> int:
 
 
 def mood_centroid_from_params(params, window_days=180) -> dict:
-    """议题情绪质心：vad 参数按时间衰减 + 位置加权平均（同 emotion.user_estimate 模式）。
-    返回 {vad, label, intensity, label_zh, trend, n, compound}；无 vad 参数返回 None。"""
+    """议题情绪质心：vad 参数按时间衰减 + 位置加权平均（复用 emotion.vad_centroid）。
+    返回 {vad, label, intensity, label_zh, trend, n, compound}；无有效 vad 参数返回 None。"""
+    from memory import emotion as emotion_mod
     vads = [(i, p) for i, p in enumerate(params or []) if p.get("param") == "vad"]
     if not vads:
         return None
     n = len(vads)
     now = time.time()
-    weights = []
-    for i, p in vads:
+    samples = []
+    for _i, p in vads:
+        try:
+            v = json.loads(str(p.get("value") or "[]"))
+            v3 = [float(v[0]), float(v[1]), float(v[2])]
+        except Exception:
+            continue
         age_days = 0.0
         try:
             ut = str(p.get("updated_at") or "")
@@ -93,34 +99,11 @@ def mood_centroid_from_params(params, window_days=180) -> dict:
                 age_days = max(0.0, (now - datetime.fromisoformat(ut[:19]).timestamp()) / 86400.0)
         except Exception:
             pass
-        rec = 0.5 ** (age_days / float(window_days))   # 时间衰减：window_days 半衰期
-        pos = 0.5 + 0.5 * i / max(1, n - 1)           # 越近权重越高
-        weights.append(rec * pos)
-    total = sum(weights)
-    s = {"v": 0.0, "a": 0.0, "d": 0.0}
-
-    def _vad(p):
-        try:
-            v = json.loads(str(p.get("value") or "[]"))
-            return [float(v[0]), float(v[1]), float(v[2])]
-        except Exception:
-            return None
-
-    vals = [(_vad(p), w) for (_, p), w in zip(vads, weights)]
-    vals = [(v, w) for v, w in vals if v]
-    if not vals:
+        samples.append((age_days, v3))
+    if not samples:
         return None
-    total = sum(w for _v, w in vals)
-    for v, w in vals:
-        s["v"] += v[0] * w / total
-        s["a"] += v[1] * w / total
-        s["d"] += v[2] * w / total
-    half = max(1, n // 2)
-    v_first = sum(_vad(p)[0] for _, p in vads[:half] if _vad(p)) / max(1, half)
-    rest = vads[half:]
-    v_last = sum(_vad(p)[0] for _, p in rest if _vad(p)) / max(1, len(rest)) if rest else v_first
-    trend = "变好" if v_last - v_first > 0.2 else ("变差" if v_first - v_last > 0.2 else "平稳")
-    from memory import emotion as emotion_mod
+    c = emotion_mod.vad_centroid(samples, float(window_days))
+    s = c["vad"]
     label, intensity, _ = emotion_mod.label_from_vad(s)
     compound = next((p.get("value") for p in reversed(params or []) if p.get("param") == "compound"), "")
     return {
@@ -128,7 +111,7 @@ def mood_centroid_from_params(params, window_days=180) -> dict:
         "label": label,
         "intensity": round(intensity, 2),
         "label_zh": emotion_mod.label_zh(s),
-        "trend": trend,
+        "trend": c["trend"],
         "n": n,
         "compound": str(compound or ""),
     }
@@ -264,7 +247,7 @@ def _vad_table_drift() -> dict:
 
 def backfill_vad(limit=200) -> dict:
     """给只有 mood 标签、没有 vad 参数的旧议题补近似 VAD（来自 analysis.EMOTION_METRICS）
-    和复合情绪参数（emotion._compound_of）。幂等：已有 vad 的议题跳过。"""
+    和复合情绪参数（emotion.compound_of）。幂等：已有 vad 的议题跳过。"""
     from memory import analysis, emotion as emotion_mod
     done = skipped = 0
     samples = []
@@ -297,14 +280,14 @@ def backfill_vad(limit=200) -> dict:
         compound = ""
         try:
             fact = facts[-1] if facts else str(t.get("topic") or "")
-            compound = emotion_mod._compound_of(fact, str(last_mood.get("value") or "") if last_mood else "", vad)
+            compound = emotion_mod.compound_of(fact, str(last_mood.get("value") or "") if last_mood else "")
             if compound and not any(pp.get("param") == "compound" for pp in params):
                 _db.topic_param_add(
                     t["id"], "compound", compound, 0.6,
                     str(last_mood.get("updated_at") or "") if last_mood else "",
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            _stats_err(e)
         done += 1
         samples.append({"topic": t.get("topic"), "vad_added": added, "compound": compound})
     return {"backfilled": done, "already_had_vad": skipped, "samples": samples[:10]}
@@ -339,8 +322,8 @@ def invalidate_for_fact(scope, key, fact):
     """纠错联动：含该事实的议题参数降权（标记 stale，供重算/下次 build 修正）。"""
     try:
         _db.topic_param_invalidate(str(fact))
-    except Exception:
-        pass
+    except Exception as e:
+        _stats_err(e)
 
 
 def build(scope=None) -> int:
@@ -356,3 +339,12 @@ def build(scope=None) -> int:
         _db.event_set_topic(ev["id"], tid)
         created += 1
     return created
+
+
+def _stats_err(e):
+    """裸 except 审计（v2.2）：错误计数 + 日志，供消融/排查。"""
+    try:
+        import memory.stats as _st
+        _st.bump_err("topic", e)
+    except Exception:
+        pass

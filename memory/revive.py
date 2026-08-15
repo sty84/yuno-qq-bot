@@ -20,10 +20,7 @@ STATE_ZH = {"active": "活跃", "busy": "忙", "asleep": "睡觉", "need_care": 
 
 
 def _cfg(key, default):
-    r = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("revive", {}) or {}
-    return r.get(key, default)
-
-
+    return _shared.core_cfg("revive", key, default)
 def _hour():
     try:
         return datetime.now().hour
