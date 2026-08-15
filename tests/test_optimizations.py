@@ -144,6 +144,8 @@ def test_auto_adjust_true_applies_params():
     assert rec["applied"] is True
     assert "privacy_threshold" in rec["params"]
     assert "confidence_factor" in rec["params"]
+    audit_rows = _db.audit_query(limit=5, action="conv_auto_adjust")
+    assert audit_rows, "自动调参应写入审计"
 
     adj = trace.adjustments(force=True)
     assert adj.get("convreview_applied") is True

@@ -209,6 +209,20 @@ def auto_adjust_enabled() -> bool:
     return bool(_cfg("auto_adjust", False))
 
 
+def _clamp_params(params: dict) -> dict:
+    """自动调参参数安全边界：防止评分噪声导致参数越界。"""
+    out = dict(params or {})
+    if "confidence_factor" in out:
+        out["confidence_factor"] = round(min(1.0, max(0.7, float(out["confidence_factor"]))), 3)
+    if "igt_threshold" in out:
+        out["igt_threshold"] = round(min(0.5, max(0.2, float(out["igt_threshold"]))), 3)
+    if "privacy_threshold" in out:
+        out["privacy_threshold"] = round(min(0.8, max(0.4, float(out["privacy_threshold"]))), 3)
+    if "extraction_strict" in out:
+        out["extraction_strict"] = bool(out["extraction_strict"])
+    return out
+
+
 def apply_adjustments() -> dict:
     """把当前对话评分建议写入 kv，供后续模块读取；auto_adjust=false 时仅记录 dry-run。
     auto_adjust=true 时会根据 ADJUSTMENT_MAP 生成实际参数覆盖，trace 等模块可读取。"""
@@ -218,6 +232,14 @@ def apply_adjustments() -> dict:
     if auto_adjust_enabled():
         for dim in sugg:
             params.update(ADJUSTMENT_MAP.get(dim, {}))
+        params = _clamp_params(params)
+        if params:
+            _db.audit_add(
+                "conv_auto_adjust",
+                "auto_adjust=true",
+                f"应用参数覆盖：{params}；低分维度：{'、'.join(sugg)}",
+                operator="auto",
+            )
     record = {
         "auto_adjust": auto_adjust_enabled(),
         "applied": bool(auto_adjust_enabled()),

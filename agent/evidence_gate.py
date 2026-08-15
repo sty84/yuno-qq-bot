@@ -73,9 +73,11 @@ def _source_claim_content(t: str, m) -> str:
     # pre/post 都为空时从声称词内剥壳提取
     inner = ""
     g = m.group(0)
-    if g.startswith("不是说"):
-        inner = re.sub(r"^(不是说)", "", g)
-        inner = re.sub(r"^(好)", "", inner)  # "不是说好今天排练吗"的"好"是"说好"补语，非内容
+    if g.startswith(("不是说", "你不是说")):
+        if post.startswith("好"):
+            post = post[1:]  # "你不是说好今天排练吗"：好是"说好"补语，非声称内容
+        inner = re.sub(r"^(?:不是说|你不是说)", "", g)
+        inner = re.sub(r"^(好)", "", inner)  # "不是说好/你不是说好今天排练吗"的"好"是"说好"补语，非内容
         inner = re.sub(r"(那会儿|来着|吧|吗)$", "", inner)
     seg = pre + post + inner
     seg = seg.replace(g, "")
