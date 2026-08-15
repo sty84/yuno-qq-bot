@@ -84,6 +84,19 @@ def migrate(sqlite_path: str, pg_dsn: str, dry_run: bool = False) -> dict:
                 # 继续其他表
                 dst.rollback()
 
+        # 修复自增序列，避免插入冲突
+        with dst.cursor() as cur:
+            cur.execute(
+                "SELECT table_name, column_name FROM information_schema.columns "
+                "WHERE table_schema='public' AND column_default LIKE 'nextval(%'"
+            )
+            for t, c in cur.fetchall():
+                try:
+                    cur.execute(
+                        f'SELECT setval(pg_get_serial_sequence(\'{t}\',\'{c}\'), COALESCE(MAX("{c}"),1)) FROM "{t}"'
+                    )
+                except Exception:
+                    pass
         dst.commit()
     src.close()
     dst.close()
