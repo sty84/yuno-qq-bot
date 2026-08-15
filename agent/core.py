@@ -184,6 +184,8 @@ class _AgentMemoryPort(MemoryPort):
         self.last_scopes = []
         self.last_extra_scopes = []
         self.last_recent_texts = []
+        self.last_current_topic = ""
+        self.last_world_block = ""
 
     def search(self, query, scopes, top_k=5, **kwargs):
         full_scopes = kwargs.get("scopes") or scopes
@@ -192,9 +194,12 @@ class _AgentMemoryPort(MemoryPort):
         if not self.last_scopes or not _core_enabled():
             self.last_mem_ctx = ""
             self.last_evidence = []
+            self.last_current_topic = ""
+            self.last_world_block = ""
             return []
         session.touch(self.last_scopes[0], "", query)
         current = session.current(self.last_scopes[0], "")
+        self.last_current_topic = (current or {}).get("topic", "") or ""
         recent_texts = [
             m.get("content", "") for m in history if m.get("role") == "user"
         ][-3:]
@@ -220,6 +225,24 @@ class _AgentMemoryPort(MemoryPort):
             evidence_out=self.last_evidence,
         )
         self.last_mem_ctx = mem_ctx
+        try:
+            from memory import world
+            if s := world.snapshot(self.last_scopes[0]):
+                self.last_world_block = s
+        except Exception as e:
+            _stats_err(e)
+            pass
+        try:
+            from memory import trace
+            if mem_ctx:
+                trace.record(
+                    self.last_scopes[0], speaker="system", raw_content=query,
+                    candidate=mem_ctx[:200], action="inject", modules=["memory"],
+                    reasoning="检索注入（回答依据）", hint="assemble_context",
+                )
+        except Exception as e:
+            _stats_err(e)
+            pass
         return [
             {"fact": f, "score": 0.0, "scope": self.last_scopes[0]}
             for f in self.last_evidence
@@ -446,6 +469,13 @@ class _AgentActionPort(ActionPort):
         ctx_parts = list(decision.get("ctx_parts") or [])
         mem_ctx = (memory.last_mem_ctx if memory else "") or ""
         mem_evidence = list(memory.last_evidence) if memory else []
+
+        if memory and memory.last_current_topic:
+            ctx_parts.append(
+                f"【当前话题】{memory.last_current_topic}（跨轮保持主线，别聊跑题）"
+            )
+        if memory and memory.last_world_block:
+            ctx_parts.append(memory.last_world_block)
 
         if mem_ctx:
             ctx_parts.append(mem_ctx)
