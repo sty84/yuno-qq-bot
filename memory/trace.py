@@ -167,6 +167,10 @@ def adjustments(force=False) -> dict:
                 "suggestions": conv.get("suggestions", {}),
                 "updated_at": conv.get("updated_at", ""),
             }
+            if conv.get("auto_adjust") and conv.get("params"):
+                for _k, _v in conv["params"].items():
+                    data[_k] = _v
+                data["convreview_applied"] = True
     except Exception:
         pass
     _adjust_cache.update({"ts": now, "data": data})

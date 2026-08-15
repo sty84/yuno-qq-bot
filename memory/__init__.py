@@ -105,6 +105,7 @@ conv_adjustments = convreview.adjustments
 conv_apply_adjustments = convreview.apply_adjustments
 conv_auto_adjust_enabled = convreview.auto_adjust_enabled
 conv_current_adjustments = convreview.current_adjustments
+conv_rollback_adjustments = convreview.rollback_adjustments
 user_tz = tz.user_tz
 tz_detect = tz.detect
 appointment_extract = appointment.extract

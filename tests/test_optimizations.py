@@ -125,6 +125,37 @@ def test_conflict_scan_detects_like_dislike():
     assert len(conflicts) == 1, conflicts
 
 
+def test_auto_adjust_true_applies_params():
+    _db, _shared = _setup("yuno_conv_auto_")
+    from memory import convreview, trace
+
+    _db.conv_add("c2c:auto", "c2c:auto", "2026-08-15T00:00:00", "你好", "你好呀")
+    rows = _db.conv_rows(limit=1)
+    assert rows
+    _db.conv_review_add(
+        rows[0]["id"], 2,
+        {"remember": 2, "natural": 2, "emotional": 4, "proactive": 4, "boundary": 2},
+    )
+    # 打开自动调参并强制刷新报告
+    _shared.CONFIG.setdefault("memory", {}).setdefault("core", {})["convreview"] = {"auto_adjust": True}
+    convreview.report(force=True)
+    rec = convreview.apply_adjustments()
+    assert rec["auto_adjust"] is True
+    assert rec["applied"] is True
+    assert "privacy_threshold" in rec["params"]
+    assert "confidence_factor" in rec["params"]
+
+    adj = trace.adjustments(force=True)
+    assert adj.get("convreview_applied") is True
+    assert adj.get("privacy_threshold") == 0.6
+    assert adj.get("confidence_factor") == 0.9
+
+    # 回滚后恢复
+    convreview.rollback_adjustments()
+    adj2 = trace.adjustments(force=True)
+    assert adj2.get("convreview_applied") is None
+
+
 def test_conv_adjustments_visible_in_trace():
     _db, _shared = _setup("yuno_conv_trace_")
     from memory import convreview, trace

@@ -213,7 +213,7 @@ def cmd_config_validate() -> str:
         "persona", "world", "trace", "emotion", "sleep", "schedule", "weather",
         "environment", "sharing", "living", "space", "interaction", "weights",
         "vector_index", "policy", "mind", "sensors", "agents", "persona_pack",
-        "active_edit",
+        "active_edit", "convreview", "hesitation", "evidence_gate", "core_layer",
     }
     for k in core:
         if k.startswith("_") or k in KNOWN:
@@ -693,9 +693,11 @@ def cmd_reflection_report(limit: int = 20) -> str:
     return "\n".join(lines)
 
 
-def cmd_memory_conv_adjust(apply: bool = False) -> str:
-    """对话评分调参框架：--apply 时把当前建议写入 kv（auto_adjust=false 仍只是 dry-run）。"""
+def cmd_memory_conv_adjust(apply: bool = False, rollback: bool = False) -> str:
+    """对话评分调参框架：--apply 写入建议/参数，--rollback 回滚，默认只读。"""
     import memory
+    if rollback:
+        return json.dumps(memory.conv_rollback_adjustments(), ensure_ascii=False, indent=2)
     if apply:
         return json.dumps(memory.conv_apply_adjustments(), ensure_ascii=False, indent=2)
     return json.dumps(memory.conv_adjustments(), ensure_ascii=False, indent=2)
@@ -1988,9 +1990,10 @@ def main() -> int:
     p.add_argument("--limit", type=int, default=20)
     p.set_defaults(func=lambda a: _emit(cmd_reflection_report(a.limit)) or 0)
 
-    p = sub.add_parser("memory-conv-adjust", help="对话评分调参框架：查看建议或写入 dry-run")
+    p = sub.add_parser("memory-conv-adjust", help="对话评分调参框架：查看/应用/回滚")
     p.add_argument("--apply", action="store_true", help="把建议写入 kv（auto_adjust=false 时仅 dry-run）")
-    p.set_defaults(func=lambda a: _emit(cmd_memory_conv_adjust(a.apply)) or 0)
+    p.add_argument("--rollback", action="store_true", help="清除已写入的调参记录")
+    p.set_defaults(func=lambda a: _emit(cmd_memory_conv_adjust(a.apply, a.rollback)) or 0)
 
 
 

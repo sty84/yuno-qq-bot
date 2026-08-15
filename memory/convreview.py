@@ -27,6 +27,15 @@ CONV_DIMENSION_LABELS = {
     "proactive": "主动（会主动分享/推进）",
     "boundary": "边界（不乱编不泄密）",
 }
+# 自动调参第一版映射：低分维度 → 覆盖 trace 行为参数
+# 仅当 auto_adjust=true 且 apply_adjustments 写入后才生效。
+ADJUSTMENT_MAP = {
+    "remember": {"confidence_factor": 0.9, "igt_threshold": 0.35},
+    "natural": {"extraction_strict": True},
+    "boundary": {"privacy_threshold": 0.6},
+    # emotional / proactive 暂不映射，避免误调情绪和主动频率
+}
+
 # 低分归因方向：维度 → 该查哪个模块
 DIMENSION_HINTS = {
     "remember": "检索失败→query_log 样本 + 缺口守卫触发率",
@@ -201,15 +210,27 @@ def auto_adjust_enabled() -> bool:
 
 
 def apply_adjustments() -> dict:
-    """把当前对话评分建议写入 kv，供后续模块读取；auto_adjust=false 时仅记录 dry-run。"""
+    """把当前对话评分建议写入 kv，供后续模块读取；auto_adjust=false 时仅记录 dry-run。
+    auto_adjust=true 时会根据 ADJUSTMENT_MAP 生成实际参数覆盖，trace 等模块可读取。"""
     data = report()
     sugg = adjustments().get("suggestions", {})
+    params = {}
+    if auto_adjust_enabled():
+        for dim in sugg:
+            params.update(ADJUSTMENT_MAP.get(dim, {}))
     record = {
         "auto_adjust": auto_adjust_enabled(),
         "applied": bool(auto_adjust_enabled()),
         "suggestions": sugg,
+        "params": params,
         "dimension_averages": data.get("dimension_averages", {}),
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
     _db.kv_set("memory", "conv_adjustments", record)
     return record
+
+
+def rollback_adjustments() -> dict:
+    """回滚自动调参：清除已写入的 conv_adjustments，恢复默认行为。"""
+    _db.kv_set("memory", "conv_adjustments", None)
+    return {"rolled_back": True, "message": "已清除 conv_adjustments，自动调参回滚为默认行为"}
