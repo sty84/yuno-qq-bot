@@ -6,32 +6,71 @@
   <title>Yuno 公开状态</title>
   <script src="/static/vendor/echarts.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js';"></script>
   <style>
-    body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 24px; }
-    .wrap { max-width: 960px; margin: 0 auto; }
-    h1 { font-size: 22px; }
-    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-top: 16px; }
-    .card { background: #1e293b; border-radius: 10px; padding: 14px; }
-    .k { font-size: 12px; color: #94a3b8; }
-    .v { font-size: 24px; font-weight: 600; margin-top: 4px; }
-    .muted { color: #64748b; font-size: 12px; margin-top: 20px; }
-    .panel { background: #111c33; border: 1px solid #1e293b; border-radius: 12px; padding: 16px; margin-top: 20px; }
+    :root {
+      --bg: #0b0f1a;
+      --panel: rgba(255,255,255,0.06);
+      --panel-border: rgba(255,255,255,0.12);
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #818cf8;
+      --accent2: #a78bfa;
+      --accent3: #2dd4bf;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: var(--bg); color: var(--text); margin: 0; padding: 24px;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 1080px; margin: 0 auto; position: relative; z-index: 1; }
+    h1 { font-size: 26px; font-weight: 700; background: linear-gradient(90deg, var(--accent), var(--accent2), var(--accent3));
+         -webkit-background-clip: text; background-clip: text; color: transparent; margin-bottom: 4px; }
+    .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
+    .cards {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; margin-top: 18px;
+    }
+    .card {
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 16px;
+      padding: 16px 18px; backdrop-filter: blur(10px); transition: transform .2s, border-color .2s, box-shadow .2s;
+    }
+    .card:hover { transform: translateY(-3px); border-color: rgba(129,140,248,.5); box-shadow: 0 8px 30px rgba(99,102,241,.15); }
+    .card .k { font-size: 12px; color: var(--muted); }
+    .card .v { font-size: 26px; font-weight: 700; margin-top: 6px; }
+    .card .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .muted { color: var(--muted); font-size: 12px; margin-top: 20px; }
+    .panel {
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 18px;
+      padding: 20px; margin-top: 22px; backdrop-filter: blur(12px);
+    }
+    .panel h2 { font-size: 18px; margin: 0 0 10px; color: #c7d2fe; }
     .chart { width: 100%; height: 320px; margin-top: 12px; }
     table { border-collapse: collapse; width: 100%; margin-top: 12px; font-size: 13px; }
-    th, td { border: 1px solid #334155; padding: 6px 10px; text-align: left; }
-    th { background: #1e293b; }
+    th, td { border: 1px solid rgba(255,255,255,0.1); padding: 8px 12px; text-align: left; }
+    th { background: rgba(255,255,255,0.06); color: #c7d2fe; }
+    tr:hover td { background: rgba(255,255,255,0.03); }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 760px) {
+      .grid-2 { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
   <canvas id="bg-canvas" style="position:fixed;inset:0;z-index:0;pointer-events:none;"></canvas>
-  <div class="wrap" style="position:relative;z-index:1;">
+  <div class="wrap">
     <h1>Yuno 公开状态</h1>
+    <div class="subtitle">成长型 Agent 记忆系统 · 实时状态与评测趋势</div>
     <div class="cards" id="cards">加载中…</div>
     <div class="muted" id="updated"></div>
 
-    <div class="panel">
-      <h2>历史评测趋势</h2>
-      <div id="trendChart" class="chart"></div>
-      <div id="trendTable"></div>
+    <div class="grid-2">
+      <div class="panel">
+        <h2>历史评测趋势</h2>
+        <div id="trendChart" class="chart"></div>
+      </div>
+      <div class="panel">
+        <h2>最近评测明细</h2>
+        <div id="trendTable">加载中…</div>
+      </div>
     </div>
   </div>
 
@@ -39,19 +78,25 @@
     function fmt(v) {
       return v === null || v === undefined ? '-' : Number(v).toFixed(3);
     }
+    function money(v) { return '¥' + Number(v || 0).toFixed(4); }
+    function num(v) { return Number(v || 0).toLocaleString(); }
 
     fetch('/api/public/stats')
       .then(r => r.json())
       .then(data => {
+        const cost = data.today_cost || {};
         const cards = [
-          ['记忆条数', data.memory_count],
-          ['事件数', data.event_count],
-          ['对话数', data.conv_count],
-          ['轨迹数', data.trace_count],
-          ['今日成本', '¥' + (data.today_cost?.cost ?? 0)],
+          ['记忆条数', num(data.memory_count), '长期记忆'],
+          ['事件数', num(data.event_count), '事件图谱'],
+          ['对话数', num(data.conv_count), '对话记录'],
+          ['轨迹数', num(data.trace_count), '处理轨迹'],
+          ['今日调用', num(cost.calls), 'LLM 请求'],
+          ['Prompt', num(cost.prompt), 'tokens'],
+          ['Completion', num(cost.completion), 'tokens'],
+          ['今日成本', money(cost.cost), '估算费用'],
         ];
-        document.getElementById('cards').innerHTML = cards.map(([k, v]) =>
-          `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`
+        document.getElementById('cards').innerHTML = cards.map(([k, v, sub]) =>
+          `<div class="card"><div class="k">${k}</div><div class="v">${v}</div><div class="sub">${sub}</div></div>`
         ).join('');
         document.getElementById('updated').textContent = '更新于 ' + (data.updated_at || '');
       })
@@ -65,6 +110,7 @@
         const mem = data.memory_eval || [];
         if (!mem.length) {
           document.getElementById('trendChart').textContent = '暂无历史评测数据';
+          document.getElementById('trendTable').textContent = '暂无历史评测数据';
           return;
         }
         const times = mem.map(x => x.ts);
@@ -76,6 +122,9 @@
           name: s.name,
           type: 'line',
           smooth: true,
+          symbol: 'circle',
+          symbolSize: 6,
+          lineStyle: { width: 2 },
           data: mem.map(x => x.metrics?.[s.key] ?? null),
         }));
         const chart = echarts.init(document.getElementById('trendChart'));
@@ -87,6 +136,7 @@
           grid: { left: 50, right: 20, top: 40, bottom: 40 },
           xAxis: { type: 'category', data: times, axisLabel: { color: '#94a3b8' } },
           yAxis: { type: 'value', min: 0, max: 1, axisLabel: { color: '#94a3b8' } },
+          color: ['#818cf8', '#a78bfa', '#2dd4bf'],
           series,
         });
 

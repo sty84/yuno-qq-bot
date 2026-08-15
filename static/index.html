@@ -56,6 +56,54 @@
       .tabs { flex-direction: row; flex-wrap: wrap; }
     }
   </style>
+<style>
+    :root {
+      --panel-bg: rgba(255,255,255,0.06);
+      --panel-border: rgba(255,255,255,0.12);
+      --accent: #818cf8;
+      --accent2: #a78bfa;
+      --accent3: #2dd4bf;
+    }
+    body { background: #0b0f1a; }
+    .sidebar {
+      background: rgba(11,15,26,0.72);
+      backdrop-filter: blur(14px);
+      border-right: 1px solid rgba(255,255,255,0.08);
+    }
+    .tab {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 10px;
+      transition: background .2s, transform .15s, border-color .2s;
+    }
+    .tab:hover { background: rgba(255,255,255,0.1); transform: translateX(2px); }
+    .tab.active {
+      background: linear-gradient(135deg, #6366f1, #a855f7);
+      border-color: transparent;
+      color: #fff;
+    }
+    .card {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      backdrop-filter: blur(10px);
+      transition: transform .2s, border-color .2s, box-shadow .2s;
+    }
+    .card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(129,140,248,.5);
+      box-shadow: 0 8px 30px rgba(99,102,241,.15);
+    }
+    .panel {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      backdrop-filter: blur(10px);
+    }
+    .cards { gap: 14px; }
+    h1 { background: linear-gradient(90deg, var(--accent), var(--accent2), var(--accent3));
+         -webkit-background-clip: text; background-clip: text; color: transparent; }
+  </style>
 </head>
 <body>
   <canvas id="bg-canvas" style="position:fixed;inset:0;z-index:0;pointer-events:none;"></canvas>
