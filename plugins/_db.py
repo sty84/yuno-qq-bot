@@ -405,6 +405,19 @@ def _create_tables():
                 tries INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT,
                 PRIMARY KEY(situation, action));
+
+            CREATE TABLE IF NOT EXISTS skills(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                situation TEXT NOT NULL,
+                action TEXT NOT NULL,
+                result TEXT NOT NULL DEFAULT '',
+                condition TEXT NOT NULL DEFAULT '',
+                failure_reason TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT '',
+                success REAL NOT NULL DEFAULT 0.5,
+                tries INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT,
+                UNIQUE(situation, action));
             CREATE TABLE IF NOT EXISTS state_invalidations(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 scope TEXT NOT NULL,
@@ -865,6 +878,70 @@ def kv_cas(namespace, key, old_raw, new_raw):
         _maybe_commit()
         return c.total_changes > 0
 
+
+
+# ===== 技能库（Voyager 式 skill library）=====
+def skill_add(situation, action, result="", condition="", failure_reason="", source="", success=0.5, updated_at=""):
+    with _lock:
+        c = _connect()
+        c.execute(
+            "INSERT INTO skills(situation,action,result,condition,failure_reason,source,success,tries,updated_at) "
+            "VALUES(?,?,?,?,?,?,?,1,?) "
+            "ON CONFLICT(situation,action) DO UPDATE SET "
+            "result=excluded.result, condition=excluded.condition, failure_reason=excluded.failure_reason, "
+            "source=excluded.source, success=excluded.success, tries=tries+1, updated_at=excluded.updated_at",
+            (str(situation)[:200], str(action)[:400], str(result or "")[:500], str(condition or "")[:200],
+             str(failure_reason or "")[:300], str(source or "")[:50], float(success),
+             updated_at or datetime.now().isoformat(timespec="seconds")),
+        )
+        _maybe_commit()
+
+
+def skill_rows(limit=200):
+    with _lock:
+        rows = _connect().execute(
+            "SELECT * FROM skills ORDER BY success DESC, tries DESC LIMIT ?", (max(1, int(limit)),)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def skill_update(situation, action, success=None, result=None, failure_reason=None, condition=None):
+    with _lock:
+        c = _connect()
+        sets, params = [], []
+        if success is not None:
+            sets.append("success=?")
+            params.append(float(success))
+        if result is not None:
+            sets.append("result=?")
+            params.append(str(result)[:500])
+        if failure_reason is not None:
+            sets.append("failure_reason=?")
+            params.append(str(failure_reason)[:300])
+        if condition is not None:
+            sets.append("condition=?")
+            params.append(str(condition)[:200])
+        if not sets:
+            return
+        sets.append("updated_at=?")
+        params.append(datetime.now().isoformat(timespec="seconds"))
+        params.extend([str(situation), str(action)])
+        c.execute(f"UPDATE skills SET {', '.join(sets)} WHERE situation=? AND action=?", params)
+        _maybe_commit()
+
+
+def skill_search(query, limit=10):
+    """按情境关键词粗略检索技能（后续可换语义检索）。"""
+    q = str(query or "").strip()
+    if not q:
+        return []
+    with _lock:
+        rows = _connect().execute(
+            "SELECT * FROM skills WHERE situation LIKE ? OR action LIKE ? OR result LIKE ? "
+            "ORDER BY success DESC, tries DESC LIMIT ?",
+            (f"%{q}%", f"%{q}%", f"%{q}%", max(1, int(limit))),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 # ===== 物品事件溯源（P0-1：位置历史 / 激活 / 找东西）=====
 def item_event_add(item, ts, event, from_place="", to_place="", cause="", seen_by=""):

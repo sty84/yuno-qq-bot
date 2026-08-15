@@ -307,6 +307,49 @@ def daily_reflect(limit=20) -> int:
     return n
 
 
+
+def weekly_reflect(limit=50) -> int:
+    """分层反思：每周把近期事件/关系归纳成更高层信念，写入 ai:belief。"""
+    evs = _db.event_rows(limit=limit)
+    if not evs:
+        return 0
+    titles = "\n".join(f"- {e['title']}" for e in evs[:limit])
+    rels = _db.relationship_rows()
+    rel_text = "；".join(f"{r['scope']}:{r['stage']}" for r in rels[:10])
+    prompt = (
+        "你是记忆反思器。基于近一周事件与关系，写出 1-3 条关于用户/关系的稳定信念或长期判断。"
+        "每行一条，不要解释，不要编号。\n"
+        f"近期事件：\n{titles}\n关系：{rel_text or '无'}"
+    )
+    try:
+        resp = _shared.deepseek_chat(
+            messages=[
+                {"role": "system", "content": "你是记忆反思器，输出简洁中文信念。"},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=240,
+            temperature=0.3,
+            module="advisor",
+            detail="weekly_reflect",
+        )
+        lines = [
+            l.strip().lstrip("-• ")
+            for l in (resp.choices[0].message.content or "").splitlines()
+            if l.strip()
+        ]
+    except Exception as e:
+        _stats_err(e)
+        return 0
+    n = 0
+    ts = datetime.now().isoformat(timespec="seconds")
+    for l in lines[:3]:
+        if 6 <= len(l) <= 80 and _reflection_quality(l, evs, rels):
+            _db.memory_add("ai", "belief", l, ts, None, 0.7, "reflection")
+            _db.policy_log_add("reflection", "weekly_belief", 0.7, detail=l[:100])
+            n += 1
+    return n
+
+
 # ===== 成长反思闭环（v31.3 合并自 memory/reflect.py）=====
 def _refl_cfg(key, default):
     core = (_shared.CONFIG.get("memory", {}).get("core", {}) or {}).get("reflection", {}) or {}

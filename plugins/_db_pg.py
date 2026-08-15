@@ -92,6 +92,14 @@ def init(data_dir=None, force=False):
                 "scope TEXT NOT NULL, key TEXT NOT NULL DEFAULT '', fact TEXT NOT NULL, "
                 "embedding vector, PRIMARY KEY(scope,key,fact))"
             )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS skills("
+                "id SERIAL PRIMARY KEY, situation TEXT NOT NULL, action TEXT NOT NULL, "
+                "result TEXT NOT NULL DEFAULT '', condition TEXT NOT NULL DEFAULT '', "
+                "failure_reason TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', "
+                "success DOUBLE PRECISION NOT NULL DEFAULT 0.5, tries INTEGER NOT NULL DEFAULT 0, "
+                "updated_at TEXT, UNIQUE(situation, action))"
+            )
             _conn.commit()
     except Exception:
         _conn.rollback()
@@ -1597,6 +1605,70 @@ def procedure_clear():
         _maybe_commit()
         cur.close()
 
+
+
+# ===== 技能库（Voyager 式 skill library）=====
+def skill_add(situation, action, result="", condition="", failure_reason="", source="", success=0.5, updated_at=""):
+    with _lock:
+        cur = _connect().cursor()
+        cur.execute(
+            "INSERT INTO skills(situation,action,result,condition,failure_reason,source,success,tries,updated_at) "
+            "VALUES(%s,%s,%s,%s,%s,%s,%s,1,%s) "
+            "ON CONFLICT(situation,action) DO UPDATE SET "
+            "result=EXCLUDED.result, condition=EXCLUDED.condition, failure_reason=EXCLUDED.failure_reason, "
+            "source=EXCLUDED.source, success=EXCLUDED.success, tries=skills.tries+1, updated_at=EXCLUDED.updated_at",
+            (str(situation)[:200], str(action)[:400], str(result or "")[:500], str(condition or "")[:200],
+             str(failure_reason or "")[:300], str(source or "")[:50], float(success),
+             updated_at or datetime.now().isoformat(timespec="seconds")),
+        )
+        _maybe_commit()
+        cur.close()
+
+
+def skill_rows(limit=200):
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM skills ORDER BY success DESC, tries DESC LIMIT %s", (max(1, int(limit)),))
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        return rows
+
+
+def skill_update(situation, action, success=None, result=None, failure_reason=None, condition=None):
+    with _lock:
+        cur = _connect().cursor()
+        sets, params = [], []
+        if success is not None:
+            sets.append("success=%s"); params.append(float(success))
+        if result is not None:
+            sets.append("result=%s"); params.append(str(result)[:500])
+        if failure_reason is not None:
+            sets.append("failure_reason=%s"); params.append(str(failure_reason)[:300])
+        if condition is not None:
+            sets.append("condition=%s"); params.append(str(condition)[:200])
+        if not sets:
+            return
+        sets.append("updated_at=%s"); params.append(datetime.now().isoformat(timespec="seconds"))
+        params.extend([str(situation), str(action)])
+        cur.execute(f"UPDATE skills SET {', '.join(sets)} WHERE situation=%s AND action=%s", params)
+        _maybe_commit()
+        cur.close()
+
+
+def skill_search(query, limit=10):
+    q = str(query or "").strip()
+    if not q:
+        return []
+    with _lock:
+        cur = _connect().cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            "SELECT * FROM skills WHERE situation ILIKE %s OR action ILIKE %s OR result ILIKE %s "
+            "ORDER BY success DESC, tries DESC LIMIT %s",
+            (f"%{q}%", f"%{q}%", f"%{q}%", max(1, int(limit))),
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        return rows
 
 # ===== scenario scores =====
 def scenario_score_add(scenario_id, scope, scores, comment="", mode="manual"):

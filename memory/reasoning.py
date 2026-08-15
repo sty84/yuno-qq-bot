@@ -691,6 +691,22 @@ def retrieve(
         hits = sorted(
             ((f, s, sc) for f, (s, sc) in merged.items()), key=lambda x: -x[1]
         )[:top_k]
+    # 检索自我评估（P0）：结果太弱时自动做一次查询扩展再检索
+    low_conf = not hits or hits[0][1] < float(_cfg("low_conf_retrieval_threshold", 0.3))
+    if low_conf and not expand_query:
+        _variants = extract.expand(query_text, recent)
+        if len(_variants) > 1:
+            _merged = {f: (s, sc) for f, s, sc in hits}
+            for _v in _variants[1:]:
+                for _f, _s, _sc in _retrieve_single(
+                    _v, scopes, top_k, min_score, extra_scopes,
+                    location=location, window=window,
+                ):
+                    if _f not in _merged or _s > _merged[_f][0]:
+                        _merged[_f] = (_s, _sc)
+            hits = sorted(
+                ((f, s, sc) for f, (s, sc) in _merged.items()), key=lambda x: -x[1]
+            )[:top_k]
     mmr_cfg = _cfg("mmr", {}) or {}
     if mmr_cfg.get("enabled", True) and len(hits) > 1:
         hits = mmr(query_text, hits, top_k, lam=float(mmr_cfg.get("lambda", 0.7)))

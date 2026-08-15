@@ -143,6 +143,20 @@ def test_retrieval_contextvar_isolation_between_threads():
     assert main_after == main_before, (main_before, main_after)
 
 
+def test_skill_library():
+    _db, _shared = _setup("yuno_skill_")
+    from memory import skills
+    skills.record("用户催约", "先查约定表再否认", result="通过门控", source="test")
+    skills.mark_failure("用户问边界", "直接答应", reason="越界", source="reflection")
+    rows = skills.search("催约", limit=5)
+    assert rows and any("查约定表" in r["action"] for r in rows)
+    fail = skills.search("边界", limit=5)
+    assert fail and any(r["failure_reason"] == "越界" for r in fail)
+    skills.update("用户催约", "先查约定表再否认", success=0.95)
+    updated = skills.search("催约", limit=5)
+    assert updated and updated[0]["success"] == 0.95
+
+
 def test_mbti_plugin_flow():
     _db, _shared = _setup("yuno_mbti_")
     from plugins import mbti
