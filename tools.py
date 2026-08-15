@@ -67,6 +67,18 @@ def cmd_health(notify: bool):
     lines = [
         f"{kw} [{('在线' if ok else '离线')}] {detail[:60]}" for kw, ok, detail in results
     ]
+    import os as _os
+    if _os.getenv("YUNO_DB_BACKEND", "postgresql").strip().lower() != "sqlite":
+        try:
+            pg = _db.health()
+            if pg.get("ok"):
+                lines.append(f"PostgreSQL [在线] {pg.get('version', '')[:60]} 表数={pg.get('table_count')}")
+            else:
+                lines.append(f"PostgreSQL [离线] {pg.get('error', '')[:60]}")
+                results.append(("PostgreSQL", False, pg.get("error", "连接失败")))
+        except Exception as e:
+            lines.append(f"PostgreSQL [离线] {e}")
+            results.append(("PostgreSQL", False, str(e)))
     messages = _sync_notify(results, notify)
     if messages:
         lines.append("播报：" + "；".join(messages))
@@ -707,6 +719,13 @@ def cmd_memory_conv_adjust(apply: bool = False, rollback: bool = False) -> str:
     if apply:
         return json.dumps(memory.conv_apply_adjustments(), ensure_ascii=False, indent=2)
     return json.dumps(memory.conv_adjustments(), ensure_ascii=False, indent=2)
+
+
+def cmd_internal_db_prune(days: int = 30) -> str:
+    """清理内部/测试 SQLite 中的过期记录。"""
+    from plugins import _db_internal
+    n = _db_internal.prune(days)
+    return f"已清理 {n} 条内部测试记录（保留 {days} 天）"
 
 
 def cmd_reflection_stats() -> str:
@@ -1992,6 +2011,10 @@ def main() -> int:
     sub.add_parser("reflection-stats", help="反思质量统计：产出/过滤/写入").set_defaults(
         func=lambda a: _emit(cmd_reflection_stats()) or 0
     )
+    p = sub.add_parser("internal-db-prune", help="清理内部/测试 SQLite 过期记录")
+    p.add_argument("--days", type=int, default=30)
+    p.set_defaults(func=lambda a: _emit(cmd_internal_db_prune(a.days)) or 0)
+
     p = sub.add_parser("reflection-report", help="反思抽检报告：最近写入内容 + 质量统计")
     p.add_argument("--limit", type=int, default=20)
     p.set_defaults(func=lambda a: _emit(cmd_reflection_report(a.limit)) or 0)

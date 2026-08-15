@@ -9,6 +9,7 @@ import pytest
 
 # 默认使用独立测试库，避免污染生产 yuno
 os.environ.setdefault("YUNO_PG_DB", "yuno_test")
+os.environ.setdefault("YUNO_PG_PASSWORD", "yuno")  # 仅本地测试用
 
 pytestmark = pytest.mark.skipif(
     os.getenv("YUNO_PG_TEST") != "1",

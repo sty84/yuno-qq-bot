@@ -11,3 +11,6 @@ uvicorn>=0.23
 sentence-transformers>=2.7.0
 # jieba 用于 BM25 中文分词 + 中文专名识别（纯 Python 轻量，无外部依赖）
 jieba>=0.42.1
+
+# PostgreSQL 默认后端（生产必需）
+psycopg2-binary>=2.9

@@ -86,3 +86,14 @@ def recent(kind=None, limit=100):
                 pass
             out.append(d)
         return out
+
+
+def prune(days=30) -> int:
+    """清理超过保留天数的内部/测试记录。"""
+    from datetime import datetime, timedelta
+    cutoff = (datetime.now() - timedelta(days=max(1, int(days)))).isoformat(timespec="seconds")
+    with _lock:
+        c = _connect()
+        cur = c.execute("DELETE FROM test_runs WHERE created_at < ?", (cutoff,))
+        c.commit()
+        return cur.rowcount

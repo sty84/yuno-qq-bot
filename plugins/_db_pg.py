@@ -30,12 +30,15 @@ _txn_depth = 0
 
 
 def dsn() -> str:
+    password = os.getenv("YUNO_PG_PASSWORD")
+    if not password:
+        raise RuntimeError("YUNO_PG_PASSWORD 未设置，拒绝使用默认弱密码")
     return (
         f"host={os.getenv('YUNO_PG_HOST', '127.0.0.1')} "
         f"port={os.getenv('YUNO_PG_PORT', '5432')} "
         f"dbname={os.getenv('YUNO_PG_DB', 'yuno')} "
         f"user={os.getenv('YUNO_PG_USER', 'esp')} "
-        f"password={os.getenv('YUNO_PG_PASSWORD', 'yuno')}"
+        f"password={password}"
     )
 
 
@@ -48,7 +51,7 @@ def init(data_dir=None, force=False):
             _conn.close()
         except Exception:
             pass
-    _conn = psycopg2.connect(dsn())
+    _conn = psycopg2.connect(dsn(), keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3)
     _conn.autocommit = False
     _ensure_schema_migrations()
     with _conn.cursor() as cur:
@@ -59,10 +62,19 @@ def init(data_dir=None, force=False):
                 (SCHEMA_VERSION, datetime.now().isoformat(timespec="seconds")),
             )
             _conn.commit()
+    # pg_trgm 加速 ILIKE 中文子串检索（可用则建索引，不可用不阻塞）
+    try:
+        with _conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_memories_fact_trgm ON memories USING gin (fact gin_trgm_ops)")
+            _conn.commit()
+    except Exception:
+        _conn.rollback()
 
 
 def _connect():
-    if _conn is None:
+    global _conn
+    if _conn is None or _conn.closed:
         init()
     return _conn
 
@@ -2438,7 +2450,10 @@ def backup_to(path):
     """使用 pg_dump 备份 PostgreSQL 到自定义格式文件。"""
     import subprocess
     env = os.environ.copy()
-    env["PGPASSWORD"] = os.getenv("YUNO_PG_PASSWORD", "yuno")
+    password = os.getenv("YUNO_PG_PASSWORD")
+    if not password:
+        raise RuntimeError("YUNO_PG_PASSWORD 未设置")
+    env["PGPASSWORD"] = password
     subprocess.run(
         [
             "pg_dump",

@@ -45,6 +45,18 @@ MAX_CONCURRENT = 2  # eval 会触发 LLM/检索，控制并发
 _tasks = {}
 _lock = threading.Lock()
 _sem = threading.BoundedSemaphore(MAX_CONCURRENT)
+_rate = {}
+
+
+def _check_rate(key: str, limit: int = 10, window: float = 60.0):
+    """极简内存速率限制：同一 key 在窗口内最多 limit 次。"""
+    now = time.time()
+    arr = _rate.setdefault(key, [])
+    arr[:] = [t for t in arr if t > now - window]
+    if len(arr) >= limit:
+        raise HTTPException(429, "请求过于频繁，请稍后再试")
+    arr.append(now)
+
 
 
 def _run_task(task_id, kind, fn):
@@ -726,7 +738,8 @@ def data_dump():
 
 
 @app.post("/api/data/import")
-def data_import(req: DataImportRequest):
+def data_import(req: DataImportRequest, request: Request):
+    _check_rate(f"import:{request.client.host if request.client else 'unknown'}", limit=5, window=60)
     """Web 数据导入（高危）：必须 confirm=true，导入前写审计。"""
     if not req.confirm:
         raise HTTPException(400, "数据导入为高危操作，需要 confirm=true")
@@ -742,7 +755,8 @@ def data_import(req: DataImportRequest):
 
 
 @app.post("/api/ops/notify")
-def notify(req: NotifyRequest):
+def notify(req: NotifyRequest, request: Request):
+    _check_rate(f"notify:{request.client.host if request.client else 'unknown'}", limit=5, window=60)
     """发送运维/告警播报（高危/易骚扰，必须 confirm=true）。"""
     if not req.confirm:
         raise HTTPException(400, "发送播报需要 confirm=true")
@@ -754,7 +768,8 @@ def notify(req: NotifyRequest):
 
 
 @app.post("/api/tools")
-def run_tool(req: ToolRun):
+def run_tool(req: ToolRun, request: Request):
+    _check_rate(f"tools:{request.client.host if request.client else 'unknown'}", limit=20, window=60)
     """运维动作白名单（诊断页按钮）。
     高危操作（污染/矛盾/日历 apply、清用户）必须 confirm=true 并写审计。"""
     _HIGH_RISK = {
