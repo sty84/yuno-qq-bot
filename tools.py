@@ -671,6 +671,21 @@ def cmd_memory_conv_report() -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
+def cmd_reflection_stats() -> str:
+    """反思质量统计：最近 daily_reflect 产出/过滤/写入计数。"""
+    import memory.stats as _st
+    c = _st.counters()
+    return json.dumps({
+        "reflect_raw": int(c.get("reflect_raw", 0)),
+        "reflect_rejected": int(c.get("reflect_rejected", 0)),
+        "reflect_insight": int(c.get("reflect_insight", 0)),
+        "reject_rate": round(
+            int(c.get("reflect_rejected", 0)) / max(1, int(c.get("reflect_raw", 0))),
+            3,
+        ),
+    }, ensure_ascii=False, indent=2)
+
+
 def cmd_data_dump_json(out: str) -> str:
     """全表 JSON 转储（v12）：数据可移植/可分析格式。"""
     from plugins import _db
@@ -1936,6 +1951,10 @@ def main() -> int:
 
     p = sub.add_parser("memory-conv-report", help="查看对话五维诊断（v33，只诊断不调参）")
     p.set_defaults(func=lambda a: _emit(cmd_memory_conv_report()) or 0)
+    sub.add_parser("reflection-stats", help="反思质量统计：产出/过滤/写入").set_defaults(
+        func=lambda a: _emit(cmd_reflection_stats()) or 0
+    )
+
 
     p = sub.add_parser("data-export", help="全量数据打包导出（v12）")
     p.add_argument("--out", default="")

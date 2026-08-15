@@ -48,8 +48,12 @@ def test_daily_reflect_persists_insights(monkeypatch):
             self.choices = [types.SimpleNamespace(message=types.SimpleNamespace(content=content))]
 
     monkeypatch.setattr(_shared, "deepseek_chat", lambda **kwargs: _FakeResp("用户偏好稳定\n第二条用户洞察也很重要\n"))
+    import memory.stats as st
+    before = int(st.counters().get("reflect_insight", 0))
     n = advisor.daily_reflect(limit=10)
     assert n == 2, n
+    after = int(st.counters().get("reflect_insight", 0))
+    assert after - before == n, (before, after)
     rows = _db.memory_rows("ai", "reflection")
     texts = [r["fact"] for r in rows]
     assert "用户偏好稳定" in texts

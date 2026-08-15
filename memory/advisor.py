@@ -276,12 +276,18 @@ def daily_reflect(limit=20) -> int:
             module="advisor",
             detail="reflect",
         )
-        lines = [
+        raw_lines = [
             l.strip().lstrip("-• ")
             for l in (resp.choices[0].message.content or "").splitlines()
             if l.strip()
         ]
-        lines = [l for l in lines if _reflection_quality(l, evs, rels)][:3]
+        lines = [l for l in raw_lines if _reflection_quality(l, evs, rels)][:3]
+        try:
+            import memory.stats as _st
+            _st.bump("reflect_raw", len(raw_lines))
+            _st.bump("reflect_rejected", max(0, len(raw_lines) - len(lines)))
+        except Exception:
+            pass
     except Exception as e:
         _stats_err(e)
         return 0
@@ -292,6 +298,11 @@ def daily_reflect(limit=20) -> int:
             _db.memory_add("ai", "reflection", l, ts, None, 0.6, "reflection")
             # 反思闭环（v6 建议 §8）：洞察落策略日志，供复盘与后续 HITL 行为调整
             _db.policy_log_add("reflection", "insight", 0.6, detail=l[:100])
+            try:
+                import memory.stats as _st
+                _st.bump("reflect_insight")
+            except Exception:
+                pass
             n += 1
     return n
 
