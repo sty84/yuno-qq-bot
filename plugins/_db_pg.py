@@ -22,8 +22,15 @@ except ImportError:
     psycopg2 = None
     RealDictCursor = None
 
+try:
+    from psycopg2.pool import ThreadedConnectionPool
+except ImportError:
+    ThreadedConnectionPool = None
+
 DB_PATH = None
 _conn = None
+_pool = None
+_tlocal = threading.local()
 _lock = threading.RLock()
 SCHEMA_VERSION = 1
 _txn_depth = 0
@@ -43,14 +50,22 @@ def dsn() -> str:
 
 
 def init(data_dir=None, force=False):
-    global _conn
-    if _conn is not None and not force:
+    global _conn, _pool
+    if _pool is not None and not force:
         return
+    _tlocal.conn = None
+    if _pool is not None:
+        try:
+            _pool.close()
+        except Exception:
+            pass
+        _pool = None
     if _conn is not None:
         try:
             _conn.close()
         except Exception:
             pass
+    # 用一次性连接做 schema 初始化
     _conn = psycopg2.connect(dsn(), keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3)
     _conn.autocommit = False
     _ensure_schema_migrations()
@@ -62,7 +77,6 @@ def init(data_dir=None, force=False):
                 (SCHEMA_VERSION, datetime.now().isoformat(timespec="seconds")),
             )
             _conn.commit()
-    # pg_trgm 加速 ILIKE 中文子串检索（可用则建索引，不可用不阻塞）
     try:
         with _conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
@@ -70,7 +84,6 @@ def init(data_dir=None, force=False):
             _conn.commit()
     except Exception:
         _conn.rollback()
-    # pgvector 可选：可用则建 vec_pg 表，不可用不阻塞
     try:
         with _conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
@@ -82,19 +95,48 @@ def init(data_dir=None, force=False):
             _conn.commit()
     except Exception:
         _conn.rollback()
+    _conn.close()
+    _conn = None
+    if ThreadedConnectionPool is None:
+        raise RuntimeError("psycopg2.pool 不可用")
+    _pool = ThreadedConnectionPool(
+        1, 8,
+        dsn(),
+        keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3,
+    )
 
 
 def _connect():
-    global _conn
-    if _conn is None or _conn.closed:
+    global _pool
+    if _pool is None:
         init()
-    return _conn
+    conn = getattr(_tlocal, "conn", None)
+    if conn is None:
+        conn = _pool.getconn()
+        _tlocal.conn = conn
+    return conn
+
+
+def _release():
+    """把当前线程持有的连接归还连接池。"""
+    global _pool
+    conn = getattr(_tlocal, "conn", None)
+    if conn is not None and _pool is not None:
+        try:
+            _pool.putconn(conn)
+        finally:
+            _tlocal.conn = None
 
 
 def _maybe_commit():
     if _txn_depth > 0:
         return
-    _connect().commit()
+    conn = getattr(_tlocal, "conn", None)
+    if conn is not None:
+        try:
+            conn.commit()
+        finally:
+            _release()
 
 
 @contextmanager
@@ -119,6 +161,8 @@ def transaction():
             raise
         finally:
             _txn_depth = 0
+            if getattr(_tlocal, "conn", None) is c:
+                _release()
 
 
 def _schema_version():
@@ -132,11 +176,12 @@ def _schema_version():
 
 def _ensure_schema_migrations():
     with _lock:
-        cur = _connect().cursor()
+        conn = _conn if _conn is not None else _connect()
+        cur = conn.cursor()
         cur.execute(
             "CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT)"
         )
-        _connect().commit()
+        conn.commit()
         cur.close()
 
 

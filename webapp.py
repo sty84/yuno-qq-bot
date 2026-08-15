@@ -46,6 +46,9 @@ _tasks = {}
 _lock = threading.Lock()
 _sem = threading.BoundedSemaphore(MAX_CONCURRENT)
 _rate = {}
+_sessions = {}  # token -> expiry ts
+_SESSION_TTL = 12 * 3600
+
 
 
 def _check_rate(key: str, limit: int = 10, window: float = 60.0):
@@ -250,11 +253,19 @@ if _WEB_TOKEN:
     @app.middleware("http")
     async def _require_web_token(request: Request, call_next):
         # 公开统计接口与公开页不鉴权，供只读展示页使用
-        if request.url.path.startswith("/api/public/") or request.url.path == "/public":
+        if request.url.path.startswith("/api/public/") or request.url.path == "/public" or request.url.path == "/api/auth/login":
             return await call_next(request)
-        if request.headers.get("Authorization", "") != f"Bearer {_WEB_TOKEN}":
-            return JSONResponse({"detail": "未授权"}, status_code=401)
-        return await call_next(request)
+        auth = request.headers.get("Authorization", "")
+        token = auth[7:] if auth.startswith("Bearer ") else ""
+        if token == _WEB_TOKEN:
+            return await call_next(request)
+        if token in _sessions and _sessions[token] > time.time():
+            return await call_next(request)
+        return JSONResponse({"detail": "未授权"}, status_code=401)
+
+
+class LoginRequest(BaseModel):
+    password: str
 
 
 class TaskRequest(BaseModel):
@@ -323,6 +334,17 @@ class ConvReviewSubmit(BaseModel):
     proactive: float
     boundary: float
     comment: str = ""
+
+
+@app.post("/api/auth/login")
+def login(req: LoginRequest):
+    """使用 YUNO_WEB_PASSWORD 换取短期会话 token。"""
+    password = os.getenv("YUNO_WEB_PASSWORD", "")
+    if not password or req.password != password:
+        raise HTTPException(401, "密码错误")
+    token = uuid.uuid4().hex
+    _sessions[token] = time.time() + _SESSION_TTL
+    return {"token": token, "expires_in": _SESSION_TTL}
 
 
 @app.get("/api/health")

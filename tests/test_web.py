@@ -315,3 +315,27 @@ def test_public_trend_no_auth(monkeypatch):
     finally:
         monkeypatch.delenv("YUNO_WEB_TOKEN", raising=False)
         importlib.reload(webapp)
+
+
+def test_web_login_session(monkeypatch):
+    """YUNO_WEB_PASSWORD 登录后可用 session token 访问。"""
+    import importlib
+    import webapp
+    monkeypatch.setenv("YUNO_WEB_TOKEN", "web-secret")
+    monkeypatch.setenv("YUNO_WEB_PASSWORD", "admin123")
+    reloaded = importlib.reload(webapp)
+    try:
+        from starlette.testclient import TestClient
+        client = TestClient(reloaded.app)
+        assert client.get("/api/health").status_code == 401
+        bad = client.post("/api/auth/login", json={"password": "wrong"})
+        assert bad.status_code == 401
+        ok = client.post("/api/auth/login", json={"password": "admin123"})
+        assert ok.status_code == 200
+        token = ok.json()["token"]
+        r = client.get("/api/health", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+    finally:
+        monkeypatch.delenv("YUNO_WEB_TOKEN", raising=False)
+        monkeypatch.delenv("YUNO_WEB_PASSWORD", raising=False)
+        importlib.reload(webapp)
