@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """认知架构标准化接口（借鉴 CoALA）。
 
-不强制现有模块立即重构，先定义统一协议，后续逐步适配。
+提供统一的内存/决策/动作接口，并给出基于当前模块的默认适配器。
+现有业务代码可以逐步迁移到这些接口，降低耦合、方便替换实现。
 """
 
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 
@@ -18,59 +20,93 @@ class MemoryInterface(Protocol):
         ...
 
 
-class ActionInterface(Protocol):
-    def execute(self, action: str, **kwargs) -> Any:
-        ...
-
-
 class DecisionInterface(Protocol):
     def decide(self, query: str, scope: str = "", context: str = "") -> dict:
         ...
 
 
-class CognitiveArchitecture:
-    """最小认知架构：决策 → 记忆检索 → 动作/回复。"""
+class ActionInterface(Protocol):
+    def execute(self, action: str, **kwargs) -> Any:
+        ...
 
-    def __init__(self, memory=None, decision=None, action=None):
-        self.memory = memory
-        self.decision = decision
-        self.action = action
 
-    def run(self, query: str, scope: str = "", context: str = ""):
-        decision = self.decision.decide(query, scope, context) if self.decision else {}
-        hits = []
-        if self.memory is not None:
-            hits = self.memory.search(query, [scope] if scope else [], top_k=5)
-        action = self.action.execute(decision.get("action", "reply"), text=query) if self.action else None
+@dataclass
+class CognitiveTurn:
+    """一次标准化认知回合的输出。"""
+    query: str
+    scope: str = ""
+    situation: dict = field(default_factory=dict)
+    goals: list = field(default_factory=list)
+    intention: dict = field(default_factory=dict)
+    activated_memories: list = field(default_factory=list)
+    options: list = field(default_factory=list)
+    action: Any = None
+
+
+class MemoryPort:
+    """默认记忆端口：包装 reasoning / controller / policy。"""
+
+    def search(self, query, scopes, top_k=5):
+        from memory import reasoning
+        return [
+            {"fact": f, "score": s, "scope": sc}
+            for f, s, sc in reasoning.retrieve(query, scopes, top_k=top_k, min_score=0.0)
+        ]
+
+    def add(self, scope, key, fact, **kwargs):
+        from memory import controller
+        return controller.ingest(scope, key, fact, facts=[fact])
+
+    def forget(self, scope=None):
+        from memory import policy
+        return policy.forget(scope)
+
+
+class DecisionPort:
+    """默认决策端口：包装 mind.snapshot。"""
+
+    def decide(self, query, scope="", context=""):
+        from memory import mind
+        snap = mind.snapshot(scope, query) if scope else {}
         return {
-            "decision": decision,
-            "memory_hits": hits,
-            "action": action,
+            "situation": snap.get("situation", {}),
+            "goals": snap.get("goals", []),
+            "intention": snap.get("intention", {}),
+            "options": snap.get("options", []),
         }
 
 
-def default_architecture():
-    """用当前项目模块组装一个默认架构实例。"""
-    from memory import reasoning, mind
+class ActionPort:
+    """默认动作端口：目前只描述动作，不直接执行外部副作用。"""
 
-    class _Memory:
-        def search(self, query, scopes, top_k=5):
-            return [f for f, _s, _sc in reasoning.retrieve(query, scopes, top_k=top_k, min_score=0.0)]
+    def execute(self, action, **kwargs):
+        return {"action": action, "text": kwargs.get("text", "")}
 
-        def add(self, scope, key, fact, **kwargs):
-            from memory import controller
-            return controller.ingest(scope, key, fact, facts=[fact])
 
-        def forget(self, scope=None):
-            from memory import policy
-            return policy.forget(scope)
+class CognitiveArchitecture:
+    """组合记忆/决策/动作端口，形成统一认知流程。"""
 
-    class _Decision:
-        def decide(self, query, scope="", context=""):
-            return mind.snapshot(scope, query) if scope else {"options": []}
+    def __init__(self, memory=None, decision=None, action=None):
+        self.memory = memory or MemoryPort()
+        self.decision = decision or DecisionPort()
+        self.action = action or ActionPort()
 
-    class _Action:
-        def execute(self, action, **kwargs):
-            return {"action": action, "text": kwargs.get("text", "")}
+    def run(self, query: str, scope: str = "", context: str = "") -> CognitiveTurn:
+        decision = self.decision.decide(query, scope, context)
+        hits = self.memory.search(query, [scope] if scope else [], top_k=5)
+        action = self.action.execute(decision.get("options", [{}])[0].get("action", "reply") if decision.get("options") else "reply", text=query)
+        return CognitiveTurn(
+            query=query,
+            scope=scope,
+            situation=decision.get("situation", {}),
+            goals=decision.get("goals", []),
+            intention=decision.get("intention", {}),
+            activated_memories=hits,
+            options=decision.get("options", []),
+            action=action,
+        )
 
-    return CognitiveArchitecture(memory=_Memory(), decision=_Decision(), action=_Action())
+
+def default_architecture() -> CognitiveArchitecture:
+    """返回使用当前项目模块的默认认知架构。"""
+    return CognitiveArchitecture()

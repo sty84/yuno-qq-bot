@@ -145,12 +145,13 @@ def test_retrieval_contextvar_isolation_between_threads():
 
 def test_cognitive_architecture_interfaces():
     _db, _shared = _setup("yuno_cog_")
+    _db.memory_add("c2c:cog", "", "用户养了一只橘猫", "2026-01-01T00:00:00", None, 0.7, "user")
     from memory.interfaces import default_architecture
     arch = default_architecture()
     result = arch.run("用户养了什么猫", scope="c2c:cog")
-    assert "decision" in result
-    assert "memory_hits" in result
-    assert "action" in result
+    assert isinstance(result.activated_memories, list)
+    assert any("橘猫" in h["fact"] for h in result.activated_memories)
+    assert result.action is not None
 
 
 def test_memory_consolidator():
