@@ -217,3 +217,33 @@ def test_high_risk_tool_requires_confirm():
     assert r2.status_code == 200, r2.status_code
     audit = _db.audit_query(limit=5, action="web.high_risk")
     assert audit, "高危操作应写审计"
+
+
+def test_public_page_no_auth(monkeypatch):
+    """设置 token 后，/public 公开页仍可匿名访问。"""
+    import importlib
+    import webapp
+    monkeypatch.setenv("YUNO_WEB_TOKEN", "web-secret")
+    reloaded = importlib.reload(webapp)
+    try:
+        from starlette.testclient import TestClient
+        client = TestClient(reloaded.app)
+        assert client.get("/api/health").status_code == 401
+        r = client.get("/public")
+        assert r.status_code == 200, r.status_code
+        assert "Yuno 公开状态" in r.text
+    finally:
+        monkeypatch.delenv("YUNO_WEB_TOKEN", raising=False)
+        importlib.reload(webapp)
+
+
+def test_data_dump_endpoint():
+    """全量数据导出接口返回 JSON dump。"""
+    from starlette.testclient import TestClient
+    import webapp
+    client = TestClient(webapp.app)
+    r = client.get("/api/data/dump")
+    assert r.status_code == 200, r.status_code
+    body = r.json()
+    assert isinstance(body, dict)
+    assert "memories" in body and "events" in body

@@ -232,8 +232,8 @@ _WEB_TOKEN = os.getenv("YUNO_WEB_TOKEN", "")
 if _WEB_TOKEN:
     @app.middleware("http")
     async def _require_web_token(request: Request, call_next):
-        # 公开统计接口不鉴权，供只读展示页使用
-        if request.url.path.startswith("/api/public/"):
+        # 公开统计接口与公开页不鉴权，供只读展示页使用
+        if request.url.path.startswith("/api/public/") or request.url.path == "/public":
             return await call_next(request)
         if request.headers.get("Authorization", "") != f"Bearer {_WEB_TOKEN}":
             return JSONResponse({"detail": "未授权"}, status_code=401)
@@ -671,6 +671,12 @@ def convreview_submit(req: ConvReviewSubmit):
     return {"ok": True, "score": round(avg, 2), "reviews": len(_db.conv_review_recent(limit=1000))}
 
 
+@app.get("/api/data/dump")
+def data_dump():
+    """全量数据 JSON 导出（只读，含用户数据表；索引类由 grow 重建）。"""
+    return _db.dump_all()
+
+
 @app.post("/api/tools")
 def run_tool(req: ToolRun):
     """运维动作白名单（诊断页按钮）。
@@ -709,6 +715,11 @@ def run_tool(req: ToolRun):
         import tools as tools_mod
         return tools_mod.cmd_memory_clear_user(req.uid)
     raise HTTPException(400, f"未知工具：{req.name}")
+
+
+@app.get("/public")
+def public_page():
+    return FileResponse(STATIC_DIR / "public.html")
 
 
 @app.get("/")

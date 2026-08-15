@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Yuno 公开状态</title>
+  <style>
+    body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 24px; }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 22px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-top: 16px; }
+    .card { background: #1e293b; border-radius: 10px; padding: 14px; }
+    .k { font-size: 12px; color: #94a3b8; }
+    .v { font-size: 24px; font-weight: 600; margin-top: 4px; }
+    .muted { color: #64748b; font-size: 12px; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Yuno 公开状态</h1>
+    <div class="cards" id="cards">加载中…</div>
+    <div class="muted" id="updated"></div>
+  </div>
+  <script>
+    fetch('/api/public/stats')
+      .then(r => r.json())
+      .then(data => {
+        const cards = [
+          ['记忆条数', data.memory_count],
+          ['事件数', data.event_count],
+          ['对话数', data.conv_count],
+          ['轨迹数', data.trace_count],
+          ['今日成本', '¥' + (data.today_cost?.cost ?? 0)],
+        ];
+        document.getElementById('cards').innerHTML = cards.map(([k, v]) =>
+          `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`
+        ).join('');
+        document.getElementById('updated').textContent = '更新于 ' + (data.updated_at || '');
+      })
+      .catch(e => {
+        document.getElementById('cards').textContent = '加载失败：' + e;
+      });
+  </script>
+</body>
+</html>
