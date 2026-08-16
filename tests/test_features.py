@@ -301,7 +301,6 @@ def test_03_time_subjects():
     e = _env()
     _db, memory, graph, lexical, reasoning, subjects, time_extract = e["_db"], e["memory"], e["graph"], e["lexical"], e["reasoning"], e["subjects"], e["time_extract"]
     # ---- 时间感知回忆（v2.2）----
-    from memory import graph, lexical, reasoning, time_extract
     _now = datetime.now()
     old10 = (_now - timedelta(days=10)).isoformat(timespec="seconds")
     _db.memory_add("ai", "test", "上个月去了北京出差", _now.isoformat(timespec="seconds"), None, 0.7, "test")
@@ -359,7 +358,7 @@ def test_03_time_subjects():
     )
 
     # ---- 多主体记忆（v2.2）----
-    from memory import context as context_mod, controller as consistency, subjects
+    from memory import context as context_mod, controller as consistency
     _check("subjects-registered", "仲町阿拉蕾" in subjects.registered(), subjects.registered())
     _check(
         "subjects-detect",
@@ -1025,7 +1024,6 @@ def test_08_hesitation_cost_fixes():
     _db, _shared, agent, memory, hesitation = e["_db"], e["_shared"], e["agent"], e["memory"], e["hesitation"]
     tools_mod = e["tools_mod"]
     # ---- 犹豫层（v2.3）：软硬分离 + 概率化 ----
-    from memory import hesitation
     _orig_hcfg = _shared.CONFIG.setdefault("memory", {}).setdefault("core", {}).setdefault("hesitation", {})
     _shared.CONFIG["memory"]["core"]["hesitation"].update(
         {"enabled": True, "sample_rate": 1.0, "discard_cap": 1.0, "rewrite_prob": 1.0, "delay_max_s": 5}
@@ -1277,7 +1275,6 @@ def test_09_lazy_topic_night_compound():
     )
 
     # ---- 组装提示词的时间/天气约束（v2.2 修复）----
-    from memory import sharing
     cap = {}
 
     def fake_compose(*a, **k):
