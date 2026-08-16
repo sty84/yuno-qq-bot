@@ -1646,6 +1646,25 @@ def test_21_social_message_resets_topic():
     _check("social-not-old-topic", cur is None or "月底" not in str(cur.get("topic", "")), cur)
 
 
+def test_22_trace_low_info_dedup():
+    """人工评分轨迹：低信息句子不记录，同窗口同句只记一条。"""
+    e = _env()
+    _db = e["_db"]
+    from memory import trace
+    scope = "c2c:trace_filter"
+    before = len(_db.trace_rows(scope, limit=1000))  # type: ignore[attr-defined]
+    trace.record(scope, raw_content="你好", action="reject", reasoning="低信息")
+    trace.record(scope, raw_content="再见", action="reject", reasoning="低信息")
+    after_low = len(_db.trace_rows(scope, limit=1000))  # type: ignore[attr-defined]
+    _check("trace-low-info-skip", after_low == before, (before, after_low))
+
+    trace.record(scope, raw_content="月底有一场演出", action="create", reasoning="测试")
+    n1 = len(_db.trace_rows(scope, limit=1000))  # type: ignore[attr-defined]
+    trace.record(scope, raw_content="月底有一场演出", action="create", reasoning="重复")
+    n2 = len(_db.trace_rows(scope, limit=1000))  # type: ignore[attr-defined]
+    _check("trace-dedup", n2 == n1, (n1, n2))
+
+
 if __name__ == "__main__":
     for fn in (
         test_01_items_search_space, test_02_mind_procedures, test_03_time_subjects,
@@ -1657,6 +1676,7 @@ if __name__ == "__main__":
         test_14_conflict_scan, test_15_reply_rubric_judge,
         test_20_reply_probes_offline_smoke,
         test_21_social_message_resets_topic,
+        test_22_trace_low_info_dedup,
         test_16_calendar_gate_and_check, test_17_feedback_calibration,
         test_18_retrieval_eval_probes, test_19_forgetful_reply_pool,
     ):

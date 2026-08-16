@@ -5,12 +5,58 @@
 """
 
 import json
+import re
 import time
 from datetime import datetime
 
 from plugins import _db, _shared
 
 GOAL_KEYWORDS = ("目标", "打算", "计划", "想达成", "争取", "为了")
+
+_LOW_INFO_WORDS = (
+    "在吗", "在么", "在不在", "你在吗", "你在么", "你在干嘛", "在干嘛",
+    "干嘛呢", "干什么呢", "忙吗", "忙不忙", "你忙吗", "有空吗", "你有空吗",
+    "你好", "嗨", "哈喽", "再见", "拜拜", "晚安", "早安", "早上好", "下午好",
+    "晚上好", "辛苦了", "谢谢", "感谢", "哈哈", "呵呵", "嗯", "哦", "好的",
+    "好", "行", "ok", "OK", "知道啦", "睡啦", "加油", "我回来了", "我先去忙了",
+)
+_LOW_INFO_RE = re.compile(
+    r"^(?:(?:你|您)?(?:在|忙|有空|干嘛|干什么|咋|怎么)[吗么呢吧]?|"
+    r"你好|嗨|哈喽|再见|拜拜|晚安|早安|辛苦了|谢谢|哈哈+|嗯+|哦+|好的?|知道啦?|睡啦?|加油|我回来了|我先去忙了)"
+    r"[！!。.？?]?$"
+)
+
+_dedup_cache: dict[tuple[str, str], float] = {}
+
+
+def _cfg(key, default):
+    return _shared.core_cfg("trace", key, default)
+def enabled() -> bool:
+    return bool(_cfg("enabled", True))
+
+
+def is_low_information(text) -> bool:
+    """判断是否为低信息密度句子：问候/寒暄/再见/语气词等。"""
+    t = re.sub(r"\s+", "", str(text or "")).strip("？?。！!，,、")
+    if not t:
+        return True
+    if t.lower() in _LOW_INFO_WORDS:
+        return True
+    if len(t) <= 2:
+        return True
+    return _LOW_INFO_RE.fullmatch(t) is not None
+
+
+def _is_duplicate(scope, raw_content, window_min=None) -> bool:
+    """同 scope 同句子在时间窗口内只记录一条。"""
+    window = int(window_min if window_min is not None else _cfg("dedup_window_min", 10))
+    key = (str(scope or ""), str(raw_content or ""))
+    now = time.time()
+    last = _dedup_cache.get(key)
+    if last is not None and now - last < window * 60:
+        return True
+    _dedup_cache[key] = now
+    return False
 
 # 多维度评分（v11）：每维 1~5 分，评分驱动行为调整
 DIMENSIONS = ("extraction", "decision", "confidence", "provenance", "privacy")
@@ -21,12 +67,6 @@ DIMENSION_LABELS = {
     "provenance": "来源可信度",
     "privacy": "隐私处理",
 }
-
-
-def _cfg(key, default):
-    return _shared.core_cfg("trace", key, default)
-def enabled() -> bool:
-    return bool(_cfg("enabled", True))
 
 
 def record(
@@ -51,6 +91,10 @@ def record(
 ):
     """写一条记忆处理轨迹（失败静默，不影响主流程）。"""
     if not enabled():
+        return
+    if is_low_information(raw_content):
+        return
+    if _is_duplicate(scope, raw_content):
         return
     try:
         semantic = dict(semantic or {})

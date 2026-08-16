@@ -55,8 +55,17 @@ def enabled() -> bool:
 
 
 def record(scope, text, reply, conversation_id=""):
-    """记一轮对话（用户消息 + AI 回复）。失败静默，不影响主流程。"""
+    """记一轮对话（用户消息 + AI 回复）。失败静默，不影响主流程。
+
+    低信息密度消息（问候/寒暄/再见等）不进入人工评分队列；
+    同 scope 同句子在时间窗口内只记录一条。
+    """
     if not enabled():
+        return
+    from memory.trace import _is_duplicate, is_low_information
+    if is_low_information(text):
+        return
+    if _is_duplicate(scope, text):
         return
     try:
         ts = datetime.now().isoformat(timespec="seconds")
