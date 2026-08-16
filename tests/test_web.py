@@ -219,6 +219,22 @@ def test_high_risk_tool_requires_confirm():
     assert audit, "高危操作应写审计"
 
 
+def test_public_assets_and_login_page_no_auth(monkeypatch):
+    """设置 token 后，根页面与静态资源仍可匿名访问，管理台才能先渲染登录框。"""
+    import importlib
+    import webapp
+    monkeypatch.setenv("YUNO_WEB_TOKEN", "web-secret")
+    reloaded = importlib.reload(webapp)
+    try:
+        from starlette.testclient import TestClient
+        client = TestClient(reloaded.app)
+        assert client.get("/").status_code == 200
+        assert client.get("/static/vendor/echarts.min.js").status_code == 200
+    finally:
+        monkeypatch.delenv("YUNO_WEB_TOKEN", raising=False)
+        importlib.reload(webapp)
+
+
 def test_public_page_no_auth(monkeypatch):
     """设置 token 后，/public 公开页仍可匿名访问。"""
     import importlib

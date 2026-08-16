@@ -3,593 +3,1211 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Yuno Ops Web</title>
-  <!-- P2-4 离线化：本地 vendor 优先，CDN 兜底（服务器无外网也能用图表/Excel 导出） -->
+  <meta name="color-scheme" content="light">
+  <title>Yuno Ops Web · 评测管理台</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%236366f1'/><stop offset='.5' stop-color='%23a855f7'/><stop offset='1' stop-color='%23ec4899'/></linearGradient></defs><rect width='100' height='100' rx='24' fill='url(%23g)'/><text x='50' y='66' font-size='46' text-anchor='middle' fill='white' font-family='sans-serif'>Y</text></svg>">
   <script src="/static/vendor/echarts.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js';"></script>
   <script src="/static/vendor/xlsx.full.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #0f172a; color: #e2e8f0; }
-    .app { display: flex; min-height: 100vh; }
-    .sidebar { width: 188px; flex-shrink: 0; background: #0b1220; border-right: 1px solid #1e293b;
-               padding: 14px 10px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
-    .brand { font-size: 15px; font-weight: 700; color: #e2e8f0; padding: 0 12px 12px; letter-spacing: 1px; }
-    .main { flex: 1; min-width: 0; padding: 16px 20px; }
-    h1 { font-size: 20px; margin-bottom: 12px; }
-    .tabs { display: flex; flex-direction: column; gap: 2px; }
-    .tab { padding: 9px 12px; border-radius: 8px; background: #1e293b; cursor: pointer; user-select: none; font-size: 13px; }
-    .tab.active { background: #3b82f6; color: #fff; }
-    .page { display: none; }
-    .page.active { display: block; }
-    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-bottom: 14px; }
-    .card { background: #1e293b; border-radius: 10px; padding: 12px; }
-    .card .k { font-size: 12px; color: #94a3b8; }
-    .card .v { font-size: 22px; font-weight: 600; margin-top: 4px; }
-    .card .sub { font-size: 12px; color: #64748b; margin-top: 2px; }
-    .red { color: #f87171; }
-    .green { color: #4ade80; }
-    button { background: #3b82f6; color: #fff; border: 0; padding: 8px 16px; border-radius: 8px; cursor: pointer; margin: 4px 4px 4px 0; }
-    button:disabled { background: #475569; cursor: wait; }
-    pre { background: #0b1220; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; overflow: auto; font-size: 12px; margin-top: 10px; max-height: 420px; }
-    table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 13px; }
-    th, td { border: 1px solid #334155; padding: 6px 10px; text-align: left; }
-    th { background: #1e293b; }
-    .chart { width: 100%; height: 300px; margin-top: 10px; }
-    .muted { color: #64748b; font-size: 12px; }
-    .sw { display: inline-flex; align-items: center; gap: 6px; background: #1e293b;
-          border: 1px solid #334155; border-radius: 8px; padding: 6px 12px; margin: 4px;
-          cursor: pointer; user-select: none; font-size: 13px; }
-    .sw input { accent-color: #3b82f6; width: 16px; height: 16px; cursor: pointer; }
-    .sw.off { opacity: 0.55; }
-    h3.sect { margin: 14px 0 6px; font-size: 15px; color: #e2e8f0; }
-    table tr:nth-child(even) { background: #16213a; }
-    .panel { background: #111c33; border: 1px solid #1e293b; border-radius: 10px;
-             padding: 12px 14px; margin: 10px 0; }
-    .tag { display: inline-block; background: #1e293b; border-radius: 6px; padding: 2px 8px;
-           font-size: 12px; margin: 2px; }
-    .tabsep { display: block; padding: 12px 12px 4px; color: #64748b;
-              font-size: 11px; letter-spacing: 1px; user-select: none; }
-    .sect-line { border-top: 1px solid #1e293b; margin: 12px 0 8px; }
-    @media (max-width: 860px) {
-      .app { flex-direction: column; }
-      .sidebar { width: auto; height: auto; position: static; border-right: 0; border-bottom: 1px solid #1e293b; }
-      .tabs { flex-direction: row; flex-wrap: wrap; }
-    }
-  </style>
-<style>
     :root {
-      --panel-bg: rgba(255,255,255,0.75);
-      --panel-border: rgba(255,255,255,0.9);
-      --accent: #ec4899;
-      --accent2: #a855f7;
-      --accent3: #06b6d4;
+      --bg: #f5f6ff;
+      --surface: #ffffff;
+      --surface-soft: rgba(255,255,255,.78);
+      --text: #10142e;
+      --muted: #667085;
+      --faint: #98a2b3;
+      --line: rgba(99,102,241,.12);
+      --primary: #6366f1;
+      --violet: #8b5cf6;
+      --pink: #ec4899;
+      --cyan: #06b6d4;
+      --green: #10b981;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --radius: 16px;
+      --shadow: 0 10px 30px rgba(99,102,241,.08);
+      --shadow-lg: 0 18px 45px rgba(99,102,241,.14);
+      --grad: linear-gradient(135deg, #6366f1, #a855f7 52%, #ec4899);
+      --sidebar-w: 236px;
     }
-    body { background: #fdf2f8; color: #1e293b; }
-    .sidebar {
-      background: rgba(255,255,255,0.72);
-      backdrop-filter: blur(16px);
-      border-right: 1px solid rgba(100,116,139,0.15);
-      color: #1e293b;
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      min-height: 100vh; font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(1100px 720px at 8% -12%, rgba(199,210,254,.5), transparent 60%),
+        radial-gradient(950px 640px at 104% 2%, rgba(240,171,252,.34), transparent 58%),
+        radial-gradient(920px 680px at 55% 112%, rgba(165,243,252,.36), transparent 62%),
+        var(--bg);
+      background-attachment: fixed;
     }
-    .brand { color: #7c3aed; }
-    .tab {
-      background: rgba(255,255,255,0.6);
-      border: 1px solid rgba(100,116,139,0.1);
-      border-radius: 12px;
-      color: #334155;
-      transition: background .2s, transform .15s, border-color .2s, color .2s;
-    }
-    .tab:hover { background: rgba(255,255,255,0.85); color: #be185d; transform: translateX(2px); }
-    .tab.active {
-      background: linear-gradient(135deg, #ec4899, #a855f7);
-      border-color: transparent;
-      color: #fff;
-    }
-    .tabsep { color: #94a3b8; }
-    .card {
-      background: var(--panel-bg);
-      border: 1px solid var(--panel-border);
-      border-radius: 18px;
-      color: #1e293b;
-      backdrop-filter: blur(14px);
-      box-shadow: 0 4px 20px rgba(236,72,153,0.08);
-      transition: transform .2s, border-color .2s, box-shadow .2s;
-    }
-    .card:hover {
-      transform: translateY(-4px);
-      border-color: rgba(236,72,153,0.35);
-      box-shadow: 0 12px 30px rgba(236,72,153,0.15);
-    }
-    .card .k, .card .sub, .muted { color: #64748b; }
-    .panel {
-      background: rgba(255,255,255,0.7);
-      border: 1px solid rgba(255,255,255,0.9);
-      border-radius: 18px;
-      color: #1e293b;
-      backdrop-filter: blur(14px);
-      box-shadow: 0 8px 30px rgba(168,85,247,0.08);
-    }
-    h1, h2, h3 { color: #7c3aed; }
-    .cards { gap: 14px; }
-    table th { background: rgba(236,72,153,0.08); color: #6d28d9; }
-    table td { color: #334155; border-color: rgba(100,116,139,0.15); }
-    pre {
-      background: rgba(255,255,255,0.65);
-      color: #1e293b;
-      border: 1px solid rgba(100,116,139,0.15);
-    }
-    h1 { background: linear-gradient(90deg, var(--accent), var(--accent2), var(--accent3));
-         -webkit-background-clip: text; background-clip: text; color: transparent; }
+    ::-webkit-scrollbar { width: 9px; height: 9px; }
+    ::-webkit-scrollbar-thumb { background: rgba(99,102,241,.22); border-radius: 999px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,.38); }
+    ::-webkit-scrollbar-track { background: transparent; }
 
-    .bg-bands { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
-    .bg-bands i { position: absolute; display: block; border-radius: 50%; filter: blur(80px); opacity: .5; will-change: transform; }
-    .bg-bands i:nth-child(1) { width: 55vw; height: 55vw; top: -12%; left: -8%; background: radial-gradient(circle, #f472b6, transparent 70%); animation: drift1 24s ease-in-out infinite alternate; }
-    .bg-bands i:nth-child(2) { width: 45vw; height: 45vw; top: 10%; right: -10%; background: radial-gradient(circle, #a78bfa, transparent 70%); animation: drift2 28s ease-in-out infinite alternate; }
-    .bg-bands i:nth-child(3) { width: 50vw; height: 50vw; bottom: -15%; left: 15%; background: radial-gradient(circle, #22d3ee, transparent 70%); animation: drift3 26s ease-in-out infinite alternate; }
-    .bg-bands i:nth-child(4) { width: 40vw; height: 40vw; top: 45%; left: -12%; background: radial-gradient(circle, #34d399, transparent 70%); animation: drift4 30s ease-in-out infinite alternate; }
-    .bg-bands i:nth-child(5) { width: 48vw; height: 48vw; bottom: 5%; right: 5%; background: radial-gradient(circle, #fbbf24, transparent 70%); animation: drift5 32s ease-in-out infinite alternate; }
-    @keyframes drift1 { from { transform: translate(0,0) scale(1); } to { transform: translate(10vw,6vh) scale(1.15); } }
-    @keyframes drift2 { from { transform: translate(0,0) scale(1); } to { transform: translate(-8vw,10vh) scale(1.1); } }
-    @keyframes drift3 { from { transform: translate(0,0) scale(1); } to { transform: translate(12vw,-6vh) scale(1.2); } }
-    @keyframes drift4 { from { transform: translate(0,0) scale(1); } to { transform: translate(-6vw,-8vh) scale(1.1); } }
-    @keyframes drift5 { from { transform: translate(0,0) scale(1); } to { transform: translate(-10vw,8vh) scale(1.15); } }
+    .app { display: flex; min-height: 100vh; }
+    .sidebar {
+      width: var(--sidebar-w); flex-shrink: 0; position: sticky; top: 0; height: 100vh;
+      background: rgba(255,255,255,.82); border-right: 1px solid var(--line);
+      padding: 18px 14px; overflow-y: auto; z-index: 20;
+    }
+    .brand { display: flex; align-items: center; gap: 11px; padding: 2px 8px 18px; }
+    .brand-logo {
+      width: 40px; height: 40px; border-radius: 13px; display: grid; place-items: center; flex-shrink: 0;
+      color: #fff; font-weight: 900; font-size: 19px; background: var(--grad);
+      box-shadow: 0 10px 22px rgba(139,92,246,.28);
+    }
+    .brand-text { line-height: 1.15; }
+    .brand-text b { display: block; font-size: 15px; letter-spacing: .2px; }
+    .brand-text span { font-size: 11px; color: var(--muted); }
+    .nav-label { padding: 14px 10px 6px; font-size: 10.5px; color: var(--faint); font-weight: 800; letter-spacing: 1.4px; text-transform: uppercase; }
+    .nav {
+      display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+      border: 0; background: transparent; border-radius: 12px; padding: 9px 11px; margin: 2px 0;
+      font-size: 13.5px; color: #3f4559; cursor: pointer; font-family: inherit;
+      transition: background .16s, color .16s, transform .12s;
+    }
+    .nav:hover { background: rgba(99,102,241,.07); transform: translateX(2px); }
+    .nav.active {
+      background: linear-gradient(135deg, rgba(99,102,241,.12), rgba(236,72,153,.10));
+      color: #4f46e5; font-weight: 750;
+    }
+    .nav.active .nav-ico { background: var(--grad); color: #fff; box-shadow: 0 6px 14px rgba(139,92,246,.3); }
+    .nav-ico {
+      width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; flex-shrink: 0;
+      background: #eef0ff; font-size: 14px;
+    }
+    .side-footer {
+      position: sticky; bottom: 0; margin-top: 16px; padding: 12px 10px 6px;
+      background: linear-gradient(180deg, rgba(255,255,255,0), rgba(255,255,255,.95) 34%);
+      border-top: 1px solid var(--line); font-size: 11.5px; color: var(--muted);
+    }
+    .side-footer .row { display: flex; align-items: center; gap: 7px; margin-top: 5px; }
+    .mini-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 rgba(16,185,129,.4); animation: pulse 2.2s ease-out infinite; }
+    .mini-dot.off { background: var(--amber); animation: none; }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(16,185,129,.4); } 70% { box-shadow: 0 0 0 7px rgba(16,185,129,0); } 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); } }
+
+    .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .topbar {
+      position: sticky; top: 0; z-index: 15; display: flex; align-items: center; gap: 14px;
+      padding: 13px 26px; background: rgba(245,246,255,.82); backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line);
+    }
+    .crumb { font-size: 11.5px; color: var(--faint); letter-spacing: .4px; }
+    .topbar h1 { margin: 1px 0 0; font-size: 20px; font-weight: 850; letter-spacing: -.3px; }
+    .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 999px;
+      background: #fff; border: 1px solid var(--line); font-size: 12px; color: #4b5563; white-space: nowrap;
+    }
+    .content { padding: 20px 26px 48px; max-width: 1480px; width: 100%; margin: 0 auto; }
+
+    .page { display: none; animation: pageIn .22s ease both; }
+    .page.active { display: block; }
+    @keyframes pageIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+    .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+    .page-head .lead { min-width: 240px; }
+    .page-head h2 { margin: 0 0 4px; font-size: 18px; font-weight: 820; color: #312e81; }
+    .page-head p { margin: 0; color: var(--muted); font-size: 12.5px; max-width: 780px; line-height: 1.55; }
+    .actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+
+    .grid { display: grid; gap: 13px; }
+    .stats { grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); margin-bottom: 15px; }
+    .stats.sm { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+    .stat {
+      position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 16px 17px 14px; box-shadow: var(--shadow);
+      transition: transform .18s, box-shadow .2s, border-color .2s;
+    }
+    .stat:hover { transform: translateY(-3px); border-color: rgba(139,92,246,.3); box-shadow: var(--shadow-lg); }
+    .stat::after { content: ""; position: absolute; right: -30px; top: -34px; width: 92px; height: 92px; border-radius: 50%; background: var(--tint, rgba(99,102,241,.08)); }
+    .stat .k { font-size: 12px; color: var(--muted); font-weight: 650; position: relative; z-index: 1; }
+    .stat .v { font-size: 25px; font-weight: 850; margin-top: 5px; font-variant-numeric: tabular-nums; position: relative; z-index: 1; }
+    .stat .sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; min-height: 15px; position: relative; z-index: 1; }
+    .stat .bar { height: 3px; width: 34px; border-radius: 999px; margin-top: 10px; background: var(--gradline, var(--grad)); }
+
+    .panel {
+      background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
+      padding: 18px 20px; box-shadow: var(--shadow); margin-bottom: 14px;
+    }
+    .panel-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+    .panel-head h3 { margin: 0; font-size: 15px; font-weight: 800; color: #3730a3; }
+    .panel-head .desc { color: var(--muted); font-size: 12px; width: 100%; line-height: 1.5; }
+    .split { display: grid; grid-template-columns: 1.1fr .9fr; gap: 14px; }
+    .split > .panel { margin-bottom: 0; }
+    @media (max-width: 1080px) { .split { grid-template-columns: 1fr; } .split > .panel { margin-bottom: 14px; } }
+
+    .btn {
+      border: 0; cursor: pointer; border-radius: 11px; padding: 9px 15px; font-size: 13px; font-weight: 700;
+      color: #fff; background: linear-gradient(135deg, #6366f1, #a855f7); font-family: inherit;
+      box-shadow: 0 8px 18px rgba(99,102,241,.2); transition: transform .15s, box-shadow .2s, opacity .2s, filter .2s;
+      display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+    }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 12px 24px rgba(99,102,241,.28); filter: saturate(1.08); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: .5; cursor: wait; transform: none; box-shadow: none; }
+    .btn.ghost { background: #fff; color: #4f46e5; border: 1px solid var(--line); box-shadow: var(--shadow); }
+    .btn.pink { background: linear-gradient(135deg, #ec4899, #a855f7); box-shadow: 0 8px 18px rgba(236,72,153,.2); }
+    .btn.danger { background: linear-gradient(135deg, #f43f5e, #ef4444); box-shadow: 0 8px 18px rgba(239,68,68,.2); }
+    .btn.soft { background: #eef2ff; color: #4f46e5; box-shadow: none; }
+    .btn.sm { padding: 7px 11px; font-size: 12px; border-radius: 9px; }
+
+    .chart { width: 100%; height: 300px; }
+    .chart.tall { height: 360px; }
+    .muted { color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .red { color: var(--red); font-weight: 650; }
+    .green { color: var(--green); font-weight: 650; }
+    .hint { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); background: #eef2ff; padding: 5px 10px; border-radius: 999px; }
+
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 13px; max-height: 430px; overflow-y: auto; }
+    table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+    th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid rgba(99,102,241,.08); vertical-align: top; }
+    th { position: sticky; top: 0; background: #fafaff; color: #5b5bd6; font-size: 11px; letter-spacing: .35px; text-transform: uppercase; z-index: 1; }
+    tr:last-child td { border-bottom: 0; }
+    tbody tr:hover td { background: #fafaff; }
+    .badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 750; background: #eef2ff; color: #4f46e5; }
+    .badge.pink { background: #fdf2f8; color: #db2777; }
+    .badge.cyan { background: #ecfeff; color: #0891b2; }
+    .badge.green { background: #ecfdf5; color: #059669; }
+    .badge.amber { background: #fffbeb; color: #b45309; }
+    .badge.red { background: #fef2f2; color: #dc2626; }
+    .badge.gray { background: #f3f4f6; color: #4b5563; }
+
+    pre.json {
+      background: #0f1230; color: #d9e2ff; border: 1px solid #252a54; border-radius: 13px;
+      padding: 13px 15px; overflow: auto; font-size: 11.8px; line-height: 1.55; max-height: 420px;
+      margin: 8px 0 0;
+    }
+    details.json-dump summary { cursor: pointer; color: #4f46e5; font-size: 12px; font-weight: 700; padding: 5px 0; }
+    .empty {
+      border: 1px dashed rgba(99,102,241,.25); border-radius: 14px; padding: 26px 18px; text-align: center;
+      color: var(--muted); font-size: 13px; background: rgba(255,255,255,.5);
+    }
+
+    .seg { display: inline-flex; gap: 3px; padding: 4px; background: #eef0ff; border-radius: 11px; }
+    .seg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 8px; cursor: pointer; color: #4b5563; font-size: 12px; font-weight: 700; font-family: inherit; }
+    .seg button.active { background: #fff; color: #4f46e5; box-shadow: 0 3px 9px rgba(99,102,241,.14); }
+
+    input, select, textarea {
+      font-family: inherit; font-size: 13px; color: var(--text); background: #fff;
+      border: 1px solid rgba(99,102,241,.2); border-radius: 10px; padding: 8px 11px; outline: none;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.12); }
+    label { font-size: 12.5px; color: var(--muted); }
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+    .row > * { min-width: 0; }
+    textarea { width: 100%; resize: vertical; line-height: 1.5; }
+
+    .sw {
+      display: inline-flex; align-items: center; gap: 8px; background: #fff; border: 1px solid var(--line);
+      border-radius: 11px; padding: 8px 12px; margin: 4px; cursor: pointer; user-select: none; font-size: 12.5px;
+      transition: opacity .15s, border-color .15s, transform .15s;
+    }
+    .sw:hover { border-color: rgba(139,92,246,.4); transform: translateY(-1px); }
+    .sw input { accent-color: #6366f1; width: 16px; height: 16px; cursor: pointer; }
+    .sw.off { opacity: .52; }
+
+    .task-list { display: grid; gap: 8px; }
+    .task-item { display: flex; align-items: center; gap: 10px; background: #fafaff; border: 1px solid var(--line); border-radius: 11px; padding: 9px 12px; font-size: 12.5px; }
+    .task-item .grow { flex: 1; min-width: 0; }
+    .task-item b { font-size: 12.5px; }
+    .progress { height: 5px; background: #eef0ff; border-radius: 999px; overflow: hidden; margin-top: 5px; }
+    .progress i { display: block; height: 100%; width: 40%; border-radius: 999px; background: var(--grad); animation: progress 1.6s ease-in-out infinite; }
+    @keyframes progress { 0% { transform: translateX(-110%); } 100% { transform: translateX(260%); } }
+
+    .chat-list { display: grid; gap: 10px; }
+    .bubble { max-width: 86%; padding: 10px 13px; border-radius: 15px; font-size: 13px; line-height: 1.55; position: relative; }
+    .bubble.user { justify-self: end; background: linear-gradient(135deg, #6366f1, #a855f7); color: #fff; border-bottom-right-radius: 5px; }
+    .bubble.ai { justify-self: start; background: #f4f5ff; border: 1px solid var(--line); border-bottom-left-radius: 5px; }
+    .bubble .who { display: block; font-size: 10.5px; opacity: .75; margin-bottom: 2px; }
+    .bubble.ai .who { color: #6d28d9; opacity: .85; }
+
+    .review-grid { display: grid; gap: 12px; }
+    .review-card { background: #fff; border: 1px solid var(--line); border-radius: 15px; padding: 15px 17px; box-shadow: var(--shadow); }
+    .review-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 7px; }
+    .review-content { font-size: 13px; line-height: 1.6; margin-bottom: 6px; word-break: break-word; }
+    .dim-row { display: grid; grid-template-columns: repeat(5, minmax(74px, 1fr)); gap: 8px; margin-top: 10px; }
+    @media (max-width: 760px) { .dim-row { grid-template-columns: repeat(2, 1fr); } }
+    .dim { display: flex; flex-direction: column; gap: 4px; background: #fafaff; border-radius: 10px; padding: 7px 8px; }
+    .dim label { font-size: 11px; font-weight: 700; color: #5b5bd6; }
+    .dim select { padding: 5px 6px; font-size: 12px; }
+
+    .modal-back {
+      position: fixed; inset: 0; z-index: 100; background: rgba(17,20,45,.44); backdrop-filter: blur(3px);
+      display: none; align-items: center; justify-content: center; padding: 18px;
+    }
+    .modal-back.show { display: flex; }
+    .modal { width: min(460px, 100%); background: #fff; border-radius: 20px; padding: 22px; box-shadow: 0 28px 80px rgba(30,27,75,.3); animation: pageIn .2s ease both; }
+    .modal h3 { margin: 0 0 6px; font-size: 18px; color: #312e81; }
+    .modal .muted { margin-bottom: 14px; }
+
+    .toasts { position: fixed; right: 18px; top: 16px; z-index: 200; display: grid; gap: 8px; pointer-events: none; }
+    .toast {
+      min-width: 230px; max-width: 360px; padding: 11px 14px; border-radius: 12px; color: #fff; font-size: 13px;
+      background: #10142e; box-shadow: 0 14px 34px rgba(16,20,46,.28); animation: toastIn .22s ease both;
+    }
+    .toast.ok { background: linear-gradient(135deg, #059669, #10b981); }
+    .toast.err { background: linear-gradient(135deg, #e11d48, #ef4444); }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+
+    @media (max-width: 900px) {
+      .app { flex-direction: column; }
+      .sidebar { position: relative; width: 100%; height: auto; max-height: none; padding: 12px; }
+      .nav-row { display: flex; gap: 4px; flex-wrap: wrap; }
+      .nav-label { width: 100%; }
+      .side-footer { position: static; }
+      .content { padding: 16px 12px 36px; }
+      .topbar { padding: 10px 14px; flex-wrap: wrap; }
+      .topbar-actions { margin-left: 0; width: 100%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; transition: none !important; }
+    }
   </style>
 </head>
 <body>
-  <div class="bg-bands" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
-  <div class="app" style="position:relative;z-index:1;">
-  <aside class="sidebar">
-    <div class="brand">Yuno Ops Web</div>
-    <div class="tabs" id="tabs">
-      <div class="tab active" data-page="dash">总览</div>
-      <div class="tabsep">评测</div>
-      <div class="tab" data-page="mem">检索评测</div>
-      <div class="tab" data-page="space">空间评测</div>
-      <div class="tab" data-page="time">时间评测</div>
-      <div class="tab" data-page="emotion">情绪评测</div>
-      <div class="tab" data-page="subjects">多主体评测</div>
-      <div class="tab" data-page="review">记忆评分</div>
-      <div class="tabsep">实验</div>
-      <div class="tab" data-page="ablation">消融实验</div>
-      <div class="tab" data-page="scenario">对话回放</div>
-      <div class="tabsep">分析</div>
-      <div class="tab" data-page="diag">数据与诊断</div>
-      <div class="tab" data-page="charts">图表分析</div>
-      <div class="tab" data-page="costs">成本</div>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">Y</div>
+        <div class="brand-text"><b>Yuno Ops</b><span>Agent 记忆系统控制台</span></div>
+      </div>
+      <div class="nav-row" id="nav"></div>
+      <div class="side-footer">
+        <div class="row"><span class="mini-dot" id="sideDot"></span><span id="sideStatus">连接中…</span></div>
+        <div class="row" id="sideAuth">鉴权：—</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="crumb">Yuno Ops Web / <span id="crumbPage">总览</span></div>
+          <h1 id="pageTitle">总览</h1>
+        </div>
+        <div class="topbar-actions">
+          <span class="pill"><span id="taskPill">⚙️ 无运行任务</span></span>
+          <span class="pill" id="lastSync">—</span>
+          <a class="btn ghost sm" href="/public" target="_blank" rel="noreferrer">公开状态页 ↗</a>
+          <button class="btn sm" id="authBtn">登录</button>
+        </div>
+      </header>
+      <div class="content">
+
+        <!-- ============ 总览 ============ -->
+        <section class="page active" id="page-dash">
+          <div class="page-head">
+            <div class="lead"><h2>系统总览</h2><p>记忆库规模、评测基线、今日成本与运行中任务一屏掌握。页面每 20 秒自动刷新，后台静默时暂停。</p></div>
+            <div class="actions">
+              <button class="btn" data-task="grow" data-label="跑一次 grow">🌱 跑一次 grow</button>
+              <button class="btn ghost" data-task="memory_eval" data-label="检索评测">▶ 跑检索评测</button>
+              <button class="btn ghost" data-task="space_eval" data-label="空间评测">▶ 跑空间评测</button>
+              <button class="btn ghost" data-task="time_eval" data-label="时间评测">▶ 跑时间评测</button>
+              <button class="btn ghost" data-task="subjects_eval" data-label="多主体评测">▶ 跑多主体评测</button>
+            </div>
+          </div>
+          <div class="grid stats" id="dashData"></div>
+          <div class="grid stats sm" id="dashQuality"></div>
+          <div class="split">
+            <div class="panel">
+              <div class="panel-head"><h3>服务健康</h3><span class="badge green" id="healthBadge">检测中</span></div>
+              <div class="grid stats sm" id="healthCards"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h3>运行中任务</h3><button class="btn soft sm" onclick="refreshTasks()">刷新</button></div>
+              <div id="taskBoard"><div class="empty">加载中…</div></div>
+            </div>
+          </div>
+          <div class="panel" id="growPanel" style="display:none">
+            <div class="panel-head"><h3>最近一次 grow 报告</h3></div>
+            <pre class="json" id="grow-report"></pre>
+          </div>
+        </section>
+
+        <!-- ============ 认知试验台 ============ -->
+        <section class="page" id="page-cognitive">
+          <div class="page-head">
+            <div class="lead"><h2>认知架构试验台</h2><p>调用标准化 CoALA 接口：决策 → 记忆检索 → 动作描述。适合验证某个 query 在当前心智状态下命中了哪些记忆、会给出什么动作。</p></div>
+          </div>
+          <div class="panel">
+            <div class="grid" style="grid-template-columns:1fr 220px;gap:12px">
+              <div class="field"><label>Query（模拟用户输入）</label><textarea id="cogQuery" rows="2" placeholder="例如：用户养了什么猫"></textarea></div>
+              <div class="field"><label>Scope</label><input id="cogScope" value="c2c:cog" placeholder="c2c:test"></div>
+            </div>
+            <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+              <button class="btn pink" id="cogRun">🔬 运行认知回合</button>
+              <span class="muted">只读分析，不产生外部副作用；限速 20 次/分钟。</span>
+            </div>
+          </div>
+          <div id="cogResult"><div class="empty">运行后这里会展示决策、命中的记忆与动作描述。</div></div>
+        </section>
+
+        <!-- ============ 检索评测 ============ -->
+        <section class="page" id="page-mem">
+          <div class="page-head">
+            <div class="lead"><h2>检索评测</h2><p>用 probes 验证记忆检索能力：Recall@K、MRR、NDCG，以及各问题分桶表现。</p></div>
+            <div class="actions"><button class="btn" data-task="memory_eval" data-label="检索评测">▶ 运行检索评测</button></div>
+          </div>
+          <div class="grid stats" id="memCards"></div>
+          <div class="panel"><div class="panel-head"><h3>分桶召回率</h3></div><div class="chart" id="memChart"></div></div>
+          <details class="json-dump"><summary>查看完整评测 JSON</summary><pre class="json" id="memRaw"></pre></details>
+        </section>
+
+        <!-- ============ 空间评测 ============ -->
+        <section class="page" id="page-space">
+          <div class="page-head">
+            <div class="lead"><h2>空间评测</h2><p>验证 where 记忆的空间检索与空间模拟搜索能力。</p></div>
+            <div class="actions"><button class="btn" data-task="space_eval" data-label="空间评测">▶ 运行空间评测</button></div>
+          </div>
+          <div class="grid stats" id="spaceCards"></div>
+          <details class="json-dump"><summary>查看完整评测 JSON</summary><pre class="json" id="spaceRaw"></pre></details>
+        </section>
+
+        <!-- ============ 时间评测 ============ -->
+        <section class="page" id="page-time">
+          <div class="page-head">
+            <div class="lead"><h2>时间评测</h2><p>验证时间窗口召回、时间线排序与日期精度。</p></div>
+            <div class="actions"><button class="btn" data-task="time_eval" data-label="时间评测">▶ 运行时间评测</button></div>
+          </div>
+          <div class="grid stats" id="timeCards"></div>
+          <details class="json-dump"><summary>查看完整评测 JSON</summary><pre class="json" id="timeRaw"></pre></details>
+        </section>
+
+        <!-- ============ 情绪评测 ============ -->
+        <section class="page" id="page-emotion">
+          <div class="page-head">
+            <div class="lead"><h2>情绪评测</h2><p>情绪分类 accuracy、VAD 回归 MAE、复合情绪与议题 mood 一致性。</p></div>
+            <div class="actions"><button class="btn pink" data-task="emotion_eval" data-label="情绪评测">▶ 运行情绪评测</button></div>
+          </div>
+          <div class="grid stats" id="emotionCards"></div>
+          <div class="grid stats sm" id="emotionTopic"></div>
+          <div id="emotionDrift" style="margin-bottom:12px"></div>
+          <div class="panel"><div class="panel-head"><h3>分情绪准确率</h3></div><div class="chart" id="emotionChart"></div></div>
+          <details class="json-dump"><summary>查看完整评测 JSON</summary><pre class="json" id="emotionRaw"></pre></details>
+        </section>
+
+        <!-- ============ 多主体评测 ============ -->
+        <section class="page" id="page-subjects">
+          <div class="page-head">
+            <div class="lead"><h2>多主体评测</h2><p>多角色记忆归属、NPC 记忆、隐私隔离与衰减策略。</p></div>
+            <div class="actions"><button class="btn" data-task="subjects_eval" data-label="多主体评测">▶ 运行多主体评测</button></div>
+          </div>
+          <div class="grid stats" id="subjectsCards"></div>
+          <div class="grid stats sm" id="subjectsDecay"></div>
+          <details class="json-dump"><summary>查看完整评测 JSON</summary><pre class="json" id="subjectsRaw"></pre></details>
+        </section>
+
+        <!-- ============ 记忆评分 ============ -->
+        <section class="page" id="page-review">
+          <div class="page-head">
+            <div class="lead"><h2>评分审核</h2><p>对单条记忆决策 / 单轮对话质量做五维评分。评完立即刷新评分驱动的行为参数。</p></div>
+            <div class="actions">
+              <div class="seg" id="reviewSeg">
+                <button data-source="trace" class="active">记忆决策</button>
+                <button data-source="conv">对话质量</button>
+              </div>
+              <button class="btn ghost sm" onclick="loadReview()">刷新队列</button>
+            </div>
+          </div>
+          <details class="panel" style="margin-bottom:12px">
+            <summary style="cursor:pointer;font-weight:800;color:#3730a3">📏 评分标准（点开看详细规则）</summary>
+            <p class="muted" style="margin-top:8px">评分对象：单条<u>记忆处理决策</u>（create=存了什么 / reject=该不该存 / merge=合并 / update=更新）。五维 1~5：<b>5=很好　4=好　3=一般　2=差　1=很离谱</b>，拿不准就打 3。</p>
+            <div class="table-wrap" style="margin-top:8px">
+              <table>
+                <thead><tr><th>维度</th><th>评什么</th><th>打 5 分（很好）</th><th>打 1 分（很离谱）</th></tr></thead>
+                <tbody>
+                  <tr><td><b>提取 extraction</b></td><td>提取的事实准不准、细节全不全</td><td>名字/数字/品种/时间等细节都保留了，没瞎编</td><td>提取内容与原话不符，或编造了原话没有的细节</td></tr>
+                  <tr><td><b>决策 decision</b></td><td>这条<u>该不该存</u>、处理方式对不对</td><td>重要事实存了；玩笑/临时情绪/寒暄正确地没存</td><td>重要事实漏存，或垃圾/玩笑话入库了</td></tr>
+                  <tr><td><b>置信度 confidence</b></td><td>conf 数字标得跟实际可信度匹不匹配</td><td>用户亲口说的给高可信度；AI 猜的给低</td><td>证据不足却给高可信度（或反之）</td></tr>
+                  <tr><td><b>来源 provenance</b></td><td>来源标得对不对（是谁说的）</td><td>用户说的标"用户"；AI 想法没混入用户记忆</td><td>来源张冠李戴，AI 自述被当用户亲口说</td></tr>
+                  <tr><td><b>隐私 privacy</b></td><td>敏感信息（手机/证件/财务/健康）处理得对不对</td><td>敏感信息加密或标私有，不会被其他人召回</td><td>敏感信息明文入库、还能被群聊召回</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="muted" style="margin-top:6px">对话质量评分五维：remember 记忆呼应 / natural 自然度 / emotional 情绪恰当 / proactive 主动合宜 / boundary 边界感。</p>
+          </details>
+          <div class="grid stats sm" id="reviewProgress"></div>
+          <div id="reviewList" class="review-grid"><div class="empty">加载中…</div></div>
+        </section>
+
+        <!-- ============ 数据与诊断 ============ -->
+        <section class="page" id="page-diag">
+          <div class="page-head">
+            <div class="lead"><h2>数据与诊断</h2><p>数据规模、人工评分进度、程序记忆、路由命中率、一致性、犹豫层与回归门禁。</p></div>
+            <div class="actions"><button class="btn ghost sm" onclick="renderDiag()">刷新诊断</button></div>
+          </div>
+          <div class="panel"><div class="panel-head"><h3>数据规模</h3></div><div class="grid stats sm" id="diagCounts"></div></div>
+          <div class="panel"><div class="panel-head"><h3>人工评分质量</h3></div><div class="grid stats sm" id="diagReview"></div></div>
+          <div class="panel"><div class="panel-head"><h3>程序记忆</h3></div><div class="grid stats sm" id="diagProc"></div></div>
+          <div class="panel"><div class="panel-head"><h3>事实分类探针</h3></div><div class="grid stats sm" id="diagClassify"></div><div id="diagClassifyMsg" class="muted"></div></div>
+          <div class="panel"><div class="panel-head"><h3>双轨制一致性</h3></div><div class="grid stats sm" id="diagConsistency"></div></div>
+          <div class="panel"><div class="panel-head"><h3>犹豫层 · 主动消息发前斟酌</h3></div><div class="grid stats sm" id="diagHesitation"></div><div id="diagHesitationLog"></div></div>
+          <div class="panel"><div class="panel-head"><h3>检索路由命中率（各算法）</h3></div><div class="chart" id="diagRoute"></div></div>
+          <pre class="json" id="diagCal" style="display:none"></pre>
+          <div class="panel"><div class="panel-head"><h3>实验日志 · 回归门禁</h3></div><div id="diagExp"><div class="empty">加载中…</div></div></div>
+        </section>
+
+        <!-- ============ 图表分析 ============ -->
+        <section class="page" id="page-charts">
+          <div class="page-head">
+            <div class="lead"><h2>图表分析</h2><p>历史基线趋势、最新 vs 平均、bandit 策略后验与主动消息状态。</p></div>
+            <div class="actions"><button class="btn" onclick="downloadExcel()">📥 下载 Excel</button><button class="btn ghost sm" onclick="renderCharts()">刷新图表</button></div>
+          </div>
+          <div class="grid stats sm" id="chartsSummary"></div>
+          <div class="panel"><div class="panel-head"><h3>基线趋势</h3><span class="hint">横轴 = 时间</span></div><div class="chart tall" id="trendChart"></div></div>
+          <div class="panel"><div class="panel-head"><h3>最新 vs 历史平均</h3><span class="hint">红色差距 = 重点观察</span></div><div class="chart" id="compareChart"></div></div>
+          <div class="split">
+            <div class="panel"><div class="panel-head"><h3>回应策略 bandit 后验</h3></div><div class="chart" id="banditChart"></div></div>
+            <div class="panel"><div class="panel-head"><h3>主动消息决策状态</h3></div><div class="chart" id="reviveChart"></div></div>
+          </div>
+        </section>
+
+        <!-- ============ 消融实验 ============ -->
+        <section class="page" id="page-ablation">
+          <div class="page-head">
+            <div class="lead"><h2>消融实验 · 热插拔开关</h2><p>开关实时修改 config 并落盘：立即影响本管理台评测；bot 进程通过 reload_if_changed 自动生效。</p></div>
+            <div class="actions"><button class="btn pink" id="btn-ablation">🧪 运行消融（全部开关 × probes）</button></div>
+          </div>
+          <div class="panel"><div class="panel-head"><h3>机制开关</h3><span class="hint">灰色 = 当前关闭</span></div><div id="ablationSwitches"><div class="empty">加载中…</div></div></div>
+          <div class="grid stats" id="ablationCards"></div>
+          <div class="panel"><div id="ablationTable"></div></div>
+          <div class="panel"><div class="panel-head"><h3>消融表现对比</h3></div><div class="chart" id="ablationChart"></div></div>
+        </section>
+
+        <!-- ============ 对话回放 ============ -->
+        <section class="page" id="page-scenario">
+          <div class="page-head">
+            <div class="lead"><h2>对话回放 · 五维评分</h2><p>逐条走 agent.ask 回放场景，支持 DeepSeek 机器分与人工分对照。</p></div>
+          </div>
+          <div class="grid stats sm" id="scenarioMeta"></div>
+          <div class="grid stats sm" id="scenarioScoreSummary"></div>
+          <div class="panel">
+            <div class="row">
+              <div class="field" style="flex:1;min-width:240px"><label>场景</label><select id="scenarioSelect"></select></div>
+              <label style="display:flex;gap:7px;align-items:center"><input type="checkbox" id="chkScore" checked> 附带 LLM 五维评分（消耗 token）</label>
+              <button class="btn" id="btnReplay">▶ 回放</button>
+            </div>
+          </div>
+          <div id="scenarioConv"></div>
+          <div id="scenarioLlmScore" style="display:none"></div>
+          <div class="panel" id="scenarioManual" style="display:none">
+            <div class="panel-head"><h3>人工评分</h3></div>
+            <div class="grid stats sm" id="scenarioDims"></div>
+            <div class="row" style="margin-top:10px">
+              <div class="field" style="flex:1"><label>备注（可选）</label><input id="scComment" placeholder="为什么这样打分"></div>
+              <button class="btn pink" onclick="saveManualScore()">保存人工分</button>
+            </div>
+          </div>
+          <div class="panel"><div class="panel-head"><h3>评分历史</h3></div><div id="scenarioScores"></div></div>
+          <div class="panel"><div class="panel-head"><h3>五维评分对比（人工 vs 机器分）</h3></div><div class="chart" id="scenarioRadar"></div></div>
+        </section>
+
+        <!-- ============ 成本 ============ -->
+        <section class="page" id="page-costs">
+          <div class="page-head">
+            <div class="lead"><h2>成本分析</h2><p>近 30 天 LLM token 与费用，按模块、按检索路径、按天归因。</p></div>
+            <div class="actions"><button class="btn ghost sm" onclick="renderCosts()">刷新成本</button></div>
+          </div>
+          <div class="grid stats" id="costCards"></div>
+          <div class="panel"><div class="panel-head"><h3>按模块 token 消耗</h3></div><div class="chart" id="costModuleChart"></div></div>
+          <div class="panel"><div class="panel-head"><h3>检索路径 token（llm 重排归因）</h3></div><div class="chart" id="costPathChart"></div></div>
+          <div class="panel"><div class="panel-head"><h3>按天累计</h3></div><div class="chart" id="costDayChart"></div></div>
+          <div class="panel"><div class="panel-head"><h3>机制权衡：token 成本 × 消融效果</h3></div><div id="costTradeoff"></div></div>
+        </section>
+
+        <!-- ============ 系统与数据 ============ -->
+        <section class="page" id="page-system">
+          <div class="page-head">
+            <div class="lead"><h2>系统与数据</h2><p>服务状态、任务队列、数据导出 / 导入、运维播报与账号会话。</p></div>
+            <div class="actions"><button class="btn ghost sm" onclick="renderSystem()">刷新状态</button></div>
+          </div>
+          <div class="grid stats" id="systemStatus"></div>
+          <div class="split">
+            <div class="panel">
+              <div class="panel-head"><h3>任务队列</h3><button class="btn soft sm" onclick="refreshTasks()">刷新</button></div>
+              <div id="systemTasks"><div class="empty">加载中…</div></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h3>运维播报</h3><span class="badge red">高危 · 需二次确认</span></div>
+              <div class="field" style="margin-top:6px"><label>播报内容</label><textarea id="notifyContent" rows="2" placeholder="例：系统将在 22:00 进行维护"></textarea></div>
+              <div class="row" style="margin-top:8px">
+                <div class="field" style="flex:1;min-width:130px"><label>目标类型</label><select id="notifyType"><option value="group">group</option><option value="private">private</option></select></div>
+                <div class="field" style="flex:1;min-width:130px"><label>目标 ID</label><input id="notifyTarget" placeholder="群号 / QQ（可空）"></div>
+              </div>
+              <label style="display:flex;gap:7px;align-items:center;margin-top:10px"><input type="checkbox" id="notifyConfirm"> 我确认内容无误，允许发送播报</label>
+              <button class="btn danger" style="margin-top:12px" onclick="sendNotify()">📣 发送运维播报</button>
+            </div>
+          </div>
+          <div class="split">
+            <div class="panel">
+              <div class="panel-head"><h3>数据导出 / 导入</h3><span class="badge red">导入为高危操作</span></div>
+              <p class="muted">导出为全量只读 JSON（含用户数据表；索引类由 grow 重建）。导入前会自动写审计，可勾选 replace 覆盖已有数据。</p>
+              <div class="row" style="margin-top:10px">
+                <button class="btn" onclick="downloadDump()">⬇ 导出全量 JSON</button>
+                <label class="btn soft" style="cursor:pointer">选择导入文件<input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="previewImport(this)"></label>
+              </div>
+              <div id="importPreview" class="muted" style="margin-top:10px"></div>
+              <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px">
+                <label style="display:flex;gap:7px;align-items:center"><input type="checkbox" id="importConfirm"> 我理解导入会修改数据库</label>
+                <label style="display:flex;gap:7px;align-items:center"><input type="checkbox" id="importReplace"> 覆盖已有数据（replace）</label>
+              </div>
+              <button class="btn danger" style="margin-top:10px" id="btnImport" disabled onclick="doImport()">执行导入</button>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h3>账号与鉴权</h3><span class="badge" id="authModeBadge">检测中</span></div>
+              <p class="muted">未设置 YUNO_WEB_TOKEN 时仅限本机使用；公网暴露请务必在服务端配置 token 与密码。</p>
+              <div class="field" style="margin-top:10px"><label>当前会话</label><input id="sessionInfo" readonly value="未登录 / 无鉴权模式"></div>
+              <div class="row" style="margin-top:10px">
+                <button class="btn" id="sysLoginBtn">输入密码登录</button>
+                <button class="btn ghost" id="sysLogoutBtn" onclick="logout()">退出登录</button>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>维护动作</h3><span class="badge red">污染 / 冲突 / 日历 apply 需二次确认</span></div>
+            <p class="muted">安全动作直接执行；污染扫描、冲突扫描、日历检查与清空用户记忆会写审计，请确认后再执行。</p>
+            <div class="row" style="margin-top:10px">
+              <button class="btn ghost" onclick="runTool('appointment-clean')">🧹 约定表巡检清理</button>
+              <button class="btn ghost" onclick="runTool('memory-source-backfill')">🏷️ 记忆来源归一</button>
+              <button class="btn danger" onclick="confirmTool('pollution-scan-apply')">⚠ 应用污染扫描</button>
+              <button class="btn danger" onclick="confirmTool('conflict-scan-apply')">⚠ 应用冲突扫描</button>
+              <button class="btn danger" onclick="confirmTool('calendar-check-apply')">⚠ 应用日历检查</button>
+            </div>
+            <div class="row" style="margin-top:12px">
+              <div class="field" style="flex:1;min-width:220px"><label>清空用户记忆（需要 uid，管理员权限）</label><input id="clearUid" placeholder="输入 uid"></div>
+              <button class="btn danger" onclick="confirmTool('memory-clear-user', $('clearUid').value)">🗑️ 清空该用户记忆</button>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-back" id="loginModal">
+    <div class="modal">
+      <h3>登录 Yuno Ops</h3>
+      <p class="muted">输入管理员 / 运维 / 只读密码换取 12 小时短期会话。未配置密码时不会显示成功，本机模式通常无需登录。</p>
+      <div class="field"><label>密码</label><input type="password" id="loginPassword" placeholder="请输入访问密码" autocomplete="current-password"></div>
+      <div class="row" style="margin-top:14px;justify-content:flex-end">
+        <button class="btn ghost" onclick="closeLogin()">取消</button>
+        <button class="btn" id="loginSubmit">登录</button>
+      </div>
     </div>
-  </aside>
-  <main class="main">
-  <h1>Yuno Ops Web · 评测管理台 <span class="muted">(v0.3)</span></h1>
-
-  <div class="page active" id="page-dash">
-    <div class="cards" id="dash-cards"></div>
-    <div>
-      <button onclick="runTask('grow','grow')">跑一次 grow</button>
-      <button onclick="runTask('memory_eval','记忆评测')">跑检索评测</button>
-      <button onclick="runTask('space_eval','空间评测')">跑空间评测</button>
-      <button onclick="runTask('time_eval','时间评测')">跑时间评测</button>
-      <button onclick="runTask('subjects_eval','多主体评测')">跑多主体评测</button>
-      <pre id="grow-report" style="display:none"></pre>
-    </div>
   </div>
-
-  <div class="page" id="page-mem">
-    <button onclick="runTask('memory_eval','检索评测')">运行检索评测</button>
-    <div class="cards" id="mem-cards"></div>
-    <div class="chart" id="mem-chart"></div>
-    <pre id="mem-raw" style="display:none"></pre>
-  </div>
-
-  <div class="page" id="page-space">
-    <button onclick="runTask('space_eval','空间评测')">运行空间评测</button>
-    <div class="cards" id="space-cards"></div>
-    <pre id="space-raw" style="display:none"></pre>
-  </div>
-
-  <div class="page" id="page-time">
-    <button onclick="runTask('time_eval','时间评测')">运行时间评测</button>
-    <div class="cards" id="time-cards"></div>
-    <pre id="time-raw" style="display:none"></pre>
-  </div>
-
-  <div class="page" id="page-emotion">
-    <button onclick="runTask('emotion_eval','情绪评测')">运行情绪评测</button>
-    <div class="cards" id="emotion-cards"></div>
-    <div class="cards" id="emotion-topic"></div>
-    <div id="emotion-drift" style="margin: 8px 0;"></div>
-    <div class="chart" id="emotion-chart"></div>
-    <pre id="emotion-raw" style="display:none"></pre>
-  </div>
-
-  <div class="page" id="page-subjects">
-    <button onclick="runTask('subjects_eval','多主体评测')">运行多主体评测</button>
-    <div class="cards" id="subjects-cards"></div>
-    <div class="cards" id="subjects-decay"></div>
-    <pre id="subjects-raw" style="display:none"></pre>
-  </div>
-
-  <div class="page" id="page-review">
-    <div class="cards" id="review-progress"></div>
-    <details class="card" style="margin:8px 0">
-      <summary style="cursor:pointer"><b>评分标准（点开看详细打分规则）</b></summary>
-      <p class="muted">评分对象：单条<u>记忆处理决策</u>（create=存了什么 / reject=该不该存 / merge=合并 / update=更新）。
-      五维都按 1~5 打分：<b>5=很好　4=好　3=一般　2=差　1=很离谱</b>，拿不准就打 3。
-      评完自动刷新评分驱动的行为参数（confidence_factor / igt_threshold / privacy_threshold / extraction_strict）。</p>
-      <table style="width:100%;border-collapse:collapse">
-        <tr style="background:#333;color:#eee"><th style="padding:6px">维度</th><th>评什么</th><th>打 5 分（很好）</th><th>打 1 分（很离谱）</th></tr>
-        <tr><td style="padding:6px"><b>提取 extraction</b></td>
-            <td>提取的事实准不准、细节全不全</td>
-            <td>名字/数字/品种/时间等细节都保留了，没瞎编</td>
-            <td>提取内容与原话不符，或编造了原话没有的细节</td></tr>
-        <tr style="background:#2a2a2a"><td style="padding:6px"><b>决策 decision</b></td>
-            <td>这条<u>该不该存</u>、处理方式对不对</td>
-            <td>重要事实存了；玩笑/临时情绪/寒暄正确地没存</td>
-            <td>重要事实漏存（丢了关键信息），或垃圾/玩笑话入库了</td></tr>
-        <tr><td style="padding:6px"><b>置信度 confidence</b></td>
-            <td>conf 数字标得跟实际可信度匹不匹配</td>
-            <td>用户亲口说的给高可信度；AI 猜的/道听途说的给低</td>
-            <td>证据明显不足却给了高可信度（或反之），会误导后续回答</td></tr>
-        <tr style="background:#2a2a2a"><td style="padding:6px"><b>来源 provenance</b></td>
-            <td>这条记忆的来源标得对不对（是谁说的）</td>
-            <td>用户说的标"用户"；AI 自己的想法没混进用户记忆</td>
-            <td>来源张冠李戴（AI 自述/系统话术被当成用户亲口说的存进用户库）</td></tr>
-        <tr><td style="padding:6px"><b>隐私 privacy</b></td>
-            <td>敏感信息（手机号/证件/财务/健康）处理得对不对</td>
-            <td>敏感信息加密或标记私有，检索时不会被其他人召回</td>
-            <td>敏感信息明文入库、还能被群聊/其他场景召回</td></tr>
-      </table>
-      <p class="muted" style="margin-top:6px">对照示例：内容里带了具体数字（10万预算）→ extraction 看数字有没有丢；内容是寒暄/玩笑 → decision 该给低分（不该存）；内容看起来像 AI 自己说的话 → provenance 该给低分。</p>
-    </details>
-    <div id="review-list"></div>
-    <div class="muted" id="review-done"></div>
-  </div>
-
-  <div class="page" id="page-diag">
-    <div class="cards" id="diag-counts"></div>
-    <div class="cards" id="diag-review"></div>
-    <div class="cards" id="diag-proc"></div>
-    <div class="sect-line"></div>
-    <h3 class="sect">事实分类探针</h3>
-    <div class="cards" id="diag-classify"></div>
-    <h3 class="sect">双轨制一致性</h3>
-    <div class="cards" id="diag-consistency"></div>
-    <h3 class="sect">运维动作</h3>
-    <button onclick="runTool('appointment-clean')">约定表巡检清理</button>
-    <button onclick="runTool('memory-source-backfill')">记忆来源归一</button>
-    <h3 class="sect">犹豫层（主动消息发前斟酌）</h3>
-    <div class="cards" id="diag-hesitation"></div>
-    <div id="diag-hesitation-log"></div>
-    <div class="chart" id="diag-route"></div>
-    <pre id="diag-cal" style="display:none"></pre>
-    <h2 style="margin-top:14px;font-size:15px">实验日志（回归门禁）</h2>
-    <div id="diag-exp"></div>
-  </div>
-
-  <div class="page" id="page-charts">
-    <button onclick="downloadExcel()">下载 Excel</button>
-    <div class="cards" id="charts-summary"></div>
-    <div class="chart" id="trend-chart"></div>
-    <div class="muted">图 1 基线趋势：每次跑评测自动记录一点，横轴是时间，纵轴是各指标值（recall@5 / where_acc / window_recall / 情绪 accuracy），断点表示该指标当时没跑。</div>
-    <div class="chart" id="compare-chart"></div>
-    <div class="muted">图 2 最新 vs 历史平均：看当前基线是高于还是低于自己过去的表现，红色差距大的地方就是需要重点观察的指标。</div>
-    <h3 class="sect">回应策略 bandit 后验</h3>
-    <div class="chart" id="bandit-chart"></div>
-    <div class="muted">图 3 每个回应策略（共情/方案/玩梗/倾听/转移）当前的 Beta 均值——bandit 在用它学"哪种哄法对当前用户有效"，均值越高越常被选中。</div>
-    <h3 class="sect">主动消息决策状态</h3>
-    <div class="chart" id="revive-chart"></div>
-    <div class="muted">图 4 贝叶斯推断的用户状态后验（活跃/忙/睡/需要关心）+ 泊松触发概率；睡眠/忙碌时不会主动发消息。</div>
-  </div>
-
-  <div class="page" id="page-scenario">
-    <div class="cards" id="scenario-meta"></div>
-    <div class="cards" id="scenario-score-summary"></div>
-    <div style="margin: 10px 0;">
-      <select id="scenario-select"></select>
-      <button id="btn-replay" onclick="replayScenario()">回放</button>
-      <label class="muted"><input type="checkbox" id="chk-score" checked> 附带 LLM 五维评分（消耗 token）</label>
-    </div>
-    <div id="scenario-conv"></div>
-    <div id="scenario-llm-score" style="display:none;"></div>
-    <div id="scenario-manual" style="display:none; margin-top: 12px;">
-      <div class="cards" id="scenario-dims"></div>
-      <div><input id="sc-comment" placeholder="备注（可选）" style="width:60%; padding:6px;"></div>
-      <button onclick="saveManualScore()">保存人工分</button>
-    </div>
-    <h3 style="margin-top: 18px;">评分历史</h3>
-    <div id="scenario-scores"></div>
-    <h3 class="sect">五维评分对比（人工 vs 机器分）</h3>
-    <div class="chart" id="scenario-radar" style="height:280px"></div>
-  </div>
-
-  <div class="page" id="page-ablation">
-    <h3 class="sect">消融实验 · 热插拔开关</h3>
-    <div class="muted">开关实时修改 config 并落盘：立即影响本管理台的评测；bot 进程通过后台循环的 reload_if_changed 自动生效（无需重启）。"运行消融"用同一套 probes 逐个关掉机制，看每个机制的贡献。</div>
-    <div class="panel" id="ablation-switches"></div>
-    <button id="btn-ablation" onclick="runAblation()">运行消融（全部开关 × probes）</button>
-    <div class="cards" id="ablation-cards"></div>
-    <div id="ablation-table"></div>
-    <div class="chart" id="ablation-chart"></div>
-  </div>
-
-  <div class="page" id="page-costs">
-    <div class="cards" id="cost-cards"></div>
-    <h3 class="sect">按模块 token 消耗</h3>
-    <div class="chart" id="cost-module-chart"></div>
-    <div class="muted">模块 = LLM 调用用途（chat 对话 / extract 提取 / rerank 检索重排 / cognitive 认知循环 / scenario 回放评分 / proactive 主动消息 / …）。七路检索本身是本地计算、零 token，只有 llm 重排和云端向量会花钱。</div>
-    <h3 class="sect">检索路径 token（llm 重排归因）</h3>
-    <div class="chart" id="cost-path-chart"></div>
-    <div class="muted">每次 llm 重排按"本次参与了哪几条检索路径"归因，能看到重排成本主要落在哪条路上。</div>
-    <h3 class="sect">按天累计</h3>
-    <div class="chart" id="cost-day-chart"></div>
-    <h3 class="sect">机制权衡：token 成本 × 消融效果</h3>
-    <div id="cost-tradeoff"></div>
-    <div class="muted">对照看：某机制在成本表里占比高、且消融矩阵里关掉它 delta≈0（不损失效果），就是该砍的；占比低但关掉明显退化（如 rerank），说明它是值钱的。</div>
-  </div>
-  </main>
-  </div>
+  <div class="toasts" id="toasts"></div>
 
   <script>
+    "use strict";
     const $ = (id) => document.getElementById(id);
-    document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
-      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-      document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
-      t.classList.add('active');
-      $('page-' + t.dataset.page).classList.add('active');
-      if (t.dataset.page === 'diag') renderDiag();
-      if (t.dataset.page === 'charts') renderCharts();
-      if (t.dataset.page === 'scenario') loadScenarios();
-      if (t.dataset.page === 'ablation') loadAblation();
-      if (t.dataset.page === 'review') loadReview();
-      if (t.dataset.page === 'subjects') renderSubjects();
-      if (t.dataset.page === 'costs') renderCosts();
-    });
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const CHART_COLORS = ['#6366f1', '#a855f7', '#ec4899', '#06b6d4', '#10b981', '#f59e0b', '#f43f5e'];
 
-    async function api(path, opts) {
-      const r = await fetch(path, opts);
-      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const NAV = [
+      { group: '工作台' },
+      { page: 'dash', label: '总览', icon: '📊' },
+      { page: 'cognitive', label: '认知试验台', icon: '🔬' },
+      { group: '评测' },
+      { page: 'mem', label: '检索评测', icon: '🧠' },
+      { page: 'space', label: '空间评测', icon: '🗺️' },
+      { page: 'time', label: '时间评测', icon: '🕒' },
+      { page: 'emotion', label: '情绪评测', icon: '💗' },
+      { page: 'subjects', label: '多主体评测', icon: '👥' },
+      { page: 'review', label: '评分审核', icon: '⭐' },
+      { group: '实验' },
+      { page: 'ablation', label: '消融实验', icon: '🧪' },
+      { page: 'scenario', label: '对话回放', icon: '🎭' },
+      { group: '分析' },
+      { page: 'diag', label: '数据与诊断', icon: '🩺' },
+      { page: 'charts', label: '图表分析', icon: '📈' },
+      { page: 'costs', label: '成本分析', icon: '💰' },
+      { group: '系统' },
+      { page: 'system', label: '系统与数据', icon: '🛠️' },
+    ];
+    const PAGE_META = {
+      dash: ['总览', '系统总览'], cognitive: ['认知试验台', 'CoALA 标准化接口调试'],
+      mem: ['检索评测', 'Memory Recall / MRR / NDCG'], space: ['空间评测', 'Where 记忆与空间模拟'],
+      time: ['时间评测', '时间窗口与时间线'], emotion: ['情绪评测', '情绪分类与 VAD'],
+      subjects: ['多主体评测', '多角色记忆归属'], review: ['评分审核', '轨迹 + 对话五维评分'],
+      diag: ['数据与诊断', '路由 / 一致性 / 犹豫层'], charts: ['图表分析', '趋势与策略后验'],
+      costs: ['成本分析', 'LLM token 与费用归因'], ablation: ['消融实验', '机制贡献热插拔'],
+      scenario: ['对话回放', '场景回放与五维评分'], system: ['系统与数据', '状态 / 备份 / 播报 / 会话'],
+    };
+
+    const store = {
+      activePage: 'dash', token: localStorage.getItem('yuno_web_token') || '',
+      role: localStorage.getItem('yuno_web_role') || '', refreshTimer: null,
+      lastSync: null, loaded: {}, charts: {}, reviewSource: 'trace',
+      scenarioList: [], running: {}, taskPollers: new Set(), chartDoms: new Set(),
+    };
+
+    // ---------- 基础工具 ----------
+    function toast(msg, type = 'ok') {
+      const el = document.createElement('div');
+      el.className = 'toast ' + type;
+      el.textContent = msg;
+      $('toasts').appendChild(el);
+      setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .25s'; }, 3200);
+      setTimeout(() => el.remove(), 3550);
+    }
+    function fmt(v) { return v === null || v === undefined || v === '' ? '—' : (typeof v === 'number' ? Number(v.toFixed(3)) : v); }
+    function num(v) { return Number(v || 0).toLocaleString(); }
+    function money(v) { return v == null ? '—' : '¥' + Number(v).toFixed(4); }
+    function costText(v) { return v == null ? '—' : '¥' + Number(v).toFixed(4); }
+    function deltaCls(d) { return d === null || d === undefined ? '' : (d < -0.03 ? 'red' : (d > 0 ? 'green' : '')); }
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+    function chartAt(id) {
+      const dom = $(id);
+      if (!dom) return null;
+      const old = echarts.getInstanceByDom(dom);
+      if (old) old.dispose();
+      if (!dom.clientWidth || !dom.clientHeight) return null;
+      const inst = echarts.init(dom);
+      store.chartDoms.add(dom);
+      return inst;
+    }
+    function baseChartOption(extra) {
+      return Object.assign({
+        textStyle: { color: '#10142e' },
+        tooltip: { trigger: 'axis', confine: true },
+        grid: { left: 46, right: 18, top: 38, bottom: 44 },
+        color: CHART_COLORS,
+      }, extra || {});
+    }
+    function axisLabel(rotate) {
+      return { color: '#667085', fontSize: 10.5, rotate: rotate || 0 };
+    }
+    function splitLine() { return { lineStyle: { color: 'rgba(99,102,241,.08)' } }; }
+
+    async function api(path, opts = {}) {
+      const headers = Object.assign({}, opts.headers || {});
+      if (opts.body && !(opts.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+      if (store.token) headers['Authorization'] = 'Bearer ' + store.token;
+      const r = await fetch(path, Object.assign({}, opts, { headers }));
+      if (r.status === 401) {
+        openLogin();
+        throw new Error('未授权：请先登录（或使用只读密码）');
+      }
+      if (!r.ok) {
+        let detail = r.statusText;
+        try { detail = (await r.json()).detail || detail; } catch (_) {}
+        throw new Error(detail);
+      }
       return r.json();
     }
+    function statCard(k, v, sub, tint, grad) {
+      return `<div class="stat" style="--tint:${tint || 'rgba(99,102,241,.08)'};--gradline:${grad || 'var(--grad)'}">
+        <div class="k">${esc(k)}</div><div class="v">${fmt(v)}</div><div class="sub">${esc(sub || '')}</div><div class="bar"></div></div>`;
+    }
+    function loadingBlock(text) { return `<div class="empty">${esc(text || '加载中…')}</div>`; }
+    function errorBlock(err, id) { if (id) $(id).innerHTML = loadingBlock('加载失败：' + esc(err.message)); }
+    function setBtnLoading(btn, loading, text) {
+      if (!btn) return;
+      if (loading) { btn.dataset.orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = '⏳ ' + (text || '处理中…'); }
+      else { btn.disabled = false; if (btn.dataset.orig) btn.innerHTML = btn.dataset.orig; }
+    }
 
-    function fmt(x) { return x === null || x === undefined ? '—' : (typeof x === 'number' ? x.toFixed(3) : x); }
-    function deltaCls(d) { return d === null || d === undefined ? '' : (d < -0.03 ? 'red' : (d > 0 ? 'green' : '')); }
-
-    async function poll(taskId, cb) {
-      for (let i = 0; i < 600; i++) {
-        const t = await api('/api/tasks/' + taskId);
-        if (t.status === 'done') { cb(t.result); return; }
-        if (t.status === 'error') { alert('任务失败：' + t.error); cb(null); return; }
-        await new Promise(r => setTimeout(r, 2000));
+    // ---------- 导航与布局 ----------
+    function buildNav() {
+      const html = [];
+      NAV.forEach(item => {
+        if (item.group) { html.push(`<div class="nav-label">${item.group}</div>`); return; }
+        html.push(`<button class="nav ${item.page === store.activePage ? 'active' : ''}" data-page="${item.page}">
+          <span class="nav-ico">${item.icon}</span><span>${item.label}</span></button>`);
+      });
+      $('nav').innerHTML = html.join('');
+      document.querySelectorAll('.nav[data-page]').forEach(btn => {
+        btn.addEventListener('click', () => switchPage(btn.dataset.page));
+      });
+    }
+    function switchPage(page) {
+      if (!document.getElementById('page-' + page)) return;
+      store.activePage = page;
+      document.querySelectorAll('.nav').forEach(b => b.classList.toggle('active', b.dataset.page === page));
+      document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + page));
+      $('pageTitle').textContent = PAGE_META[page][0];
+      $('crumbPage').textContent = PAGE_META[page][0];
+      document.title = PAGE_META[page][0] + ' · Yuno Ops Web';
+      const loaders = {
+        dash: loadDash, cognitive: () => {}, mem: renderMem, space: renderSpace, time: renderTime,
+        emotion: renderEmotion, subjects: renderSubjects, review: loadReview, diag: renderDiag,
+        charts: renderCharts, costs: renderCosts, ablation: loadAblation, scenario: loadScenarios,
+        system: renderSystem,
+      };
+      const fn = loaders[page];
+      if (fn && !store.loaded[page]) {
+        store.loaded[page] = true;
+        Promise.resolve(fn()).catch(err => {
+          store.loaded[page] = false; markSync(false);
+          toast('页面加载失败：' + err.message, 'err');
+        });
       }
-      alert('任务超时');
+      scheduleRefresh();
+    }
+    function scheduleRefresh() {
+      clearInterval(store.refreshTimer);
+      const active = store.activePage;
+      const auto = active === 'dash' ? 20000 : (active === 'system' ? 30000 : 0);
+      if (!auto) return;
+      store.refreshTimer = setInterval(() => {
+        if (document.hidden) return;
+        if (active === 'dash') loadDash().catch(() => {});
+        if (active === 'system') renderSystem().catch(() => {});
+      }, auto);
+    }
+    function markSync(ok = true) {
+      const t = new Date();
+      $('lastSync').textContent = (ok ? '已同步 ' : '同步异常 ') + t.toTimeString().slice(0, 5);
+      $('sideStatus').textContent = ok ? '服务在线' : '连接异常';
+      $('sideDot').className = 'mini-dot' + (ok ? '' : ' off');
+    }
+    function setSideAuth() {
+      $('sideAuth').textContent = store.role ? ('鉴权：' + store.role + ' 会话') : '鉴权：未登录';
+    }
+    function updateTaskPill(tasks) {
+      const running = (tasks || []).filter(t => t.status === 'running');
+      $('taskPill').textContent = running.length ? ('⚙️ ' + running.length + ' 个任务运行中') : '⚙️ 无运行任务';
+    }
+    function closeLogin() { $('loginModal').classList.remove('show'); }
+    function openLogin() { $('loginModal').classList.add('show'); setTimeout(() => $('loginPassword').focus(), 60); }
+    async function login() {
+      const pwd = $('loginPassword').value;
+      const btn = $('loginSubmit');
+      setBtnLoading(btn, true, '登录中');
+      try {
+        const r = await fetch('/api/auth/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwd }),
+        });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body.detail || '密码错误');
+        store.token = body.token; store.role = body.role;
+        localStorage.setItem('yuno_web_token', store.token);
+        localStorage.setItem('yuno_web_role', store.role);
+        $('loginPassword').value = '';
+        closeLogin();
+        setSideAuth();
+        toast('登录成功，角色：' + body.role);
+        const page = store.activePage;
+        store.loaded[page] = false;
+        switchPage(page);
+      } catch (e) { toast(e.message, 'err'); }
+      setBtnLoading(btn, false);
+    }
+    function logout() {
+      store.token = ''; store.role = '';
+      localStorage.removeItem('yuno_web_token'); localStorage.removeItem('yuno_web_role');
+      setSideAuth(); $('sessionInfo').value = '未登录 / 无鉴权模式';
+      toast('已退出登录');
+      const page = store.activePage;
+      store.loaded[page] = false;
+      switchPage(page);
     }
 
-    const running = {};
-    function runTask(kind, label) {
-      const btn = [...document.querySelectorAll('button')].find(b => b.textContent.includes(label));
-      if (running[kind]) return;
-      running[kind] = true;
-      if (btn) btn.disabled = true;
-      api('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }) })
-        .then(({ task_id }) => poll(task_id, () => { loadDash(); renderKind(kind); }))
-        .catch(e => alert(label + ' 启动失败：' + e.message))
-        .finally(() => { running[kind] = false; if (btn) btn.disabled = false; });
+    // ---------- 任务轮询 ----------
+    async function pollTask(taskId, doneCb) {
+      store.taskPollers.add(taskId);
+      let task;
+      try {
+        for (let i = 0; i < 900; i++) {
+          task = await api('/api/tasks/' + taskId);
+          if (task.status === 'done') { doneCb && doneCb(task.result); return; }
+          if (task.status === 'error') { toast('任务失败：' + task.error, 'err'); doneCb && doneCb(null); return; }
+          await sleep(2000);
+        }
+        toast('任务超时', 'err');
+      } finally { store.taskPollers.delete(taskId); refreshTasks().catch(() => {}); }
+    }
+    const runningMap = {};
+    async function startTask(kind, label) {
+      if (runningMap[kind]) { toast(label + ' 已在运行中', 'err'); return; }
+      runningMap[kind] = true;
+      document.querySelectorAll(`[data-task="${kind}"]`).forEach(b => { b.disabled = true; });
+      try {
+        const { task_id } = await api('/api/tasks', { method: 'POST', body: JSON.stringify({ kind }) });
+        toast(label + ' 已启动');
+        refreshTasks();
+        await pollTask(task_id, () => {
+          toast(label + ' 完成');
+          if (kind === 'grow') { loadDash(); } else { renderKind(kind); }
+          loadDash();
+          store.loaded.charts = false;
+        });
+      } catch (e) { toast(label + ' 启动失败：' + e.message, 'err'); }
+      runningMap[kind] = false;
+      document.querySelectorAll(`[data-task="${kind}"]`).forEach(b => { b.disabled = false; });
+    }
+    function renderKind(kind) {
+      const map = { memory_eval: renderMem, space_eval: renderSpace, time_eval: renderTime, emotion_eval: renderEmotion, subjects_eval: renderSubjects };
+      return (map[kind] || (() => {}))();
+    }
+    async function refreshTasks() {
+      try {
+        const tasks = await api('/api/tasks');
+        const rows = tasks.slice().sort((a, b) => b.ts - a.ts).slice(0, 20);
+        updateTaskPill(rows);
+        const html = rows.length ? rows.map(t => {
+          const st = t.status === 'running' ? '<span class="badge amber">运行中</span>' : (t.status === 'done' ? '<span class="badge green">完成</span>' : '<span class="badge red">失败</span>');
+          return `<div class="task-item"><div class="grow"><b>${esc(t.id)}</b> · ${esc(t.kind)} ${st}
+            <div class="muted">${new Date(t.ts * 1000).toLocaleString()}</div></div>
+            ${t.status === 'running' ? '<div class="progress" style="width:120px"><i></i></div>' : ''}</div>`;
+        }).join('') : '<div class="empty">暂无任务记录</div>';
+        const board = $('taskBoard'); if (board) board.innerHTML = html;
+        const sys = $('systemTasks'); if (sys) sys.innerHTML = html;
+        return rows;
+      } catch (e) { updateTaskPill([]); return []; }
     }
 
-    function card(k, v, sub, cls) {
-      return `<div class="card"><div class="k">${k}</div><div class="v ${cls || ''}">${fmt(v)}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
-    }
-
+    // ---------- 总览 ----------
     async function loadDash() {
-      const d = await api('/api/dashboard');
+      const [dash, hes, status, tasks] = await Promise.allSettled([
+        api('/api/dashboard'), api('/api/hesitation'), api('/api/status'), api('/api/tasks'),
+      ]);
+      if (dash.status === 'rejected') throw dash.reason;
+      const d = dash.value;
       const c = d.counters || {};
       const tickKeys = Object.keys(c).filter(k => k.startsWith('tick:')).sort();
       const errKeys = Object.keys(c).filter(k => k.startsWith('err:'));
-      let html = card('记忆条数', d.memory_counts.memories) + card('事件', d.memory_counts.events)
-        + card('属性', d.memory_counts.attrs) + card('LLM 调用', c.llm_calls)
-        + card('tick 项', tickKeys.length, tickKeys.join(' ')) + card('err 项', errKeys.length, errKeys.join(' '));
-      const ct = d.cost_today || {};
-      html += card('今日 tokens', ct.prompt != null ? ((ct.prompt || 0) + (ct.completion || 0)) : null, '¥' + fmt(ct.cost) + ' · ' + fmt(ct.calls) + ' 次调用');
-      try {
-        const h = await api('/api/hesitation');
-        const s = h.stats || {};
-        html += card('犹豫评估', s.eval, 'send ' + fmt(s.send) + ' · rewrite ' + fmt(s.rewrite) + ' · hold ' + fmt(s.hold) + ' · discard ' + fmt(s.discard));
-        html += card('discard 率', s.discard_rate, 'hold ' + fmt(s.hold_rate));
-        html += card('证据门控拦截', s.evidence_gate_block, '重写 ' + fmt(s.evidence_gate_hedge) + ' 次加含糊后缀');
-      } catch (e) {}
       const b = d.baselines || {};
-      html += card('检索 recall@5', b.memory_eval && b.memory_eval.recall_at_k, 'MRR ' + fmt(b.memory_eval && b.memory_eval.mrr));
-      html += card('空间 where_acc', b.space_eval && b.space_eval.where_accuracy && b.space_eval.where_accuracy.accuracy);
-      html += card('时间 window_recall', b.time_eval && b.time_eval.window_recall && b.time_eval.window_recall.recall);
-      html += card('情绪 accuracy', b.emotion_eval && b.emotion_eval.accuracy, 'VAD MAE ' + fmt(b.emotion_eval && b.emotion_eval.vad_mae));
-      html += card('情绪日志(7天)', d.emotion_log_count);
-      html += card('多主体 write_rate', b.subjects_eval && b.subjects_eval.write_rate, 'privacy ' + fmt(b.subjects_eval && b.subjects_eval.privacy_rate));
-      $('dash-cards').innerHTML = html;
+      const ct = d.cost_today || {};
+      const mm = d.memory_counts || {};
+      const html = [
+        statCard('记忆条数', num(mm.memories), '长期记忆库', 'rgba(139,92,246,.1)', 'linear-gradient(90deg,#8b5cf6,#ec4899)'),
+        statCard('事件数', num(mm.events), '事件图谱', 'rgba(236,72,153,.1)', 'linear-gradient(90deg,#ec4899,#f59e0b)'),
+        statCard('属性数', num(mm.attrs), '结构化属性', 'rgba(6,182,212,.1)', 'linear-gradient(90deg,#06b6d4,#6366f1)'),
+        statCard('LLM 调用', num(c.llm_calls), '累计调用', 'rgba(99,102,241,.1)', 'linear-gradient(90deg,#6366f1,#a855f7)'),
+        statCard('tick 监控项', tickKeys.length, tickKeys.join(' ') || '无', 'rgba(16,185,129,.1)', 'linear-gradient(90deg,#10b981,#06b6d4)'),
+        statCard('异常项', errKeys.length, errKeys.join(' ') || '全部正常', errKeys.length ? 'rgba(239,68,68,.1)' : 'rgba(16,185,129,.1)', errKeys.length ? 'linear-gradient(90deg,#ef4444,#f59e0b)' : 'linear-gradient(90deg,#10b981,#06b6d4)'),
+        statCard('今日 tokens', num((ct.prompt || 0) + (ct.completion || 0)), costText(ct.cost) + ' · ' + num(ct.calls) + ' 次', 'rgba(245,158,11,.1)', 'linear-gradient(90deg,#f59e0b,#ec4899)'),
+      ].join('');
+      $('dashData').innerHTML = html;
+      const quality = [
+        statCard('检索 recall@5', b.memory_eval && b.memory_eval.recall_at_k, 'MRR ' + fmt(b.memory_eval && b.memory_eval.mrr), 'rgba(99,102,241,.1)'),
+        statCard('空间 where_acc', b.space_eval && b.space_eval.where_accuracy && b.space_eval.where_accuracy.accuracy, 'where 记忆', 'rgba(16,185,129,.1)'),
+        statCard('时间 window_recall', b.time_eval && b.time_eval.window_recall && b.time_eval.window_recall.recall, '时间窗口', 'rgba(245,158,11,.1)'),
+        statCard('情绪 accuracy', b.emotion_eval && b.emotion_eval.accuracy, 'VAD MAE ' + fmt(b.emotion_eval && b.emotion_eval.vad_mae), 'rgba(236,72,153,.1)'),
+        statCard('情绪日志(7天)', num(d.emotion_log_count), '情绪漂移样本', 'rgba(168,85,247,.1)'),
+        statCard('多主体 write_rate', b.subjects_eval && b.subjects_eval.write_rate, 'privacy ' + fmt(b.subjects_eval && b.subjects_eval.privacy_rate), 'rgba(6,182,212,.1)'),
+      ];
+      if (hes.status === 'fulfilled') {
+        const s = hes.value.stats || {};
+        quality.push(statCard('犹豫层 discard 率', s.discard_rate, 'hold ' + fmt(s.hold_rate), 'rgba(245,158,11,.1)'));
+        quality.push(statCard('证据门控拦截', s.evidence_gate_block, '重写 ' + fmt(s.evidence_gate_hedge) + ' 次', 'rgba(239,68,68,.1)'));
+      }
+      $('dashQuality').innerHTML = quality.join('');
+      const st = status.status === 'fulfilled' ? status.value : {};
+      if (st.uptime_seconds != null) {
+        const sec = Number(st.uptime_seconds);
+        const d2 = Math.floor(sec / 86400), h2 = Math.floor(sec % 86400 / 3600), m2 = Math.floor(sec % 3600 / 60);
+        $('healthCards').innerHTML = [
+          statCard('健康检查', st.schema_version != null ? 'ok' : '—', 'schema v' + st.schema_version, 'rgba(16,185,129,.1)', 'linear-gradient(90deg,#10b981,#06b6d4)'),
+          statCard('运行时长', d2 ? d2 + '天 ' + h2 + '时' : h2 + '时 ' + m2 + '分', st.started_at || '', 'rgba(99,102,241,.1)'),
+          statCard('数据库大小', (Number(st.db_size || 0) / 1048576).toFixed(2) + ' MB', '更新于 ' + (st.updated_at || '—'), 'rgba(139,92,246,.1)'),
+          statCard('鉴权模式', st.auth_enabled ? '已启用' : '本机模式', st.auth_enabled ? '需 Bearer / 会话' : '未设置 YUNO_WEB_TOKEN', st.auth_enabled ? 'rgba(245,158,11,.1)' : 'rgba(16,185,129,.1)'),
+        ].join('');
+        $('healthBadge').textContent = '正常';
+      }
+      if (tasks.status === 'fulfilled') updateTaskPill(tasks.value);
       const g = d.grow_report;
-      if (g) { $('grow-report').style.display = 'block'; $('grow-report').textContent = JSON.stringify(g, null, 2); }
+      if (g) { $('growPanel').style.display = 'block'; $('grow-report').textContent = JSON.stringify(g, null, 2); }
+      markSync(true);
+      return d;
     }
 
-    function renderKind(kind) {
-      if (kind === 'memory_eval') return renderMem();
-      if (kind === 'space_eval') return renderSpace();
-      if (kind === 'time_eval') return renderTime();
-      if (kind === 'emotion_eval') return renderEmotion();
-    }
-
+    // ---------- 评测页 ----------
     async function renderMem() {
-      const d = await api('/api/dashboard');
-      const b = (d.baselines || {}).memory_eval || {};
-      $('mem-cards').innerHTML = card('Recall@K', b.recall_at_k) + card('MRR', b.mrr) + card('NDCG', b.ndcg)
-        + card('Probes', b.probes);
-      $('mem-raw').style.display = 'block';
-      $('mem-raw').textContent = JSON.stringify(b, null, 2);
+      const b = ((await api('/api/dashboard')).baselines || {}).memory_eval || {};
+      $('memCards').innerHTML = [
+        statCard('Recall@K', b.recall_at_k, '命中率', 'rgba(99,102,241,.1)'),
+        statCard('MRR', b.mrr, '平均倒数排名', 'rgba(168,85,247,.1)'),
+        statCard('NDCG', b.ndcg, '排序质量', 'rgba(236,72,153,.1)'),
+        statCard('Probes', b.probes, '评测样本', 'rgba(6,182,212,.1)'),
+      ].join('');
+      $('memRaw').textContent = JSON.stringify(b, null, 2);
       const cats = b.categories || {};
-      const chart = echarts.init($('mem-chart'));
-      chart.setOption({
-        title: { text: '分桶召回率', textStyle: { color: '#1e293b', fontSize: 13 } },
-        tooltip: {}, grid: { left: 40, right: 20, bottom: 40 },
-        xAxis: { type: 'category', data: Object.keys(cats), axisLabel: { color: '#64748b' } },
-        yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
-        series: [{ type: 'bar', data: Object.values(cats).map(x => x.recall), itemStyle: { color: '#3b82f6' } }],
-      });
+      const chart = chartAt('memChart');
+      if (chart) chart.setOption(baseChartOption({
+        title: { text: '分桶召回率', left: 0, top: 0, textStyle: { color: '#312e81', fontSize: 14 } },
+        grid: { left: 46, right: 18, top: 44, bottom: 52 },
+        xAxis: { type: 'category', data: Object.keys(cats), axisLabel: axisLabel(25) },
+        yAxis: { type: 'value', min: 0, max: 1, axisLabel: axisLabel(), splitLine: splitLine() },
+        series: [{ name: 'recall', type: 'bar', barMaxWidth: 46, data: Object.values(cats).map(x => x.recall), itemStyle: { borderRadius: [8, 8, 0, 0], color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#a855f7' }, { offset: 1, color: '#6366f1' }]) }, label: { show: true, position: 'top', color: '#4f46e5' } }],
+      }));
     }
-
     async function renderSpace() {
       const b = ((await api('/api/dashboard')).baselines || {}).space_eval || {};
-      $('space-cards').innerHTML = card('where_accuracy', b.where_accuracy && b.where_accuracy.accuracy, 'n=' + (b.where_accuracy && b.where_accuracy.n))
-        + card('where_recall', b.where_recall && b.where_recall.recall, 'n=' + (b.where_recall && b.where_recall.n))
-        + card('搜索 avg_steps', b.search_sim && b.search_sim.avg_steps) + card('搜索 fail_rate', b.search_sim && b.search_sim.fail_rate);
-      $('space-raw').style.display = 'block';
-      $('space-raw').textContent = JSON.stringify(b, null, 2);
+      $('spaceCards').innerHTML = [
+        statCard('where_accuracy', b.where_accuracy && b.where_accuracy.accuracy, 'n=' + fmt(b.where_accuracy && b.where_accuracy.n), 'rgba(16,185,129,.1)'),
+        statCard('where_recall', b.where_recall && b.where_recall.recall, 'n=' + fmt(b.where_recall && b.where_recall.n), 'rgba(99,102,241,.1)'),
+        statCard('搜索 avg_steps', b.search_sim && b.search_sim.avg_steps, '模拟搜索步数', 'rgba(245,158,11,.1)'),
+        statCard('搜索 fail_rate', b.search_sim && b.search_sim.fail_rate, '失败率', 'rgba(239,68,68,.1)'),
+      ].join('');
+      $('spaceRaw').textContent = JSON.stringify(b, null, 2);
     }
-
     async function renderTime() {
       const b = ((await api('/api/dashboard')).baselines || {}).time_eval || {};
-      $('time-cards').innerHTML = card('window_recall', b.window_recall && b.window_recall.recall)
-        + card('timeline_order', b.timeline_order && b.timeline_order.rate)
-        + card('date_accuracy', b.date_accuracy && b.date_accuracy.accuracy);
-      $('time-raw').style.display = 'block';
-      $('time-raw').textContent = JSON.stringify(b, null, 2);
+      $('timeCards').innerHTML = [
+        statCard('window_recall', b.window_recall && b.window_recall.recall, '时间窗口召回', 'rgba(245,158,11,.1)'),
+        statCard('timeline_order', b.timeline_order && b.timeline_order.rate, '时间线排序', 'rgba(99,102,241,.1)'),
+        statCard('date_accuracy', b.date_accuracy && b.date_accuracy.accuracy, '日期精度', 'rgba(236,72,153,.1)'),
+      ].join('');
+      $('timeRaw').textContent = JSON.stringify(b, null, 2);
     }
-
     async function renderEmotion() {
       const d = await api('/api/dashboard');
       const b = (d.baselines || {}).emotion_eval || {};
-      $('emotion-cards').innerHTML = card('分类 accuracy', b.accuracy)
-        + card('VAD MAE', b.vad_mae)
-        + card('样本数', b.n)
-        + card('复合情绪准确率', b.compound_accuracy, '样本 ' + fmt(b.compound_n))
-        + card('情绪日志(7天)', d.emotion_log_count);
+      $('emotionCards').innerHTML = [
+        statCard('分类 accuracy', b.accuracy, '情绪分类', 'rgba(236,72,153,.1)'),
+        statCard('VAD MAE', b.vad_mae, '越低越好', 'rgba(168,85,247,.1)'),
+        statCard('样本数', b.n, '评测样本', 'rgba(99,102,241,.1)'),
+        statCard('复合情绪', b.compound_accuracy, '样本 ' + fmt(b.compound_n), 'rgba(6,182,212,.1)'),
+        statCard('情绪日志(7天)', d.emotion_log_count, '漂移样本', 'rgba(245,158,11,.1)'),
+      ].join('');
       const tm = b.topic_mood || {};
-      $('emotion-topic').innerHTML = card('议题 mood 一致性', tm.write_consistency, '写入 ' + fmt(tm.write_n))
-        + card('质心合理性', tm.centroid_consistency, '议题 ' + fmt(tm.centroid_n))
-        + card('复合情绪议题', tm.compound_topics, '不坍缩');
+      $('emotionTopic').innerHTML = [
+        statCard('议题 mood 一致性', tm.write_consistency, '写入 ' + fmt(tm.write_n), 'rgba(16,185,129,.1)'),
+        statCard('质心合理性', tm.centroid_consistency, '议题 ' + fmt(tm.centroid_n), 'rgba(99,102,241,.1)'),
+        statCard('复合情绪议题', tm.compound_topics, '不坍缩', 'rgba(6,182,212,.1)'),
+      ].join('');
       const drift = tm.vad_table_drift || {};
-      $('emotion-drift').innerHTML = Object.keys(drift).length
-        ? '<div class="red">⚠ 跨表 VAD 漂移：' + Object.keys(drift).join('、') + '（analysis.EMOTION_METRICS vs emotion.LABEL_VAD）</div>'
-        : '<div class="muted">跨表 VAD 漂移：无（单一事实源）</div>';
-      $('emotion-raw').style.display = 'block';
-      $('emotion-raw').textContent = JSON.stringify(b, null, 2);
+      $('emotionDrift').innerHTML = Object.keys(drift).length
+        ? '<div class="empty"><span class="red">⚠ 跨表 VAD 漂移：' + esc(Object.keys(drift).join('、')) + '</span>（analysis.EMOTION_METRICS vs emotion.LABEL_VAD）</div>'
+        : '<div class="empty" style="border-color:rgba(16,185,129,.3)">✅ 跨表 VAD 漂移：无（单一事实源）</div>';
+      $('emotionRaw').textContent = JSON.stringify(b, null, 2);
       const cats = b.by_category || {};
-      const chart = echarts.init($('emotion-chart'));
-      chart.setOption({
-        title: { text: '分情绪准确率', textStyle: { color: '#1e293b', fontSize: 13 } },
-        tooltip: {}, grid: { left: 40, right: 20, bottom: 40 },
-        xAxis: { type: 'category', data: Object.keys(cats), axisLabel: { color: '#64748b', interval: 0, rotate: 30 } },
-        yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
-        series: [{ type: 'bar', data: Object.values(cats).map(x => x.accuracy), itemStyle: { color: '#a78bfa' } }],
-      });
+      const chart = chartAt('emotionChart');
+      if (chart) chart.setOption(baseChartOption({
+        title: { text: '分情绪准确率', left: 0, top: 0, textStyle: { color: '#312e81', fontSize: 14 } },
+        grid: { left: 46, right: 18, top: 44, bottom: 62 },
+        xAxis: { type: 'category', data: Object.keys(cats), axisLabel: axisLabel(28) },
+        yAxis: { type: 'value', min: 0, max: 1, axisLabel: axisLabel(), splitLine: splitLine() },
+        series: [{ name: 'accuracy', type: 'bar', barMaxWidth: 44, data: Object.values(cats).map(x => x.accuracy), itemStyle: { borderRadius: [8, 8, 0, 0], color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#ec4899' }, { offset: 1, color: '#a855f7' }]) }, label: { show: true, position: 'top', color: '#db2777' } }],
+      }));
     }
-
     async function renderSubjects() {
       const b = ((await api('/api/dashboard')).baselines || {}).subjects_eval || {};
-      $('subjects-cards').innerHTML = card('主体数', b.subjects)
-        + card('写入率', b.write_rate, '写入 ' + fmt(b.write_ok))
-        + card('隐私率', b.privacy_rate, '泄漏 ' + fmt(b.privacy_leak))
-        + card('NPC 记忆', b.npc_memories)
-        + card('对话引用', b.reference_ok);
+      $('subjectsCards').innerHTML = [
+        statCard('主体数', b.subjects, '角色数量', 'rgba(99,102,241,.1)'),
+        statCard('写入率', b.write_rate, '写入 ' + fmt(b.write_ok), 'rgba(16,185,129,.1)'),
+        statCard('隐私率', b.privacy_rate, '泄漏 ' + fmt(b.privacy_leak), 'rgba(239,68,68,.1)'),
+        statCard('NPC 记忆', b.npc_memories, 'NPC 记忆归属', 'rgba(6,182,212,.1)'),
+        statCard('对话引用', b.reference_ok, '引用准确', 'rgba(168,85,247,.1)'),
+      ].join('');
       const d = b.decay || {};
-      $('subjects-decay').innerHTML = card('cap 合规率', d.cap_rate, 'n ' + fmt(d.n))
-        + card('来源上限率', d.source_ceiling_rate)
-        + card('衰减合规率', d.decay_rate, '样本 ' + fmt(d.decay_eligible));
-      $('subjects-raw').style.display = 'block';
-      $('subjects-raw').textContent = JSON.stringify(b, null, 2);
+      $('subjectsDecay').innerHTML = [
+        statCard('cap 合规率', d.cap_rate, 'n ' + fmt(d.n), 'rgba(16,185,129,.1)'),
+        statCard('来源上限率', d.source_ceiling_rate, '来源上限', 'rgba(245,158,11,.1)'),
+        statCard('衰减合规率', d.decay_rate, '样本 ' + fmt(d.decay_eligible), 'rgba(99,102,241,.1)'),
+      ].join('');
+      $('subjectsRaw').textContent = JSON.stringify(b, null, 2);
     }
 
+    // ---------- 评分审核 ----------
+    const TRACE_DIMS = [
+      ['extraction', '提取'], ['decision', '决策'], ['confidence', '置信度'], ['provenance', '来源'], ['privacy', '隐私'],
+    ];
+    const CONV_DIMS = [
+      ['remember', '记忆'], ['natural', '自然'], ['emotional', '情绪'], ['proactive', '主动'], ['boundary', '边界'],
+    ];
+    function scoreRow(id, dims) {
+      return `<div class="dim-row">${dims.map(([k, label]) =>
+        `<div class="dim"><label>${label}</label><select id="rv-${id}-${k}">${[1,2,3,4,5].map(v => `<option value="${v}" ${v === 3 ? 'selected' : ''}>${v} 分</option>`).join('')}</select></div>`).join('')}</div>`;
+    }
+    async function loadReview() {
+      const source = store.reviewSource;
+      const q = await api('/api/review/queue?limit=50&source=' + source);
+      const reviewed = q.reviewed || 0;
+      $('reviewProgress').innerHTML = [
+        statCard('已评数量', reviewed, source === 'trace' ? '轨迹评分' : '对话评分', 'rgba(99,102,241,.1)'),
+        statCard('队列剩余', q.items.length, '本页最多 50 条', 'rgba(245,158,11,.1)'),
+        statCard('当前模式', source === 'trace' ? '记忆决策' : '对话质量', '可随时切换', 'rgba(236,72,153,.1)'),
+      ].join('');
+      const list = $('reviewList');
+      if (!q.items.length) { list.innerHTML = loadingBlock('队列已清空（或暂无待评数据）'); return; }
+      if (source === 'trace') {
+        list.innerHTML = q.items.map(r => `
+          <div class="review-card">
+            <div class="review-meta"><b>#${r.id}</b><span class="badge ${r.action === 'create' ? 'green' : 'amber'}">${esc(r.action)}</span>
+              <span>conf ${r.confidence ?? '—'}</span><span>${esc(r.scope || '')}</span><span>${esc(r.ts || '')}</span></div>
+            <div class="review-content">${esc(r.content || '')}</div>
+            <div class="muted">${esc(r.reasoning || '')}</div>
+            ${scoreRow(r.id, TRACE_DIMS)}
+            <div class="row" style="margin-top:10px;align-items:center">
+              <button class="btn sm" onclick="submitTraceReview(${r.id})">提交评分</button>
+              <span class="muted" id="rv-msg-${r.id}"></span>
+            </div>
+          </div>`).join('');
+      } else {
+        list.innerHTML = q.items.map(r => `
+          <div class="review-card">
+            <div class="review-meta"><b>#${r.id}</b><span class="badge pink">conv ${esc(r.conversation_id || '')}</span><span>${esc(r.scope || '')}</span><span>${esc(r.ts || '')}</span></div>
+            <div class="review-content"><b>用户：</b>${esc(r.user_text || '')}</div>
+            <div class="review-content"><b>AI：</b>${esc(r.ai_text || '')}</div>
+            ${scoreRow('c' + r.id, CONV_DIMS)}
+            <div class="row" style="margin-top:10px;align-items:center">
+              <button class="btn sm pink" onclick="submitConvReview(${r.id})">提交评分</button>
+              <span class="muted" id="rv-msg-c${r.id}"></span>
+            </div>
+          </div>`).join('');
+      }
+    }
+    async function submitTraceReview(id) {
+      const scores = {};
+      TRACE_DIMS.forEach(([k]) => { scores[k] = Number($('rv-' + id + '-' + k).value); });
+      try {
+        const r = await api('/api/review/submit', { method: 'POST', body: JSON.stringify(Object.assign({ trace_id: id }, scores)) });
+        $('rv-msg-' + id).textContent = '✅ 已提交 ' + r.score + '/5';
+        toast('评分已提交');
+        setTimeout(loadReview, 800);
+      } catch (e) { $('rv-msg-' + id).textContent = '失败：' + e.message; toast(e.message, 'err'); }
+    }
+    async function submitConvReview(id) {
+      const scores = {};
+      CONV_DIMS.forEach(([k]) => { scores[k] = Number($('rv-c' + id + '-' + k).value); });
+      try {
+        const r = await api('/api/convreview/submit', { method: 'POST', body: JSON.stringify(Object.assign({ conv_id: id }, scores)) });
+        $('rv-msg-c' + id).textContent = '✅ 已提交 ' + r.score + '/5';
+        toast('对话评分已提交');
+        setTimeout(loadReview, 800);
+      } catch (e) { $('rv-msg-c' + id).textContent = '失败：' + e.message; toast(e.message, 'err'); }
+    }
+
+    // ---------- 认知试验台 ----------
+    async function runCognitive() {
+      const query = $('cogQuery').value.trim();
+      if (!query) { toast('请先输入 Query', 'err'); return; }
+      setBtnLoading($('cogRun'), true, '运行中');
+      try {
+        const r = await api('/api/cognitive/run', { method: 'POST', body: JSON.stringify({ query, scope: $('cogScope').value.trim() }) });
+        const mems = r.activated_memories || [];
+        const action = r.action || {};
+        const opts = r.options || [];
+        const sit = r.situation || {};
+        const inten = r.intention || {};
+        $('cogResult').innerHTML = `
+          <div class="grid stats">
+            ${statCard('Query', esc(r.query || query), 'scope ' + esc(r.scope || '—'), 'rgba(99,102,241,.1)')}
+            ${statCard('命中记忆', mems.length, 'top-' + mems.length, 'rgba(168,85,247,.1)')}
+            ${statCard('候选动作', opts.length, 'decision options', 'rgba(6,182,212,.1)')}
+            ${statCard('动作', esc(typeof action === 'string' ? action : (action.action || '—')), esc((action.text || '').slice(0, 40)), 'rgba(236,72,153,.1)')}
+          </div>
+          <div class="split">
+            <div class="panel"><div class="panel-head"><h3>命中的记忆</h3></div>${mems.length ? '<div class="table-wrap"><table><thead><tr><th>Fact</th><th>Score</th><th>Scope</th></tr></thead><tbody>' + mems.map(m => `<tr><td>${esc(m.fact || m)}</td><td>${fmt(m.score)}</td><td>${esc(m.scope || '')}</td></tr>`).join('') + '</tbody></table></div>' : '<div class="empty">没有命中记忆</div>'}</div>
+            <div class="panel"><div class="panel-head"><h3>心智状态</h3></div><div class="table-wrap"><table><tbody>
+              ${Object.keys(sit).length ? Object.entries(sit).slice(0, 8).map(([k, v]) => `<tr><td><b>${esc(k)}</b></td><td>${esc(typeof v === 'object' ? JSON.stringify(v) : v)}</td></tr>`).join('') : '<tr><td class="muted">空状态</td></tr>'}
+              ${Object.keys(inten).length ? Object.entries(inten).slice(0, 5).map(([k, v]) => `<tr><td><b>intention.${esc(k)}</b></td><td>${esc(typeof v === 'object' ? JSON.stringify(v) : v)}</td></tr>`).join('') : ''}
+            </tbody></table></div></div>
+          </div>
+          <details class="json-dump"><summary>查看完整认知回合 JSON</summary><pre class="json">${esc(JSON.stringify(r, null, 2))}</pre></details>`;
+        toast('认知回合完成');
+      } catch (e) { $('cogResult').innerHTML = loadingBlock('运行失败：' + esc(e.message)); toast(e.message, 'err'); }
+      setBtnLoading($('cogRun'), false);
+    }
+
+    // ---------- 数据与诊断 ----------
     async function renderDiag() {
-      const d = await api('/api/diagnostics');
-      const dc = d.data_counts || {};
-      $('diag-counts').innerHTML = card('probes', dc.probes) + card('query_log', dc.query_log)
-        + card('item_events', dc.item_events) + card('explicit 事件', dc.explicit_events)
-        + card('trace', dc.trace) + card('feedback', dc.feedback) + card('procedures', dc.procedures);
-      const rv = d.review || {};
-      $('diag-review').innerHTML = card('人工评分', rv.n, '总分均值 ' + fmt(rv.avg_total))
-        + card('extraction', rv.avg_extraction) + card('decision', rv.avg_decision)
-        + card('confidence', rv.avg_confidence) + card('provenance', rv.avg_provenance)
-        + card('privacy', rv.avg_privacy);
-      const pr = d.procedures || {};
-      $('diag-proc').innerHTML = card('程序记忆', pr.count) + card('System1 就绪', pr.system1_ready)
-        + card('平均成功率', pr.avg_success);
       try {
+        const d = await api('/api/diagnostics');
+        const dc = d.data_counts || {};
+        $('diagCounts').innerHTML = [
+          statCard('probes', dc.probes, '检索评测集', 'rgba(99,102,241,.1)'),
+          statCard('query_log', dc.query_log, '查询日志', 'rgba(168,85,247,.1)'),
+          statCard('item_events', dc.item_events, '条目事件', 'rgba(236,72,153,.1)'),
+          statCard('explicit 事件', dc.explicit_events, '显式事件', 'rgba(6,182,212,.1)'),
+          statCard('trace', dc.trace, '记忆轨迹', 'rgba(16,185,129,.1)'),
+          statCard('feedback', dc.feedback, '反馈日志', 'rgba(245,158,11,.1)'),
+          statCard('procedures', dc.procedures, '程序记忆', 'rgba(99,102,241,.1)'),
+        ].join('');
+        const rv = d.review || {};
+        $('diagReview').innerHTML = [
+          statCard('人工评分', rv.n, '总分均值 ' + fmt(rv.avg_total), 'rgba(99,102,241,.1)'),
+          statCard('extraction', rv.avg_extraction, '提取', 'rgba(168,85,247,.1)'),
+          statCard('decision', rv.avg_decision, '决策', 'rgba(236,72,153,.1)'),
+          statCard('confidence', rv.avg_confidence, '置信度', 'rgba(6,182,212,.1)'),
+          statCard('provenance', rv.avg_provenance, '来源', 'rgba(16,185,129,.1)'),
+          statCard('privacy', rv.avg_privacy, '隐私', 'rgba(245,158,11,.1)'),
+        ].join('');
+        const pr = d.procedures || {};
+        $('diagProc').innerHTML = [
+          statCard('程序记忆', pr.count, '程序化知识', 'rgba(99,102,241,.1)'),
+          statCard('System1 就绪', pr.system1_ready, '快速路径', 'rgba(16,185,129,.1)'),
+          statCard('平均成功率', pr.avg_success, '程序执行', 'rgba(6,182,212,.1)'),
+        ].join('');
         const cl = await api('/api/policy-classify');
-        $('diag-classify').innerHTML = card('分类准确率', cl.accuracy, '样本 ' + fmt(cl.total))
-          + card('误判数', (cl.errors || []).length);
-        $('diag-classify').innerHTML += (cl.errors && cl.errors.length)
-          ? '<div class="red">误判：' + cl.errors.map(e => escapeHtml(e.text) + '(' + e.got + ')').join(' / ') + '</div>'
-          : '<div class="muted">含关键词但实为过程/指令的句子探针全部正确</div>';
-      } catch (e) { $('diag-classify').innerHTML = '<div class="muted">分类探针加载失败：' + escapeHtml(e.message) + '</div>'; }
-      try {
+        $('diagClassify').innerHTML = [
+          statCard('分类准确率', cl.accuracy, '样本 ' + fmt(cl.total), 'rgba(16,185,129,.1)'),
+          statCard('误判数', (cl.errors || []).length, '关键词探针', (cl.errors || []).length ? 'rgba(239,68,68,.1)' : 'rgba(16,185,129,.1)'),
+        ].join('');
+        $('diagClassifyMsg').innerHTML = (cl.errors && cl.errors.length)
+          ? '<span class="red">误判：' + cl.errors.map(e => esc(e.text) + '(' + esc(e.got) + ')').join(' / ') + '</span>'
+          : '含关键词但实为过程/指令的句子探针全部正确';
         const cs = await api('/api/consistency');
-        $('diag-consistency').innerHTML = card('待处理冲突', cs.pending)
-          + card('本次重算', cs.reconciled);
-      } catch (e) { $('diag-consistency').innerHTML = '<div class="muted">一致性加载失败：' + escapeHtml(e.message) + '</div>'; }
-      try {
+        $('diagConsistency').innerHTML = [
+          statCard('待处理冲突', cs.pending, '失效队列', 'rgba(245,158,11,.1)'),
+          statCard('本次重算', cs.reconciled, '双轨制一致性', 'rgba(99,102,241,.1)'),
+        ].join('');
         const h = await api('/api/hesitation');
         const s = h.stats || {};
-        $('diag-hesitation').innerHTML = card('犹豫评估', s.eval, 'send ' + fmt(s.send) + ' · rewrite ' + fmt(s.rewrite) + ' · hold ' + fmt(s.hold) + ' · discard ' + fmt(s.discard))
-          + card('discard 率', s.discard_rate, 'hold ' + fmt(s.hold_rate))
-          + card('证据门控拦截', s.evidence_gate_block, '重写 ' + fmt(s.evidence_gate_hedge) + ' 次加含糊后缀');
+        $('diagHesitation').innerHTML = [
+          statCard('犹豫评估', s.eval, 'send ' + fmt(s.send) + ' · rewrite ' + fmt(s.rewrite), 'rgba(99,102,241,.1)'),
+          statCard('discard 率', s.discard_rate, 'hold ' + fmt(s.hold_rate), 'rgba(245,158,11,.1)'),
+          statCard('证据门控拦截', s.evidence_gate_block, '重写 ' + fmt(s.evidence_gate_hedge) + ' 次', 'rgba(239,68,68,.1)'),
+        ].join('');
         const recent = h.recent || [];
-        let hh = '<table><tr><th>时间</th><th>场景</th><th>动作</th><th>原因</th><th>延迟s</th><th>内心独白</th></tr>';
-        recent.forEach(r => {
-          hh += `<tr><td>${escapeHtml(r.ts)}</td><td>${escapeHtml(r.kind)}</td><td>${escapeHtml(r.action)}</td>
-            <td>${escapeHtml(r.reason)}</td><td>${r.delay_s}</td><td class="muted">${escapeHtml(r.monologue)}</td></tr>`;
-        });
-        hh += '</table>';
-        $('diag-hesitation-log').innerHTML = hh;
-      } catch (e) { $('diag-hesitation').innerHTML = '<div class="muted">犹豫层加载失败：' + escapeHtml(e.message) + '</div>'; }
-      const rs = d.route_stats || {};
-      const algos = Object.keys(rs).filter(k => rs[k].trials > 0);
-      const chart = echarts.init($('diag-route'));
-      chart.setOption({
-        title: { text: '检索路由命中率（各算法）', textStyle: { color: '#1e293b', fontSize: 13 } },
-        tooltip: {}, grid: { left: 40, right: 20, bottom: 40 },
-        xAxis: { type: 'category', data: algos, axisLabel: { color: '#64748b' } },
-        yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
-        series: [{
-          type: 'bar',
-          data: algos.map(k => rs[k].rate),
-          itemStyle: { color: '#f59e0b' },
-          label: { show: true, position: 'top', color: '#1e293b', formatter: p => rs[algos[p.dataIndex]].hits + '/' + rs[algos[p.dataIndex]].trials },
-        }],
-      });
-      if (d.calibrate) { $('diag-cal').style.display = 'block'; $('diag-cal').textContent = d.calibrate; }
-      try {
+        $('diagHesitationLog').innerHTML = recent.length ? `<div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>时间</th><th>场景</th><th>动作</th><th>原因</th><th>延迟s</th><th>内心独白</th></tr></thead><tbody>${recent.map(r =>
+          `<tr><td>${esc(r.ts)}</td><td>${esc(r.kind)}</td><td><span class="badge">${esc(r.action)}</span></td><td>${esc(r.reason)}</td><td>${fmt(r.delay_s)}</td><td class="muted">${esc(r.monologue)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">暂无犹豫层明细</div>';
+        const rs = d.route_stats || {};
+        const algos = Object.keys(rs).filter(k => rs[k].trials > 0);
+        const chart = chartAt('diagRoute');
+        if (chart) chart.setOption(baseChartOption({
+          title: { text: '检索路由命中率（各算法）', left: 0, top: 0, textStyle: { color: '#312e81', fontSize: 14 } },
+          grid: { left: 46, right: 18, top: 44, bottom: 56 },
+          xAxis: { type: 'category', data: algos, axisLabel: axisLabel(18) },
+          yAxis: { type: 'value', min: 0, max: 1, axisLabel: axisLabel(), splitLine: splitLine() },
+          series: [{ name: 'hit rate', type: 'bar', barMaxWidth: 46, data: algos.map(k => rs[k].rate), itemStyle: { borderRadius: [8, 8, 0, 0], color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#f59e0b' }, { offset: 1, color: '#ec4899' }]) }, label: { show: true, position: 'top', color: '#b45309', formatter: p => rs[algos[p.dataIndex]].hits + '/' + rs[algos[p.dataIndex]].trials } }],
+        }));
+        if (d.calibrate) { $('diagCal').style.display = 'block'; $('diagCal').textContent = d.calibrate; }
         const exps = await api('/api/experiments?limit=30');
-        if (!exps.length) { $('diag-exp').innerHTML = '<div class="muted">暂无实验记录（跑一次评测会自动记录）</div>'; return; }
-        let html = '<table><tr><th>时间</th><th>动作</th><th>delta (recall/…) </th><th>回归</th></tr>';
-        exps.forEach(e => {
+        $('diagExp').innerHTML = exps.length ? `<div class="table-wrap"><table><thead><tr><th>时间</th><th>动作</th><th>delta</th><th>回归</th></tr></thead><tbody>${exps.map(e => {
           const dlt = e.delta ? Object.entries(e.delta).map(([k, v]) => k + '=' + fmt(v)).join(' ') : '—';
-          html += `<tr><td>${e.ts}</td><td>${e.action}${e.detail ? '·' + e.detail : ''}</td><td>${dlt}</td><td class="${e.regression ? 'red' : ''}">${e.regression ? '⚠ 退化' : '正常'}</td></tr>`;
-        });
-        html += '</table>';
-        $('diag-exp').innerHTML = html;
-      } catch (err) { $('diag-exp').innerHTML = '<div class="muted">实验日志加载失败：' + err.message + '</div>'; }
+          return `<tr><td>${esc(e.ts)}</td><td>${esc(e.action)}${e.detail ? '·' + esc(e.detail) : ''}</td><td>${dlt}</td><td class="${e.regression ? 'red' : 'green'}">${e.regression ? '⚠ 退化' : '正常'}</td></tr>`;
+        }).join('')}</tbody></table></div>` : '<div class="empty">暂无实验记录（跑一次评测会自动记录）</div>';
+        markSync(true);
+      } catch (e) { markSync(false); throw e; }
     }
 
+    // ---------- 图表分析 ----------
     async function renderCharts() {
-      const h = (await api('/api/history')).slice().sort((a, b) => a.ts.localeCompare(b.ts));
-      const ts = h.map(x => x.ts);
+      const h = (await api('/api/history')).slice().sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+      $('chartsSummary').innerHTML = [
+        statCard('历史记录数', h.length, '每次评测跑完自动记一条', 'rgba(99,102,241,.1)'),
+        statCard('覆盖能力', new Set(h.map(x => x.kind)).size, '记忆 / 空间 / 时间 / 情绪 / 主体', 'rgba(236,72,153,.1)'),
+        statCard('数据状态', h.length ? '可分析' : '等待数据', h.length ? '趋势图已生成' : '先跑一次评测', h.length ? 'rgba(16,185,129,.1)' : 'rgba(245,158,11,.1)'),
+      ].join('');
       const defs = [
-        { name: '检索 recall@5', key: 'recall', color: '#3b82f6' },
+        { name: '检索 recall@5', key: 'recall', color: '#6366f1' },
         { name: '空间 where_acc', key: 'where_acc', color: '#10b981' },
         { name: '时间 window_recall', key: 'window_recall', color: '#f59e0b' },
-        { name: '情绪 accuracy', key: 'accuracy', color: '#a78bfa' },
-        { name: '多主体 write_rate', key: 'write_rate', color: '#34d399' },
+        { name: '情绪 accuracy', key: 'accuracy', color: '#ec4899' },
+        { name: '多主体 write_rate', key: 'write_rate', color: '#06b6d4' },
       ];
-      $('charts-summary').innerHTML = card('历史记录数', h.length, '每次评测跑完自动记一条');
-      const tchart = echarts.init($('trend-chart'));
-      tchart.setOption({
-        tooltip: { trigger: 'axis' },
-        legend: { data: defs.map(d => d.name), textStyle: { color: '#64748b' } },
-        grid: { left: 45, right: 20, top: 40, bottom: 40 },
-        xAxis: { type: 'category', data: ts, axisLabel: { color: '#64748b', rotate: 30 } },
-        yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
+      const ts = h.map(x => x.ts);
+      const tc = chartAt('trendChart');
+      if (tc) tc.setOption(baseChartOption({
+        legend: { data: defs.map(d => d.name), top: 0, textStyle: { color: '#667085', fontSize: 11 } },
+        grid: { left: 46, right: 18, top: 40, bottom: 50 },
+        xAxis: { type: 'category', data: ts, axisLabel: axisLabel(25) },
+        yAxis: { type: 'value', min: 0, max: 1, axisLabel: axisLabel(), splitLine: splitLine() },
         series: defs.map(d => ({
-          name: d.name, type: 'line', smooth: true, connectNulls: false,
+          name: d.name, type: 'line', smooth: true, connectNulls: false, showSymbol: h.length < 25,
+          symbol: 'circle', symbolSize: 6, lineStyle: { width: 2.4 }, itemStyle: { color: d.color },
           data: h.map(x => x.metrics && x.metrics[d.key] != null ? x.metrics[d.key] : null),
-          itemStyle: { color: d.color }, lineStyle: { width: 2 }, symbolSize: 5,
         })),
-      });
+      }));
       const keys = ['recall', 'where_acc', 'window_recall', 'accuracy'];
       const labels = ['检索 recall@5', '空间 where_acc', '时间 window_recall', '情绪 accuracy'];
       const latest = {}, avg = {};
@@ -597,240 +1215,95 @@
         const vals = h.map(x => x.metrics && x.metrics[k]).filter(v => v != null);
         if (vals.length) { latest[k] = vals[vals.length - 1]; avg[k] = vals.reduce((a, b) => a + b, 0) / vals.length; }
       });
-      const cchart = echarts.init($('compare-chart'));
-      cchart.setOption({
-        tooltip: {}, legend: { data: ['最新', '历史平均'], textStyle: { color: '#64748b' } },
-        grid: { left: 45, right: 20, top: 40, bottom: 40 },
-        xAxis: { type: 'category', data: labels, axisLabel: { color: '#64748b' } },
-        yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
+      const cc = chartAt('compareChart');
+      if (cc) cc.setOption(baseChartOption({
+        legend: { data: ['最新', '历史平均'], top: 0, textStyle: { color: '#667085', fontSize: 11 } },
+        grid: { left: 46, right: 18, top: 40, bottom: 50 },
+        xAxis: { type: 'category', data: labels, axisLabel: axisLabel() },
+        yAxis: { type: 'value', min: 0, max: 1, axisLabel: axisLabel(), splitLine: splitLine() },
         series: [
-          { name: '最新', type: 'bar', data: keys.map(k => latest[k] != null ? latest[k] : null), itemStyle: { color: '#3b82f6' } },
-          { name: '历史平均', type: 'bar', data: keys.map(k => avg[k] != null ? avg[k] : null), itemStyle: { color: '#64748b' } },
+          { name: '最新', type: 'bar', barMaxWidth: 38, data: keys.map(k => latest[k] != null ? latest[k] : null), itemStyle: { borderRadius: [7, 7, 0, 0], color: '#6366f1' } },
+          { name: '历史平均', type: 'bar', barMaxWidth: 38, data: keys.map(k => avg[k] != null ? avg[k] : null), itemStyle: { borderRadius: [7, 7, 0, 0], color: '#c7d2fe' } },
         ],
-      });
+      }));
       try {
         const b = await api('/api/bandit');
-        const bchart = echarts.init($('bandit-chart'));
-        bchart.setOption({
-          tooltip: {}, grid: { left: 45, right: 20, bottom: 70 },
-          xAxis: { type: 'category', data: (b.strategies || []).map(s => s.label), axisLabel: { color: '#64748b', interval: 0, rotate: 20, fontSize: 10 } },
-          yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
-          series: [{ type: 'bar', data: (b.strategies || []).map(s => s.mean), itemStyle: { color: '#a78bfa' },
-                     label: { show: true, position: 'top', color: '#1e293b' } }],
-        });
-      } catch (e) { $('bandit-chart').innerHTML = '<div class="muted">bandit 数据加载失败：' + escapeHtml(e.message) + '</div>'; }
+        const bc = chartAt('banditChart');
+        if (bc) bc.setOption(baseChartOption({
+          tooltip: { trigger: 'item' }, grid: { left: 46, right: 18, top: 20, bottom: 66 },
+          xAxis: { type: 'category', data: (b.strategies || []).map(s => s.label), axisLabel: axisLabel(18) },
+          yAxis: { type: 'value', min: 0, max: 1, axisLabel: axisLabel(), splitLine: splitLine() },
+          series: [{ type: 'bar', barMaxWidth: 40, data: (b.strategies || []).map(s => s.mean), itemStyle: { borderRadius: [7, 7, 0, 0], color: '#a855f7' }, label: { show: true, position: 'top', color: '#6d28d9' } }],
+        }));
+      } catch (e) { $('banditChart').innerHTML = loadingBlock('bandit 数据加载失败：' + esc(e.message)); }
       try {
         const r = await api('/api/revive');
-        const rchart = echarts.init($('revive-chart'));
-        rchart.setOption({
-          tooltip: {}, grid: { left: 45, right: 20, bottom: 40 },
-          xAxis: { type: 'category', data: Object.keys(r.posterior || {}), axisLabel: { color: '#64748b' } },
-          yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
-          series: [{ type: 'bar', data: Object.values(r.posterior || {}), itemStyle: { color: '#f59e0b' },
-                     label: { show: true, position: 'top', color: '#1e293b' } }],
-        });
-      } catch (e) { $('revive-chart').innerHTML = '<div class="muted">revive 数据加载失败：' + escapeHtml(e.message) + '</div>'; }
+        const rc = chartAt('reviveChart');
+        if (rc) rc.setOption(baseChartOption({
+          tooltip: { trigger: 'item' }, grid: { left: 46, right: 18, top: 20, bottom: 44 },
+          xAxis: { type: 'category', data: Object.keys(r.posterior || {}), axisLabel: axisLabel() },
+          yAxis: { type: 'value', min: 0, max: 1, axisLabel: axisLabel(), splitLine: splitLine() },
+          series: [{ type: 'bar', barMaxWidth: 40, data: Object.values(r.posterior || {}), itemStyle: { borderRadius: [7, 7, 0, 0], color: '#f59e0b' }, label: { show: true, position: 'top', color: '#b45309' } }],
+        }));
+      } catch (e) { $('reviveChart').innerHTML = loadingBlock('revive 数据加载失败：' + esc(e.message)); }
     }
 
-    async function downloadExcel() {
-      if (typeof XLSX === 'undefined') { alert('SheetJS 未加载（CDN 可能被墙），无法生成 Excel'); return; }
-      const [d, h, diag, c] = await Promise.all([
-        api('/api/dashboard'), api('/api/history'), api('/api/diagnostics'), api('/api/counters'),
-      ]);
-      const wb = XLSX.utils.book_new();
-      const b = d.baselines || {};
-      const dash = [['指标', '值'],
-        ['记忆条数', d.memory_counts.memories], ['事件', d.memory_counts.events], ['属性', d.memory_counts.attrs],
-        ['情绪日志(7天)', d.emotion_log_count],
-        ['检索 recall@5', b.memory_eval && b.memory_eval.recall_at_k], ['检索 MRR', b.memory_eval && b.memory_eval.mrr],
-        ['空间 where_acc', b.space_eval && b.space_eval.where_accuracy && b.space_eval.where_accuracy.accuracy],
-        ['时间 window_recall', b.time_eval && b.time_eval.window_recall && b.time_eval.window_recall.recall],
-        ['情绪 accuracy', b.emotion_eval && b.emotion_eval.accuracy], ['情绪 VAD MAE', b.emotion_eval && b.emotion_eval.vad_mae]];
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dash), '总览');
-      const hdr = ['时间', '类型', 'recall', 'mrr', 'ndcg', 'where_acc', 'where_recall', 'avg_steps', 'window_recall', 'timeline_rate', 'date_acc', 'emotion_acc', 'vad_mae'];
-      const rows = [hdr];
-      h.slice().sort((a, b2) => a.ts.localeCompare(b2.ts)).forEach(x => {
-        const m = x.metrics || {};
-        rows.push([x.ts, x.kind, m.recall, m.mrr, m.ndcg, m.where_acc, m.where_recall, m.avg_steps, m.window_recall, m.timeline_rate, m.date_acc, m.accuracy, m.vad_mae]);
-      });
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), '历史趋势');
-      const dg = diag.data_counts || {}, rv = diag.review || {}, pr = diag.procedures || {};
-      const diagRows = [['项', '值'], ['probes', dg.probes], ['query_log', dg.query_log], ['item_events', dg.item_events],
-        ['explicit 事件', dg.explicit_events], ['trace', dg.trace], ['feedback', dg.feedback], ['procedures', dg.procedures],
-        ['人工评分', rv.n], ['总分均值', rv.avg_total], ['extraction', rv.avg_extraction], ['decision', rv.avg_decision],
-        ['confidence', rv.avg_confidence], ['provenance', rv.avg_provenance], ['privacy', rv.avg_privacy],
-        ['程序记忆数', pr.count], ['System1 就绪', pr.system1_ready], ['平均成功率', pr.avg_success]];
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(diagRows), '数据诊断');
-      const cRows = [['key', 'value']];
-      Object.keys(c).sort().forEach(k => cRows.push([k, c[k]]));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cRows), '计数器');
-      XLSX.writeFile(wb, 'yuno_baseline_' + new Date().toISOString().slice(0, 10) + '.xlsx');
-    }
-
-    // ===== 对话回放 · 五维评分（人工 / LLM 双模式）=====
-    const SCORE_DIMS = [
-      ['recall', 'recall 覆盖需求/记忆'],
-      ['precision', 'precision 不答非所问/编造'],
-      ['coherence', 'coherence 多轮连贯'],
-      ['consistency', 'consistency 前后不矛盾'],
-      ['naturalness', 'naturalness 自然像真人'],
-    ];
-    let scenarioList = [];
-
-    function escapeHtml(s) {
-      return String(s == null ? '' : s)
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;').replace(/\n/g, '<br>');
-    }
-
-    function selectedScenario() {
-      const i = +($('scenario-select').value || 0);
-      return scenarioList[i] || null;
-    }
-
-    async function loadScenarios() {
-      const d = await api('/api/scenarios');
-      scenarioList = d.scenarios || [];
-      $('scenario-select').innerHTML = scenarioList.length
-        ? scenarioList.map((s, i) => `<option value="${i}">${escapeHtml(s.id || ('场景' + i))}（${s.n_messages} 条 · ${escapeHtml(s.scope)}）</option>`).join('')
-        : '<option value="0">（无场景）</option>';
-      $('scenario-meta').innerHTML = card('场景数', scenarioList.length, d.exists ? '' : '已用内置示例播种，可在 data/eval/scenarios.json 增改');
-      const rows = await api('/api/scenario-scores?limit=200');
-      const manual = rows.filter(r => r.mode !== 'llm');
-      const llm = rows.filter(r => r.mode === 'llm');
-      const avgOf = arr => arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2) : null;
-      $('scenario-score-summary').innerHTML =
-        card('人工评分次数', manual.length, 'avg ' + fmt(avgOf(manual.map(r => r.avg))))
-        + card('LLM 机器分次数', llm.length, 'avg ' + fmt(avgOf(llm.map(r => r.avg))))
-        + card('校准建议', manual.length ? '人工抽检比例 ' + (manual.length / Math.max(1, manual.length + llm.length) * 100).toFixed(0) + '%' : '多打几次人工分用于校准机器分');
-      renderScenarioScores(rows);
-      renderScenarioRadar(rows);
-    }
-
-    async function replayScenario() {
-      const s = selectedScenario();
-      const btn = $('btn-replay');
-      btn.disabled = true;
+    // ---------- 成本 ----------
+    async function renderCosts() {
+      const c = await api('/api/costs?days=30');
+      const t = c.total || {};
+      $('costCards').innerHTML = [
+        statCard('累计调用', num(t.calls), '近 ' + (c.days || 30) + ' 天', 'rgba(99,102,241,.1)'),
+        statCard('prompt tokens', num(t.prompt), '输入 token', 'rgba(168,85,247,.1)'),
+        statCard('completion tokens', num(t.completion), '输出 token', 'rgba(236,72,153,.1)'),
+        statCard('估算花费', costText(c.total_cost), '输入 ' + money((c.prices || {}).prompt_per_1m) + '/1M · 输出 ' + money((c.prices || {}).completion_per_1m) + '/1M', 'rgba(245,158,11,.1)'),
+      ].join('');
+      const mods = c.by_module || [];
+      const mc = chartAt('costModuleChart');
+      if (mc) mc.setOption(baseChartOption({
+        legend: { data: ['prompt', 'completion'], top: 0, textStyle: { color: '#667085', fontSize: 11 } },
+        grid: { left: 56, right: 18, top: 40, bottom: 66 },
+        xAxis: { type: 'category', data: mods.map(m => m.module), axisLabel: axisLabel(22) },
+        yAxis: { type: 'value', axisLabel: axisLabel(), splitLine: splitLine() },
+        series: [
+          { name: 'prompt', type: 'bar', stack: 't', data: mods.map(m => m.prompt), itemStyle: { color: '#6366f1' } },
+          { name: 'completion', type: 'bar', stack: 't', data: mods.map(m => m.completion), itemStyle: { color: '#ec4899' } },
+        ],
+      }));
+      const paths = c.by_path || [];
+      const pc = chartAt('costPathChart');
+      if (pc) pc.setOption(baseChartOption({
+        tooltip: { trigger: 'item' }, grid: { left: 56, right: 18, top: 20, bottom: 52 },
+        xAxis: { type: 'category', data: paths.map(p => p.path), axisLabel: axisLabel(16) },
+        yAxis: { type: 'value', axisLabel: axisLabel(), splitLine: splitLine() },
+        series: [{ type: 'bar', barMaxWidth: 42, data: paths.map(p => p.prompt + p.completion), itemStyle: { borderRadius: [7, 7, 0, 0], color: '#f59e0b' }, label: { show: true, position: 'top', color: '#b45309' } }],
+      }));
+      const days = c.by_day || [];
+      const dc = chartAt('costDayChart');
+      if (dc) dc.setOption(baseChartOption({
+        legend: { data: ['tokens', '花费'], top: 0, textStyle: { color: '#667085', fontSize: 11 } },
+        grid: { left: 56, right: 60, top: 40, bottom: 56 },
+        xAxis: { type: 'category', data: days.map(d => d.date), axisLabel: axisLabel(24) },
+        yAxis: [
+          { type: 'value', name: 'tokens', axisLabel: axisLabel(), splitLine: splitLine() },
+          { type: 'value', name: '¥', axisLabel: axisLabel(), splitLine: { show: false } },
+        ],
+        series: [
+          { name: 'tokens', type: 'line', smooth: true, showSymbol: false, data: days.map(d => d.prompt + d.completion), lineStyle: { width: 2.4 }, itemStyle: { color: '#6366f1' }, yAxisIndex: 0, areaStyle: { color: 'rgba(99,102,241,.08)' } },
+          { name: '花费', type: 'line', smooth: true, showSymbol: false, data: days.map(d => d.cost), lineStyle: { width: 2.4 }, itemStyle: { color: '#ec4899' }, yAxisIndex: 1, areaStyle: { color: 'rgba(236,72,153,.06)' } },
+        ],
+      }));
       try {
-        const { task_id } = await api('/api/scenarios/replay', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ scenario_id: s ? s.id : '', score: $('chk-score').checked }),
-        });
-        $('scenario-conv').innerHTML = '<div class="muted">回放中…（逐条走 agent.ask，可能较慢）</div>';
-        await poll(task_id, renderReplay);
-      } catch (e) { alert('回放失败：' + e.message); }
-      btn.disabled = false;
+        const exps = await api('/api/experiments?limit=100');
+        const abl = exps.filter(e => e.action === 'ablation').slice(0, 14);
+        $('costTradeoff').innerHTML = abl.length ? `<div class="table-wrap"><table><thead><tr><th>机制开关</th><th>recall delta</th><th>MRR delta</th><th>NDCG delta</th><th>回归</th></tr></thead><tbody>${abl.map(e => {
+          const d = e.delta || {};
+          return `<tr><td>${esc(e.detail)}</td><td>${d.recall != null ? d.recall : '—'}</td><td>${d.mrr != null ? d.mrr : '—'}</td><td>${d.ndcg != null ? d.ndcg : '—'}</td><td class="${e.regression ? 'red' : 'green'}">${e.regression ? '⚠ 退化' : '正常'}</td></tr>`;
+        }).join('')}</tbody></table></div>` : '<div class="empty">还没有消融记录（在消融实验页跑一次"运行消融"）</div>';
+      } catch (e) { $('costTradeoff').innerHTML = loadingBlock('消融数据加载失败：' + esc(e.message)); }
     }
 
-    function renderReplay(res) {
-      if (!res) return;
-      if (res.error) { $('scenario-conv').innerHTML = '<div class="red">' + escapeHtml(res.error) + '</div>'; return; }
-      let html = '';
-      (res.scenarios || []).forEach(s => {
-        html += `<h3>${escapeHtml(s.id)} <span class="muted">${escapeHtml(s.scope)}</span></h3>`;
-        (s.replies || []).forEach((r, i) => {
-          html += `<div style="margin:6px 0;padding:8px;background:#1e293b;border-radius:8px;">
-            <div class="muted">用户 ${i + 1}：${escapeHtml(r.user)}</div>
-            <div style="margin-top:4px;">AI：${escapeHtml(r.ai)}</div></div>`;
-        });
-      });
-      $('scenario-conv').innerHTML = html;
-      renderManualForm();
-      if (res.scored) renderLlmScore(res.scored, res.avg);
-      else { $('scenario-llm-score').style.display = 'none'; }
-    }
-
-    function renderManualForm() {
-      $('scenario-manual').style.display = 'block';
-      $('scenario-dims').innerHTML = SCORE_DIMS.map(([k, label]) =>
-        `<div class="card"><div class="k">${label}</div>
-         <input id="sc-${k}" type="number" min="1" max="5" step="1" value="3" style="width:70px;padding:6px;margin-top:6px;"></div>`
-      ).join('');
-    }
-
-    function renderLlmScore(scored, avg) {
-      $('scenario-llm-score').style.display = 'block';
-      let html = '<h3>LLM 机器分 <span class="muted">（DeepSeek rubric，供参考）</span></h3><table><tr><th>场景</th>';
-      SCORE_DIMS.forEach(([k]) => html += `<th>${k}</th>`);
-      html += '<th>avg</th><th>备注</th></tr>';
-      (scored || []).forEach(x => {
-        const s = x.scores || {};
-        html += `<tr><td>${escapeHtml(x.id)}</td>`;
-        SCORE_DIMS.forEach(([k]) => html += `<td>${s[k] != null ? s[k] : '—'}</td>`);
-        html += `<td>${s.avg != null ? s.avg : '—'}</td><td class="muted">${escapeHtml(s.comment || '')}</td></tr>`;
-      });
-      if (avg && Object.keys(avg).length) {
-        html += '<tr><td><b>平均</b></td>';
-        SCORE_DIMS.forEach(([k]) => html += `<td><b>${avg[k] != null ? avg[k] : '—'}</b></td>`);
-        html += '<td></td><td></td></tr>';
-      }
-      html += '</table>';
-      $('scenario-llm-score').innerHTML = html;
-    }
-
-    async function saveManualScore() {
-      const s = selectedScenario();
-      if (!s) { alert('请先选择场景'); return; }
-      const scores = {};
-      SCORE_DIMS.forEach(([k]) => {
-        const v = +($('sc-' + k).value);
-        scores[k] = (v >= 1 && v <= 5) ? v : 3;
-      });
-      await api('/api/scenarios/score', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scenario_id: s.id, scope: s.scope, scores,
-          comment: $('sc-comment').value || '', mode: 'manual',
-        }),
-      });
-      $('sc-comment').value = '';
-      await loadScenarios();
-    }
-
-    function renderScenarioScores(rows) {
-      if (!rows || !rows.length) { $('scenario-scores').innerHTML = '<div class="muted">暂无评分记录（回放后人工打分或勾选 LLM 评分）</div>'; return; }
-      let html = '<table><tr><th>时间</th><th>场景</th><th>模式</th>';
-      SCORE_DIMS.forEach(([k]) => html += `<th>${k}</th>`);
-      html += '<th>avg</th><th>备注</th></tr>';
-      rows.slice(0, 50).forEach(r => {
-        html += `<tr><td>${escapeHtml(r.ts)}</td><td>${escapeHtml(r.scenario_id)}</td><td>${r.mode === 'llm' ? '机器分' : '人工'}</td>`;
-        SCORE_DIMS.forEach(([k]) => html += `<td>${r.scores && r.scores[k] != null ? r.scores[k] : '—'}</td>`);
-        html += `<td><b>${r.avg}</b></td><td class="muted">${escapeHtml(r.comment || '')}</td></tr>`;
-      });
-      html += '</table>';
-      $('scenario-scores').innerHTML = html;
-    }
-
-    function renderScenarioRadar(rows) {
-      const dims = SCORE_DIMS.map(d => d[0]);
-      const labels = SCORE_DIMS.map(d => d[1].split(' ')[0]);
-      const avgOf = (arr, k) => arr.length ? arr.reduce((a, b) => a + (b.scores && b.scores[k] != null ? b.scores[k] : 0), 0) / arr.length : null;
-      const manual = (rows || []).filter(r => r.mode !== 'llm');
-      const llm = (rows || []).filter(r => r.mode === 'llm');
-      if (!manual.length && !llm.length) { $('scenario-radar').style.display = 'none'; return; }
-      $('scenario-radar').style.display = 'block';
-      const chart = echarts.init($('scenario-radar'));
-      chart.setOption({
-        tooltip: {},
-        legend: { data: ['人工', '机器分'], textStyle: { color: '#64748b' } },
-        radar: {
-          indicator: dims.map((d, i) => ({ name: labels[i], max: 5 })),
-          radius: '62%',
-          axisName: { color: '#64748b' },
-          splitLine: { lineStyle: { color: '#334155' } },
-          axisLine: { lineStyle: { color: '#334155' } },
-        },
-        series: [{
-          type: 'radar',
-          data: [
-            { value: dims.map(k => avgOf(manual, k)), name: '人工' },
-            { value: dims.map(k => avgOf(llm, k)), name: '机器分' },
-          ],
-        }],
-      });
-    }
-
-    // ===== 消融实验 · 热插拔开关 =====
+    // ---------- 消融实验 ----------
     const ABLATION_DEFS = [
       ['vector', '向量检索'], ['graph', '图谱'], ['lexical', '词法'], ['time_window', '时间窗口'],
       ['emotion', '情绪'], ['sharing', '分享'], ['space', '空间'], ['system1', 'System1'],
@@ -838,195 +1311,397 @@
       ['bandit', '回应策略 bandit'], ['revive', '泊松主动触发'], ['hesitation', '犹豫层'],
       ['evidence_semantic', '语义自检'],
     ];
-
     async function loadAblation() {
       const st = await api('/api/ablation/state');
-      $('ablation-switches').innerHTML = ABLATION_DEFS.map(([k, label]) => {
+      $('ablationSwitches').innerHTML = ABLATION_DEFS.map(([k, label]) => {
         const on = st[k] !== undefined ? !!st[k] : false;
         return `<label class="sw ${on ? '' : 'off'}" title="当前：${on ? '开' : '关'}">
           <input type="checkbox" data-sw="${k}" ${on ? 'checked' : ''} onchange="toggleSwitch('${k}', this.checked, this)">
           <span>${label}</span></label>`;
       }).join('');
     }
-
     async function toggleSwitch(k, v, el) {
       try {
-        const r = await api('/api/ablation/toggle', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ switch: k, value: v }),
-        });
-        if (r.error) { alert(r.error); el.checked = !v; }
+        const r = await api('/api/ablation/toggle', { method: 'POST', body: JSON.stringify({ switch: k, value: v }) });
+        if (r.error) { toast(r.error, 'err'); el.checked = !v; }
         el.parentElement.classList.toggle('off', !v);
-      } catch (e) { alert('切换失败：' + e.message); el.checked = !v; }
+        toast((v ? '已开启 ' : '已关闭 ') + k);
+      } catch (e) { toast('切换失败：' + e.message, 'err'); el.checked = !v; }
     }
-
-    async function runTool(name) {
-      try {
-        const r = await api('/api/tools', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name }),
-        });
-        alert(JSON.stringify(r, null, 2));
-      } catch (e) { alert('执行失败：' + e.message); }
-    }
-
     async function runAblation() {
       const btn = $('btn-ablation');
-      btn.disabled = true;
+      setBtnLoading(btn, true, '消融运行中');
       try {
-        const { task_id } = await api('/api/ablation/run', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ switches: [] }),
-        });
-        $('ablation-table').innerHTML = '<div class="muted">消融运行中…（每个开关跑一遍评测，需要几分钟）</div>';
-        await poll(task_id, renderAblation);
-      } catch (e) { alert('消融失败：' + e.message); }
-      btn.disabled = false;
+        const { task_id } = await api('/api/ablation/run', { method: 'POST', body: JSON.stringify({ switches: [] }) });
+        $('ablationTable').innerHTML = '<div class="empty">消融运行中…（每个开关跑一遍评测，需要几分钟）</div>';
+        await pollTask(task_id, renderAblation);
+      } catch (e) { toast('消融失败：' + e.message, 'err'); }
+      setBtnLoading(btn, false);
     }
-
     function renderAblation(res) {
       if (!res) return;
-      $('ablation-cards').innerHTML = card('基线 recall@5', res.baseline && res.baseline.recall)
-        + card('基线 MRR', res.baseline && res.baseline.mrr)
-        + card('基线 NDCG', res.baseline && res.baseline.ndcg)
-        + card('开关数', (res.matrix || []).length - 1, '每个 = 关掉该机制后的表现');
+      $('ablationCards').innerHTML = [
+        statCard('基线 recall@5', res.baseline && res.baseline.recall, '全机制开启', 'rgba(99,102,241,.1)'),
+        statCard('基线 MRR', res.baseline && res.baseline.mrr, '全机制开启', 'rgba(168,85,247,.1)'),
+        statCard('基线 NDCG', res.baseline && res.baseline.ndcg, '全机制开启', 'rgba(236,72,153,.1)'),
+        statCard('开关数', (res.matrix || []).length - 1, '每个 = 关掉该机制后的表现', 'rgba(6,182,212,.1)'),
+      ].join('');
       const rows = res.matrix || [];
-      let html = '<table><tr><th>开关</th><th>recall</th><th>MRR</th><th>NDCG</th><th>delta</th><th>回归</th></tr>';
-      rows.forEach(r => {
+      $('ablationTable').innerHTML = `<div class="table-wrap"><table><thead><tr><th>开关</th><th>recall</th><th>MRR</th><th>NDCG</th><th>delta</th><th>回归</th></tr></thead><tbody>${rows.map(r => {
         const dlt = r.delta ? Object.entries(r.delta).map(([k, v]) => k + '=' + fmt(v)).join(' ') : '—';
-        html += `<tr><td>${escapeHtml(r.switch)}${r.label ? '<br><span class="muted">' + escapeHtml(r.label) + '</span>' : ''}</td>
-          <td>${fmt(r.recall)}</td><td>${fmt(r.mrr)}</td><td>${fmt(r.ndcg)}</td>
-          <td>${dlt}</td><td class="${r.regression ? 'red' : ''}">${r.regression ? '⚠ 退化' : '正常'}</td></tr>`;
-      });
-      html += '</table>';
-      $('ablation-table').innerHTML = html;
-      const keys = ['recall', 'mrr', 'ndcg'];
-      const chart = echarts.init($('ablation-chart'));
-      chart.setOption({
-        tooltip: { trigger: 'axis' },
-        legend: { data: keys, textStyle: { color: '#64748b' } },
-        grid: { left: 45, right: 20, top: 40, bottom: 90 },
-        xAxis: { type: 'category', data: rows.map(r => r.switch), axisLabel: { color: '#64748b', rotate: 35, interval: 0, fontSize: 10 } },
-        yAxis: { type: 'value', max: 1, axisLabel: { color: '#64748b' } },
-        series: keys.map((k, i) => ({
-          name: k, type: 'bar', data: rows.map(r => r[k]),
-          itemStyle: { color: ['#3b82f6', '#10b981', '#f59e0b'][i] },
+        return `<tr><td>${esc(r.switch)}${r.label ? '<br><span class="muted">' + esc(r.label) + '</span>' : ''}</td>
+          <td>${fmt(r.recall)}</td><td>${fmt(r.mrr)}</td><td>${fmt(r.ndcg)}</td><td>${dlt}</td>
+          <td class="${r.regression ? 'red' : 'green'}">${r.regression ? '⚠ 退化' : '正常'}</td></tr>`;
+      }).join('')}</tbody></table></div>`;
+      const chart = chartAt('ablationChart');
+      if (chart) chart.setOption(baseChartOption({
+        legend: { data: ['recall', 'mrr', 'ndcg'], top: 0, textStyle: { color: '#667085', fontSize: 11 } },
+        grid: { left: 46, right: 18, top: 40, bottom: 76 },
+        xAxis: { type: 'category', data: rows.map(r => r.switch), axisLabel: axisLabel(30) },
+        yAxis: { type: 'value', min: 0, max: 1, axisLabel: axisLabel(), splitLine: splitLine() },
+        series: ['recall', 'mrr', 'ndcg'].map((k, i) => ({
+          name: k, type: 'bar', barMaxWidth: 22, data: rows.map(r => r[k]),
+          itemStyle: { borderRadius: [6, 6, 0, 0], color: CHART_COLORS[i] },
         })),
-      });
+      }));
     }
 
-    async function renderCosts() {
-      const c = await api('/api/costs?days=30');
-      const t = c.total || {};
-      const cost = v => v == null ? '—' : '¥' + v;
-      $('cost-cards').innerHTML = card('累计调用', t.calls, '近 ' + c.days + ' 天')
-        + card('prompt tokens', t.prompt)
-        + card('completion tokens', t.completion)
-        + card('估算花费', cost(c.total_cost),
-            '输入 ¥' + ((c.prices || {}).prompt_per_1m || 1) + '/1M · 输出 ¥' + ((c.prices || {}).completion_per_1m || 2) + '/1M');
-      const mods = c.by_module || [];
-      const mchart = echarts.init($('cost-module-chart'));
-      mchart.setOption({
-        tooltip: { trigger: 'axis' },
-        legend: { data: ['prompt', 'completion'], textStyle: { color: '#64748b' } },
-        grid: { left: 60, right: 20, top: 40, bottom: 70 },
-        xAxis: { type: 'category', data: mods.map(m => m.module), axisLabel: { color: '#64748b', interval: 0, rotate: 25, fontSize: 10 } },
-        yAxis: { type: 'value', axisLabel: { color: '#64748b' } },
-        series: [
-          { name: 'prompt', type: 'bar', stack: 't', data: mods.map(m => m.prompt), itemStyle: { color: '#3b82f6' } },
-          { name: 'completion', type: 'bar', stack: 't', data: mods.map(m => m.completion), itemStyle: { color: '#a78bfa' } },
-        ],
-      });
-      const paths = c.by_path || [];
-      const pchart = echarts.init($('cost-path-chart'));
-      pchart.setOption({
-        tooltip: {}, grid: { left: 60, right: 20, bottom: 50 },
-        xAxis: { type: 'category', data: paths.map(p => p.path), axisLabel: { color: '#64748b', interval: 0, rotate: 20 } },
-        yAxis: { type: 'value', axisLabel: { color: '#64748b' } },
-        series: [{ type: 'bar', data: paths.map(p => p.prompt + p.completion), itemStyle: { color: '#f59e0b' },
-                   label: { show: true, position: 'top', color: '#1e293b' } }],
-      });
-      const days = c.by_day || [];
-      const dchart = echarts.init($('cost-day-chart'));
-      dchart.setOption({
-        tooltip: { trigger: 'axis' },
-        legend: { data: ['tokens', '花费'], textStyle: { color: '#64748b' } },
-        grid: { left: 60, right: 60, top: 40, bottom: 60 },
-        xAxis: { type: 'category', data: days.map(d => d.date), axisLabel: { color: '#64748b', rotate: 30 } },
-        yAxis: [
-          { type: 'value', name: 'tokens', axisLabel: { color: '#64748b' } },
-          { type: 'value', name: '¥', axisLabel: { color: '#64748b' } },
-        ],
-        series: [
-          { name: 'tokens', type: 'line', smooth: true, data: days.map(d => d.prompt + d.completion), itemStyle: { color: '#3b82f6' }, yAxisIndex: 0 },
-          { name: '花费', type: 'line', smooth: true, data: days.map(d => d.cost), itemStyle: { color: '#ef4444' }, yAxisIndex: 1 },
-        ],
-      });
-      try {
-        const exps = await api('/api/experiments?limit=100');
-        const abl = exps.filter(e => e.action === 'ablation').slice(0, 14);
-        if (!abl.length) { $('cost-tradeoff').innerHTML = '<div class="muted">还没有消融记录（在消融实验页跑一次"运行消融"）</div>'; return; }
-        let h2 = '<table><tr><th>机制开关</th><th>recall delta</th><th>MRR delta</th><th>NDCG delta</th><th>回归</th></tr>';
-        abl.forEach(e => {
-          const d = e.delta || {};
-          h2 += `<tr><td>${escapeHtml(e.detail)}</td><td>${d.recall != null ? d.recall : '—'}</td>
-            <td>${d.mrr != null ? d.mrr : '—'}</td><td>${d.ndcg != null ? d.ndcg : '—'}</td>
-            <td class="${e.regression ? 'red' : ''}">${e.regression ? '⚠ 退化' : '正常'}</td></tr>`;
-        });
-        h2 += '</table>';
-        $('cost-tradeoff').innerHTML = h2;
-      } catch (e) { $('cost-tradeoff').innerHTML = '<div class="muted">消融数据加载失败：' + escapeHtml(e.message) + '</div>'; }
-    }
-
-
-    // ===== 记忆评分页（路线图 trace 审核页）=====
-    const REVIEW_DIMS = [
-      ['extraction', '提取'], ['decision', '决策'], ['confidence', '置信度'],
-      ['provenance', '来源'], ['privacy', '隐私'],
+    // ---------- 对话回放 ----------
+    const SCORE_DIMS = [
+      ['recall', 'recall 覆盖需求/记忆'], ['precision', 'precision 不答非所问/编造'],
+      ['coherence', 'coherence 多轮连贯'], ['consistency', 'consistency 前后不矛盾'],
+      ['naturalness', 'naturalness 自然像真人'],
     ];
-
-    function scoreRow(id, name) {
-      return REVIEW_DIMS.map(([k, label]) =>
-        `<select id="rv-${id}-${k}" title="${label} 1~5">${[1,2,3,4,5].map(v => `<option value="${v}" ${v===3?'selected':''}>${v}</option>`).join('')}</select>`
-      ).join('');
+    function selectedScenario() { const i = +($('scenarioSelect').value || 0); return store.scenarioList[i] || null; }
+    async function loadScenarios() {
+      const d = await api('/api/scenarios');
+      store.scenarioList = d.scenarios || [];
+      $('scenarioSelect').innerHTML = store.scenarioList.length
+        ? store.scenarioList.map((s, i) => `<option value="${i}">${esc(s.id || ('场景' + i))}（${s.n_messages} 条 · ${esc(s.scope)}）</option>`).join('')
+        : '<option value="0">（无场景）</option>';
+      $('scenarioMeta').innerHTML = [
+        statCard('场景数', store.scenarioList.length, d.exists ? '可回放' : '已用内置示例播种', 'rgba(99,102,241,.1)'),
+        statCard('场景路径', esc(d.path || ''), 'data/eval/scenarios.json', 'rgba(168,85,247,.1)'),
+      ].join('');
+      const rows = await api('/api/scenario-scores?limit=200');
+      const manual = rows.filter(r => r.mode !== 'llm');
+      const llm = rows.filter(r => r.mode === 'llm');
+      const avgOf = arr => arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length) : null;
+      const ratio = manual.length + llm.length ? Math.round(manual.length / (manual.length + llm.length) * 100) : 0;
+      $('scenarioScoreSummary').innerHTML = [
+        statCard('人工评分次数', manual.length, 'avg ' + fmt(avgOf(manual.map(r => r.avg))), 'rgba(236,72,153,.1)'),
+        statCard('LLM 机器分次数', llm.length, 'avg ' + fmt(avgOf(llm.map(r => r.avg))), 'rgba(99,102,241,.1)'),
+        statCard('人工抽检比例', manual.length ? ratio + '%' : '—', manual.length ? '用于校准机器分' : '多打几次人工分用于校准', 'rgba(6,182,212,.1)'),
+      ].join('');
+      renderScenarioScores(rows);
+      renderScenarioRadar(rows);
     }
-
-    async function submitReview(id) {
-      const scores = {};
-      REVIEW_DIMS.forEach(([k]) => { scores[k] = Number($('rv-' + id + '-' + k).value); });
+    async function replayScenario() {
+      const s = selectedScenario();
+      const btn = $('btnReplay');
+      setBtnLoading(btn, true, '回放中');
       try {
-        const r = await api('/api/review/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trace_id: id, ...scores }) });
-        $('rv-msg-' + id).textContent = '已提交 ' + r.score + '/5';
-        loadReview();
-      } catch (e) { $('rv-msg-' + id).textContent = '失败：' + e.message; }
+        const { task_id } = await api('/api/scenarios/replay', {
+          method: 'POST', body: JSON.stringify({ scenario_id: s ? s.id : '', score: $('chkScore').checked }),
+        });
+        $('scenarioConv').innerHTML = '<div class="empty">回放中…（逐条走 agent.ask，可能较慢）</div>';
+        await pollTask(task_id, renderReplay);
+      } catch (e) { toast('回放失败：' + e.message, 'err'); }
+      setBtnLoading(btn, false);
+    }
+    function renderReplay(res) {
+      if (!res) return;
+      if (res.error) { $('scenarioConv').innerHTML = '<div class="empty"><span class="red">' + esc(res.error) + '</span></div>'; return; }
+      let html = '';
+      (res.scenarios || []).forEach(s => {
+        html += `<div class="panel"><div class="panel-head"><h3>${esc(s.id)}</h3><span class="badge cyan">${esc(s.scope)}</span></div><div class="chat-list">`;
+        (s.replies || []).forEach((r, i) => {
+          html += `<div class="bubble user"><span class="who">用户 · 第 ${i + 1} 轮</span>${esc(r.user)}</div>
+            <div class="bubble ai"><span class="who">Yuno</span>${esc(r.ai)}</div>`;
+        });
+        html += '</div></div>';
+      });
+      $('scenarioConv').innerHTML = html;
+      renderManualForm();
+      if (res.scored) renderLlmScore(res.scored, res.avg);
+      else $('scenarioLlmScore').style.display = 'none';
+    }
+    function renderManualForm() {
+      $('scenarioManual').style.display = 'block';
+      $('scenarioDims').innerHTML = SCORE_DIMS.map(([k, label], i) =>
+        `<div class="stat" style="--tint:${['rgba(99,102,241,.1)','rgba(168,85,247,.1)','rgba(236,72,153,.1)','rgba(6,182,212,.1)','rgba(16,185,129,.1)'][i]}">
+          <div class="k">${esc(label)}</div>
+          <input id="sc-${k}" type="number" min="1" max="5" step="1" value="3" style="width:76px;margin-top:7px"></div>`).join('');
+    }
+    function renderLlmScore(scored, avg) {
+      $('scenarioLlmScore').style.display = 'block';
+      let html = '<div class="panel"><div class="panel-head"><h3>LLM 机器分</h3><span class="badge pink">DeepSeek rubric</span></div><div class="table-wrap"><table><thead><tr><th>场景</th>';
+      SCORE_DIMS.forEach(([k]) => html += `<th>${k}</th>`);
+      html += '<th>avg</th><th>备注</th></tr></thead><tbody>';
+      (scored || []).forEach(x => {
+        const s = x.scores || {};
+        html += `<tr><td>${esc(x.id)}</td>`;
+        SCORE_DIMS.forEach(([k]) => html += `<td>${s[k] != null ? s[k] : '—'}</td>`);
+        html += `<td><b>${s.avg != null ? s.avg : '—'}</b></td><td class="muted">${esc(s.comment || '')}</td></tr>`;
+      });
+      if (avg && Object.keys(avg).length) {
+        html += '<tr><td><b>平均</b></td>';
+        SCORE_DIMS.forEach(([k]) => html += `<td><b>${avg[k] != null ? avg[k] : '—'}</b></td>`);
+        html += '<td></td><td></td></tr>';
+      }
+      html += '</tbody></table></div></div>';
+      $('scenarioLlmScore').innerHTML = html;
+    }
+    async function saveManualScore() {
+      const s = selectedScenario();
+      if (!s) { toast('请先选择场景', 'err'); return; }
+      const scores = {};
+      SCORE_DIMS.forEach(([k]) => {
+        const v = +($('sc-' + k).value);
+        scores[k] = (v >= 1 && v <= 5) ? v : 3;
+      });
+      try {
+        await api('/api/scenarios/score', {
+          method: 'POST',
+          body: JSON.stringify({ scenario_id: s.id, scope: s.scope, scores, comment: $('scComment').value || '', mode: 'manual' }),
+        });
+        $('scComment').value = '';
+        toast('人工分已保存');
+        await loadScenarios();
+      } catch (e) { toast(e.message, 'err'); }
+    }
+    function renderScenarioScores(rows) {
+      const box = $('scenarioScores');
+      if (!rows || !rows.length) { box.innerHTML = '<div class="empty">暂无评分记录（回放后人工打分或勾选 LLM 评分）</div>'; return; }
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>时间</th><th>场景</th><th>模式</th>${SCORE_DIMS.map(([k]) => `<th>${k}</th>`).join('')}<th>avg</th><th>备注</th></tr></thead><tbody>${rows.slice(0, 50).map(r => {
+        return `<tr><td>${esc(r.ts)}</td><td>${esc(r.scenario_id)}</td><td><span class="badge ${r.mode === 'llm' ? 'cyan' : 'pink'}">${r.mode === 'llm' ? '机器分' : '人工'}</span></td>${SCORE_DIMS.map(([k]) => `<td>${r.scores && r.scores[k] != null ? r.scores[k] : '—'}</td>`).join('')}<td><b>${fmt(r.avg)}</b></td><td class="muted">${esc(r.comment || '')}</td></tr>`;
+      }).join('')}</tbody></table></div>`;
+    }
+    function renderScenarioRadar(rows) {
+      const dims = SCORE_DIMS.map(d => d[0]);
+      const labels = SCORE_DIMS.map(d => d[1].split(' ')[0]);
+      const avgOf = (arr, k) => arr.length ? arr.reduce((a, b) => a + (b.scores && b.scores[k] != null ? b.scores[k] : 0), 0) / arr.length : null;
+      const manual = (rows || []).filter(r => r.mode !== 'llm');
+      const llm = (rows || []).filter(r => r.mode === 'llm');
+      const box = $('scenarioRadar');
+      if (!manual.length && !llm.length) { box.style.display = 'none'; return; }
+      box.style.display = 'block';
+      const chart = chartAt('scenarioRadar');
+      if (!chart) return;
+      chart.setOption({
+        tooltip: {}, textStyle: { color: '#10142e' }, color: ['#ec4899', '#6366f1'],
+        legend: { data: ['人工', '机器分'], top: 0, textStyle: { color: '#667085', fontSize: 11 } },
+        radar: {
+          indicator: dims.map((d, i) => ({ name: labels[i], max: 5 })),
+          radius: '62%', axisName: { color: '#667085' },
+          splitLine: { lineStyle: { color: 'rgba(99,102,241,.14)' } },
+          axisLine: { lineStyle: { color: 'rgba(99,102,241,.18)' } },
+          splitArea: { areaStyle: { color: ['rgba(99,102,241,.025)', 'rgba(99,102,241,.055)'] } },
+        },
+        series: [{ type: 'radar', data: [
+          { value: dims.map(k => avgOf(manual, k)), name: '人工', areaStyle: { opacity: .12 } },
+          { value: dims.map(k => avgOf(llm, k)), name: '机器分', areaStyle: { opacity: .12 } },
+        ] }],
+      });
     }
 
-    async function loadReview() {
-      const q = await api('/api/review/queue?limit=50');
-      const reviewed = q.reviewed || 0;
-      $('review-progress').innerHTML =
-        `<div class="card"><b>评分进度</b>：${reviewed} / 300 条（满 300 解锁 V13 置信度校准）<br>
-         <span class="muted">队列剩余 ${q.items.length} 条（create/reject 优先，已自动排除测试数据）</span></div>`;
-      if (!q.items.length) { $('review-list').innerHTML = '<div class="muted">队列已清空（或暂无 create/reject 轨迹）</div>'; return; }
-      $('review-list').innerHTML = q.items.map(r => `
-        <div class="card" style="margin:8px 0">
-          <div><b>#${r.id}</b> [${r.action}] conf ${r.confidence ?? '-'} · ${r.ts || ''}</div>
-          <div style="margin:4px 0">${escapeHtml(r.content || '')}</div>
-          <div class="muted">${escapeHtml(r.reasoning || '')}</div>
-          <div style="margin-top:6px">
-            ${REVIEW_DIMS.map(([k, label]) => `<span class="muted">${label}</span>`).join(' ')}
-            <br>${scoreRow(r.id, r.action)}
-            <button onclick="submitReview(${r.id})">提交</button>
-            <span id="rv-msg-${r.id}" class="muted"></span>
-          </div>
-        </div>`).join('');
+    // ---------- 系统与数据 ----------
+    async function runTool(name, extra) {
+      try {
+        const r = await api('/api/tools', { method: 'POST', body: JSON.stringify(Object.assign({ name, confirm: false }, extra || {})) });
+        toast('执行完成：' + JSON.stringify(r));
+        return r;
+      } catch (e) { toast('执行失败：' + e.message, 'err'); }
+    }
+    async function confirmTool(name, uid) {
+      const labels = {
+        'pollution-scan-apply': '应用污染扫描结果',
+        'conflict-scan-apply': '应用冲突扫描结果',
+        'calendar-check-apply': '应用日历检查结果',
+        'memory-clear-user': '清空用户 ' + (uid || '') + ' 的全部记忆',
+      };
+      if (!window.confirm('确认执行高危操作：' + (labels[name] || name) + '？\n该操作会写入审计日志。')) return;
+      if (name === 'memory-clear-user' && !uid) { toast('请先输入 uid', 'err'); return; }
+      try {
+        const r = await api('/api/tools', { method: 'POST', body: JSON.stringify({ name, confirm: true, uid: uid || '', scope: '' }) });
+        toast('执行完成：' + JSON.stringify(r));
+        if (name === 'memory-clear-user') $('clearUid').value = '';
+      } catch (e) { toast('执行失败：' + e.message, 'err'); }
+    }
+    async function renderSystem() {
+      const [health, status, tasks] = await Promise.allSettled([api('/api/health'), api('/api/status'), api('/api/tasks')]);
+      const st = status.status === 'fulfilled' ? status.value : {};
+      const healthy = health.status === 'fulfilled';
+      $('healthBadge').textContent = healthy ? '正常' : '异常';
+      $('healthBadge').className = 'badge ' + (healthy ? 'green' : 'red');
+      const uptime = Number(st.uptime_seconds || 0);
+      const d = Math.floor(uptime / 86400), h = Math.floor(uptime % 86400 / 3600), m = Math.floor(uptime % 3600 / 60);
+      $('systemStatus').innerHTML = [
+        statCard('健康检查', healthy ? 'ok' : 'fail', 'GET /api/health', healthy ? 'rgba(16,185,129,.1)' : 'rgba(239,68,68,.1)', healthy ? 'linear-gradient(90deg,#10b981,#06b6d4)' : 'linear-gradient(90deg,#ef4444,#f59e0b)'),
+        statCard('Schema 版本', st.schema_version, '数据库结构', 'rgba(99,102,241,.1)'),
+        statCard('数据库大小', (Number(st.db_size || 0) / 1048576).toFixed(2) + ' MB', 'SQLite 文件', 'rgba(168,85,247,.1)'),
+        statCard('运行时长', d ? d + '天 ' + h + '时' : h + '时 ' + m + '分', st.started_at || '', 'rgba(6,182,212,.1)'),
+        statCard('运行中任务', st.tasks_running, '并发上限 2', 'rgba(245,158,11,.1)'),
+        statCard('鉴权模式', st.auth_enabled ? '已启用' : '本机模式', st.auth_enabled ? 'YUNO_WEB_TOKEN 已配置' : '公网暴露请启用', st.auth_enabled ? 'rgba(245,158,11,.1)' : 'rgba(16,185,129,.1)'),
+      ].join('');
+      $('authModeBadge').textContent = st.auth_enabled ? '已启用鉴权' : '本机模式';
+      $('authModeBadge').className = 'badge ' + (st.auth_enabled ? 'amber' : 'green');
+      $('sessionInfo').value = store.role ? ('已登录 · 角色 ' + store.role) : (st.auth_enabled ? '未登录（当前接口可能需要登录）' : '未登录 / 无鉴权模式');
+      if (tasks.status === 'fulfilled') {
+        updateTaskPill(tasks.value);
+        const rows = tasks.value.slice().sort((a, b) => b.ts - a.ts).slice(0, 20);
+        $('systemTasks').innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>任务 ID</th><th>类型</th><th>状态</th><th>开始时间</th><th>耗时</th></tr></thead><tbody>${rows.map(t => {
+          const stBadge = t.status === 'running' ? '<span class="badge amber">运行中</span>' : (t.status === 'done' ? '<span class="badge green">完成</span>' : '<span class="badge red">失败</span>');
+          const took = t.finished_ts ? Math.round(t.finished_ts - t.ts) + 's' : '—';
+          return `<tr><td><b>${esc(t.id)}</b></td><td>${esc(t.kind)}</td><td>${stBadge}</td><td>${new Date(t.ts * 1000).toLocaleString()}</td><td>${took}</td></tr>`;
+        }).join('')}</tbody></table></div>` : '<div class="empty">暂无任务记录</div>';
+      }
+      markSync(true);
+    }
+    async function downloadDump() {
+      try {
+        toast('正在导出全量数据…');
+        const data = await api('/api/data/dump');
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'yuno_dump_' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.json';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+        toast('导出完成');
+      } catch (e) { toast('导出失败：' + e.message, 'err'); }
+    }
+    let importPayload = null;
+    function previewImport(input) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          importPayload = JSON.parse(reader.result);
+          const tables = Object.keys(importPayload || {});
+          const rows = tables.map(t => `${t}: ${Array.isArray(importPayload[t]) ? importPayload[t].length : 1}`).join(' · ');
+          $('importPreview').innerHTML = `<span class="badge green">文件已读取</span> ${esc(file.name)}，共 ${tables.length} 张表<br><span class="muted">${esc(rows || '空对象')}</span>`;
+          $('btnImport').disabled = false;
+        } catch (e) {
+          importPayload = null; $('btnImport').disabled = true;
+          $('importPreview').innerHTML = '<span class="red">JSON 解析失败：' + esc(e.message) + '</span>';
+        }
+      };
+      reader.readAsText(file);
+    }
+    async function doImport() {
+      if (!importPayload) { toast('请先选择导入文件', 'err'); return; }
+      if (!$('importConfirm').checked) { toast('请先勾选导入确认', 'err'); return; }
+      const btn = $('btnImport');
+      setBtnLoading(btn, true, '导入中');
+      try {
+        const r = await api('/api/data/import', { method: 'POST', body: JSON.stringify({ data: importPayload, replace: !!$('importReplace').checked, confirm: true }) });
+        toast('导入完成：' + JSON.stringify(r.counts || {}));
+        $('importConfirm').checked = false; $('importReplace').checked = false;
+        $('btnImport').disabled = true; importPayload = null;
+        $('importFile').value = ''; $('importPreview').textContent = '';
+      } catch (e) { toast('导入失败：' + e.message, 'err'); }
+      setBtnLoading(btn, false);
+    }
+    async function sendNotify() {
+      const content = $('notifyContent').value.trim();
+      if (!content) { toast('播报内容不能为空', 'err'); return; }
+      if (!$('notifyConfirm').checked) { toast('请先勾选发送确认', 'err'); return; }
+      try {
+        const r = await api('/api/ops/notify', {
+          method: 'POST',
+          body: JSON.stringify({ content, target_type: $('notifyType').value, target: $('notifyTarget').value.trim(), confirm: true }),
+        });
+        toast('播报已发送：' + JSON.stringify(r.result || {}));
+        $('notifyContent').value = ''; $('notifyConfirm').checked = false;
+      } catch (e) { toast('播报失败：' + e.message, 'err'); }
     }
 
-    function escapeHtml(s) {
-      return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    // ---------- Excel 导出 ----------
+    async function downloadExcel() {
+      if (typeof XLSX === 'undefined') { toast('SheetJS 未加载（CDN 可能被墙），无法生成 Excel', 'err'); return; }
+      try {
+        const [d, h, diag, c] = await Promise.all([
+          api('/api/dashboard'), api('/api/history'), api('/api/diagnostics'), api('/api/counters'),
+        ]);
+        const wb = XLSX.utils.book_new();
+        const b = d.baselines || {};
+        const dash = [['指标', '值'],
+          ['记忆条数', d.memory_counts.memories], ['事件', d.memory_counts.events], ['属性', d.memory_counts.attrs],
+          ['情绪日志(7天)', d.emotion_log_count],
+          ['检索 recall@5', b.memory_eval && b.memory_eval.recall_at_k], ['检索 MRR', b.memory_eval && b.memory_eval.mrr],
+          ['空间 where_acc', b.space_eval && b.space_eval.where_accuracy && b.space_eval.where_accuracy.accuracy],
+          ['时间 window_recall', b.time_eval && b.time_eval.window_recall && b.time_eval.window_recall.recall],
+          ['情绪 accuracy', b.emotion_eval && b.emotion_eval.accuracy], ['情绪 VAD MAE', b.emotion_eval && b.emotion_eval.vad_mae]];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dash), '总览');
+        const hdr = ['时间', '类型', 'recall', 'mrr', 'ndcg', 'where_acc', 'where_recall', 'avg_steps', 'window_recall', 'timeline_rate', 'date_acc', 'emotion_acc', 'vad_mae'];
+        const rows = [hdr];
+        h.slice().sort((a, b2) => String(a.ts).localeCompare(String(b2.ts))).forEach(x => {
+          const m = x.metrics || {};
+          rows.push([x.ts, x.kind, m.recall, m.mrr, m.ndcg, m.where_acc, m.where_recall, m.avg_steps, m.window_recall, m.timeline_rate, m.date_acc, m.accuracy, m.vad_mae]);
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), '历史趋势');
+        const dg = diag.data_counts || {}, rv = diag.review || {}, pr = diag.procedures || {};
+        const diagRows = [['项', '值'], ['probes', dg.probes], ['query_log', dg.query_log], ['item_events', dg.item_events],
+          ['explicit 事件', dg.explicit_events], ['trace', dg.trace], ['feedback', dg.feedback], ['procedures', dg.procedures],
+          ['人工评分', rv.n], ['总分均值', rv.avg_total], ['extraction', rv.avg_extraction], ['decision', rv.avg_decision],
+          ['confidence', rv.avg_confidence], ['provenance', rv.avg_provenance], ['privacy', rv.avg_privacy],
+          ['程序记忆数', pr.count], ['System1 就绪', pr.system1_ready], ['平均成功率', pr.avg_success]];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(diagRows), '数据诊断');
+        const cRows = [['key', 'value']];
+        Object.keys(c).sort().forEach(k => cRows.push([k, c[k]]));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cRows), '计数器');
+        XLSX.writeFile(wb, 'yuno_baseline_' + new Date().toISOString().slice(0, 10) + '.xlsx');
+        toast('Excel 已导出');
+      } catch (e) { toast('导出失败：' + e.message, 'err'); }
     }
-    loadDash().catch(e => $('dash-cards').innerHTML = '<div class="red">加载失败：' + e.message + '</div>');
-    setInterval(() => { if (!document.hidden) loadDash().catch(() => {}); }, 15000);
+
+    // ---------- 初始化 ----------
+    function bindEvents() {
+      document.querySelectorAll('[data-task]').forEach(btn => {
+        btn.addEventListener('click', () => startTask(btn.dataset.task, btn.dataset.label));
+      });
+      document.querySelectorAll('#reviewSeg button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#reviewSeg button').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          store.reviewSource = btn.dataset.source;
+          loadReview().catch(e => toast(e.message, 'err'));
+        });
+      });
+      $('cogRun').addEventListener('click', runCognitive);
+      $('cogQuery').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runCognitive(); });
+      $('btnReplay').addEventListener('click', replayScenario);
+      $('btn-ablation').addEventListener('click', runAblation);
+      $('authBtn').addEventListener('click', openLogin);
+      $('sysLoginBtn').addEventListener('click', openLogin);
+      $('loginSubmit').addEventListener('click', login);
+      $('loginPassword').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+      $('loginModal').addEventListener('click', e => { if (e.target === $('loginModal')) closeLogin(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLogin(); });
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && store.activePage === 'dash') loadDash().catch(() => {});
+      });
+      window.addEventListener('resize', () => {
+        store.chartDoms.forEach(dom => { try { const inst = echarts.getInstanceByDom(dom); if (inst) inst.resize(); } catch (_) {} });
+      });
+      window.addEventListener('beforeunload', () => {
+        store.chartDoms.forEach(dom => { try { const inst = echarts.getInstanceByDom(dom); if (inst) inst.dispose(); } catch (_) {} });
+      });
+    }
+    async function boot() {
+      buildNav();
+      bindEvents();
+      setSideAuth();
+      const hash = location.hash.replace('#', '');
+      if (hash && document.getElementById('page-' + hash)) store.activePage = hash;
+      switchPage(store.activePage);
+      if (store.activePage !== 'dash') loadDash().catch(e => { markSync(false); toast('总览加载失败：' + e.message, 'err'); });
+      refreshTasks().catch(() => {});
+      setInterval(() => { if (!document.hidden && store.activePage !== 'dash') refreshTasks().catch(() => {}); }, 60000);
+    }
+    boot();
   </script>
 </body>
 </html>

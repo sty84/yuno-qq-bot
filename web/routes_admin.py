@@ -1,6 +1,7 @@
 """数据导出/导入/运维/健康等管理接口。"""
 
 import json
+import os
 import pathlib
 import time
 
@@ -13,6 +14,7 @@ from web.auth import require_role
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STATIC_DIR = ROOT / "static"
+STARTED_AT = time.time()
 
 
 class DataImportRequest(BaseModel):
@@ -55,6 +57,9 @@ def register(app, state):
             "last_grow": _db.kv_get("memory", "last_grow_report"),
             "tasks_running": sum(1 for t in state.tasks.values() if t.get("status") == "running"),
             "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "started_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(STARTED_AT)),
+            "uptime_seconds": round(time.time() - STARTED_AT, 1),
+            "auth_enabled": bool(os.getenv("YUNO_WEB_TOKEN")),
         }
 
     @app.get("/api/public/stats")
@@ -67,6 +72,8 @@ def register(app, state):
             "trace_count": state.count("memory_trace"),
             "today_cost": state.cost_summary_today(),
             "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "started_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(STARTED_AT)),
+            "uptime_seconds": round(time.time() - STARTED_AT, 1),
         }
 
     @app.get("/api/counters")

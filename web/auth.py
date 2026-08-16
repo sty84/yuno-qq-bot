@@ -31,8 +31,15 @@ def install_auth(app, state):
     if web_token:
         @app.middleware("http")
         async def _require_web_token(request: Request, call_next):
-            # 公开统计接口与公开页不鉴权，供只读展示页使用
-            if request.url.path.startswith("/api/public/") or request.url.path == "/public" or request.url.path == "/api/auth/login":
+            # 公开统计接口与公开页不鉴权，供只读展示页使用；
+            # 根页面与静态资源也放行，让管理台能先渲染登录框，敏感数据接口仍全部受保护。
+            if (
+                request.url.path.startswith("/api/public/")
+                or request.url.path == "/public"
+                or request.url.path == "/api/auth/login"
+                or request.url.path == "/"
+                or request.url.path.startswith("/static/")
+            ):
                 return await call_next(request)
             # 基础 CSRF：非 GET 请求若带 Origin，必须与 Host 一致
             if request.method not in ("GET", "HEAD", "OPTIONS"):
