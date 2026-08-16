@@ -15,3 +15,13 @@ def test_gate_eval_set():
         if blocked != should_block:
             failed.append((i, reply, got, should_block))
     assert not failed, failed
+
+
+def test_gate_eval_evaluate():
+    """覆盖 memory.gate_eval.evaluate() 聚合路径。"""
+    from memory.gate_eval import evaluate
+    res = evaluate()
+    assert res["total"] == len(CASES)
+    assert res["passed"] == len(CASES)
+    assert res["accuracy"] == 1.0
+    assert res["errors"] == []

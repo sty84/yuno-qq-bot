@@ -306,3 +306,220 @@ def test_active_edit_not_direct_core():
     assert len(rows) == 1
     # 非稳定事实不应直接进 core，应落为 long，等待 promote_core 安全升级
     assert rows[0]["mclass"] == "long", rows[0]
+
+
+def test_vecindex_cosine_and_kmeans():
+    _db, _shared = _setup("yuno_vec_")
+    from memory import vecindex
+    assert vecindex._cosine([1, 0], [0, 1]) == 0.0
+    assert abs(vecindex._cosine([1, 1], [1, 1]) - 1.0) < 1e-6
+    centroids = vecindex._kmeans([[1, 0], [0, 1], [1, 1]], nlist=2)
+    assert len(centroids) == 2
+
+
+def test_world_snapshot_and_subject_gate():
+    _db, _shared = _setup("yuno_world_")
+    from memory import world
+    _db.memory_add("c2c:w", "", "用户喜欢猫", "2026-01-01T00:00:00", None, 0.7, "user")
+    snap = world.snapshot("c2c:w")
+    assert isinstance(snap, str)
+    assert "用户喜欢猫" in snap
+    assert world.subject_gate("c2c:w", "", "用户喜欢猫") is False  # c2c 私聊不传播
+    assert world.subject_confidence("experienced") == 0.9
+    stats = world.stats()
+    assert stats["active"] >= 1
+
+
+def test_sensors_flow():
+    _db, _shared = _setup("yuno_sensors_")
+    from memory import sensors
+    ok = sensors.set_device("客厅灯", "开")
+    assert ok["ok"] is True
+    assert sensors.device_state("客厅灯")["state"] == "开"
+    ev = sensors.sensor_event("门铃", "ring", "门铃响了")
+    assert ev["kind"] == "ring"
+    assert len(sensors.recent_events(seconds=3600)) >= 1
+    block = sensors.block("客厅")
+    assert isinstance(block, str)
+
+
+def test_tools_eval_commands():
+    _db, _shared = _setup("yuno_evalcmd_")
+    from tools.eval import cmd_evidence_gate_eval, cmd_memory_eval
+    res = cmd_evidence_gate_eval()
+    assert '"total": 50' in res
+
+    probes = [{"query": "煤球是什么猫", "expected": ["用户养了一只叫煤球的橘猫"], "scope": "c2c:evalcmd", "category": "偏好"}]
+    _db.memory_add("c2c:evalcmd", "", "用户养了一只叫煤球的橘猫", "2026-01-01T00:00:00", None, 0.8, "user")
+    import pathlib as _p
+    p = _p.Path(tempfile.mkdtemp()) / "probes.json"
+    p.write_text(json.dumps(probes, ensure_ascii=False), encoding="utf-8")
+    res2 = cmd_memory_eval(str(p), k=5, save=False)
+    assert '"recall_at_k": 1.0' in res2
+
+
+def test_trace_review_and_render():
+    _db, _shared = _setup("yuno_trace_")
+    from memory import trace
+    trace._dedup_cache.clear()
+    trace.record("c2c:trace", raw_content="用户说月底有演出", action="create", reasoning="test")
+    rows = _db.trace_rows(scope="c2c:trace", limit=10)  # type: ignore[attr-defined]
+    assert rows
+    tid = rows[0]["id"]
+    res = trace.score(tid, {"extraction": 5, "decision": 5, "confidence": 5, "provenance": 5, "privacy": 5}, reviewer="test")
+    assert "已记录评分" in res
+    md = trace.render_markdown(rows, {tid: {"score": 5}})
+    assert isinstance(md, str)
+    assert isinstance(trace.detect_modules("ai", "belief", "目标：写歌"), list)
+    assert isinstance(trace.prune(days=30), int)
+    adj = trace.adjustments(force=True)
+    assert isinstance(adj, dict)
+
+
+def test_character_markdown_flow():
+    _db, _shared = _setup("yuno_char_")
+    from memory import character
+    md = "# 测试角色\n\n## 经历\n- 曾经是鼓手\n"
+    parsed = character.parse_markdown(md)
+    assert isinstance(parsed, dict)
+    out = character.render_markdown("测试角色", parsed)
+    assert "测试角色" in out
+    p = character.write_markdown("测试角色", parsed, out_dir=tempfile.mkdtemp())
+    assert p.exists()
+    synced = character.sync_from_markdown(name="测试角色", path=str(p))
+    assert synced.get("name") == "测试角色"
+    assert isinstance(character.search("测试"), list)
+    assert isinstance(character.match_scopes("测试角色"), list)
+
+
+def test_mistake_flow():
+    _db, _shared = _setup("yuno_mist_")
+    from datetime import datetime
+    from memory import mistake
+    rec = mistake.record("c2c:mist", "我记错了，是明天", now=datetime.now())
+    assert rec.get("recorded") == 1
+    assert isinstance(mistake.anger_of(rec, datetime.now()), dict)
+    assert isinstance(mistake.forgive_probability(rec, "c2c:mist", now=datetime.now()), float)
+    ctx = mistake.context_block("c2c:mist", "对不起")
+    assert isinstance(ctx, str)
+
+
+def test_expression_flow():
+    _db, _shared = _setup("yuno_expr_")
+    from memory import expression
+    assert isinstance(expression.detect_expressions("笑死我了"), list)
+    an = expression.analyze("笑死我了")
+    assert isinstance(an, dict)
+    upd = expression.profile_update("c2c:expr", "笑死我了")
+    assert isinstance(upd, dict)
+    assert isinstance(expression.profile_get("c2c:expr"), dict)
+    assert isinstance(expression.describe("c2c:expr"), str)
+
+
+def test_scenario_replay_offline():
+    _db, _shared = _setup("yuno_scen_")
+    import pathlib as _p
+    scenarios = [{"id": "s1", "scope": "c2c:scen", "messages": [{"user": "你好"}], "expected": []}]
+    p = _p.Path(tempfile.mkdtemp()) / "scenarios.json"
+    p.write_text(json.dumps(scenarios, ensure_ascii=False), encoding="utf-8")
+    _shared.ask_deepseek = lambda *a, **k: "……嗯。"
+    from tools.core import scenario_replay
+    res = scenario_replay(path=str(p))
+    assert res["replayed"] == 1
+    assert res["scenarios"][0]["replies"][0]["ai"] == "……嗯。"
+
+
+def test_tools_admin_config_validate():
+    _db, _shared = _setup("yuno_adm_")
+    from tools.admin import cmd_config_validate
+    code, text = cmd_config_validate()
+    assert code in (0, 1)
+    assert isinstance(text, str)
+
+
+def test_embedder_none_mode():
+    _db, _shared = _setup("yuno_emb_")
+    from memory import embedder
+    assert embedder.enabled() is False
+    assert embedder.embed(["你好"]) is None
+    assert embedder.cosine([1, 0], [0, 1]) == 0.0
+
+
+def test_revive_flow():
+    _db, _shared = _setup("yuno_rev_")
+    import time as _time
+    from memory import revive
+    assert isinstance(revive.poisson_p(None), float)
+    assert revive.poisson_p(_time.time()) < 1.0
+    assert isinstance(revive.state_posterior("c2c:rev"), dict)
+    assert isinstance(revive.peek("c2c:rev"), dict)
+    assert isinstance(revive.decide("c2c:rev", force=True), dict)
+
+
+def test_interaction_modulate():
+    _db, _shared = _setup("yuno_inter_")
+    from memory import interaction
+    assert isinstance(interaction.scene_mult("chat", "c2c"), float)
+    assert isinstance(interaction.relation_mult("c2c:inter"), float)
+    assert isinstance(interaction.user_mult("c2c:inter"), dict)
+    assert isinstance(interaction.fatigue_mult("chat"), float)
+    interaction.mark_event("chat")
+    assert isinstance(interaction.modulate("c2c:inter", "chat", base=1.0), float)
+
+
+def test_tools_admin_dump_json():
+    _db, _shared = _setup("yuno_dump_")
+    from tools.admin import cmd_data_dump_json
+    out = os.path.join(tempfile.mkdtemp(), "dump.json")
+    res = cmd_data_dump_json(out)
+    assert os.path.exists(out)
+    assert "已导出" in res
+
+
+def test_relationship_update_describe():
+    _db, _shared = _setup("yuno_rel_")
+    from memory import relationship
+    row = relationship.update("c2c:rel", subject="用户", event="chat")
+    assert row and row["scope"] == "c2c:rel"
+    assert isinstance(relationship.describe("c2c:rel"), str)
+    assert isinstance(relationship.rows(), list)
+    assert relationship.note_return("c2c:rel") in (True, False)
+
+
+def test_tools_memory_probes():
+    _db, _shared = _setup("yuno_probes_")
+    from tools.memory import cmd_memory_probes
+    _db.query_log_add("白巧克力放在哪", ["c2c:probe"], 5, ["白巧克力"])
+    out = os.path.join(tempfile.mkdtemp(), "probes.json")
+    res = cmd_memory_probes(limit=10, out=out)
+    assert os.path.exists(out)
+    assert "已导出" in res
+
+
+def test_time_extract():
+    _db, _shared = _setup("yuno_time_")
+    from datetime import datetime
+    from memory import time_extract
+    res = time_extract.extract("明天下午三点", scope="c2c:time")
+    assert isinstance(res, dict)
+    assert isinstance(time_extract.label_for("2026-08-16T15:00:00", now=datetime(2026, 8, 16, 12, 0)), str)
+
+
+def test_tools_memory_views():
+    _db, _shared = _setup("yuno_memviews_")
+    from tools.memory import (
+        cmd_memory_history,
+        cmd_memory_sessions,
+        cmd_memory_topics,
+        cmd_persona_probes,
+        cmd_relationship,
+    )
+    _db.memory_add("c2c:mv", "", "用户喜欢猫", "2026-01-01T00:00:00", None, 0.7, "user")
+    _db.topic_add("c2c:mv", "", "偏好", "猫", importance=0.5, confidence=0.7)
+    _db.session_create("c2c:mv", "", topic="猫", summary="用户喜欢猫")
+    assert isinstance(cmd_memory_topics("c2c:mv", 10), str)
+    assert isinstance(cmd_memory_sessions("c2c:mv", 10), str)
+    assert isinstance(cmd_memory_history("c2c:mv", 10), str)
+    assert isinstance(cmd_relationship("c2c:mv"), str)
+    out = os.path.join(tempfile.mkdtemp(), "persona.json")
+    assert isinstance(cmd_persona_probes(out=out), str)

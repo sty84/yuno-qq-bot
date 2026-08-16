@@ -898,7 +898,7 @@ def relationship_upsert(scope, subject="", object="ai", trust=0.3, familiarity=0
             "familiarity=EXCLUDED.familiarity, closeness=EXCLUDED.closeness, stage=EXCLUDED.stage, "
             "history=EXCLUDED.history, updated_at=EXCLUDED.updated_at",
             (scope, str(subject), str(object), float(trust), float(familiarity), float(closeness),
-             str(stage), str(history or "[]"), updated_at or datetime.now().isoformat(timespec="seconds")),
+             str(stage), json.dumps(history or [], ensure_ascii=False), updated_at or datetime.now().isoformat(timespec="seconds")),
         )
         _maybe_commit()
         cur.close()
