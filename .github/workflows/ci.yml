@@ -34,6 +34,10 @@ jobs:
         run: |
           python tools.py persona-freshcheck --pack yuno
           python tools.py persona-freshcheck --pack office
+      - name: Eval gates (automatic baseline + regression)
+        # 每次提交跑核心评测集：证据门控 50 / 检索 50 / 情绪 61，
+        # 自动写 docs/baselines/ci_eval.json，指标退化超过阈值时失败。
+        run: python scripts/eval_ci.py
 
   test-pg:
     runs-on: ubuntu-latest

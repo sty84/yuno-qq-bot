@@ -1,0 +1,19 @@
+{
+  "seeded_facts": 52,
+  "gate": {
+    "total": 50,
+    "passed": 50,
+    "accuracy": 1.0
+  },
+  "retrieval": {
+    "probes": 50,
+    "recall_at_k": 0.8,
+    "mrr": 0.78,
+    "ndcg": 0.785
+  },
+  "emotion": {
+    "n": 61,
+    "accuracy": 0.918,
+    "vad_mae": 0.143
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "说明": "检索命中率评测集（扩充版）：原 12 条 + 时间/空间/指代 8 条",
+  "说明": "检索命中率评测集（CI 扩充版）：50 条，覆盖身份/日程/偏好/事务/空间/时间/指代/人物",
   "items": [
     {
       "query": "我是谁，在乐队里负责什么",
@@ -162,6 +162,246 @@
       ],
       "scope": "ai",
       "category": "空间"
+    },
+    {
+      "query": "我喜欢喝什么咖啡",
+      "expected": [
+        "用户喜欢喝冰美式"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "偏好"
+    },
+    {
+      "query": "我明天下午有什么安排",
+      "expected": [
+        "用户明天下午三点有面试"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "日程"
+    },
+    {
+      "query": "周末有什么安排",
+      "expected": [
+        "用户约了朋友周末吃饭"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "日程"
+    },
+    {
+      "query": "钥匙放哪了",
+      "expected": [
+        "用户把钥匙放在玄关抽屉里"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "空间"
+    },
+    {
+      "query": "新买的调音台在哪",
+      "expected": [
+        "用户新买的调音台在工作室"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "空间"
+    },
+    {
+      "query": "我怕什么",
+      "expected": [
+        "用户害怕虫子"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "偏好"
+    },
+    {
+      "query": "我一般什么时候写歌",
+      "expected": [
+        "用户喜欢在晚上写歌"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "偏好"
+    },
+    {
+      "query": "最近在练什么",
+      "expected": [
+        "用户最近在练新曲子"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "日程"
+    },
+    {
+      "query": "这周六有什么活动",
+      "expected": [
+        "用户下周六有一场排练"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "日程"
+    },
+    {
+      "query": "下个月要去哪",
+      "expected": [
+        "用户下个月要去上海出差"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "日程"
+    },
+    {
+      "query": "昨天去哪了",
+      "expected": [
+        "用户昨天去了超市"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "事务"
+    },
+    {
+      "query": "上周五去哪了",
+      "expected": [
+        "用户上周五去了乐器行"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "事务"
+    },
+    {
+      "query": "我是谁的经纪人",
+      "expected": [
+        "用户是乐队的经纪人助理"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "身份"
+    },
+    {
+      "query": "我在乐队里负责什么",
+      "expected": [
+        "用户是乐队的经纪人助理"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "身份"
+    },
+    {
+      "query": "我家猫叫什么",
+      "expected": [
+        "用户养了一只叫煤球的橘猫，上周刚接回家"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "偏好"
+    },
+    {
+      "query": "猫什么时候接回家的",
+      "expected": [
+        "用户养了一只叫煤球的橘猫，上周刚接回家"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "时间"
+    },
+    {
+      "query": "上上个月去哪了",
+      "expected": [
+        "上个月去了北京出差"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "时间"
+    },
+    {
+      "query": "这周初干了什么",
+      "expected": [
+        "上周三买了只猫"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "时间"
+    },
+    {
+      "query": "你是谁",
+      "expected": [
+        "你是千石由乃（Sengoku Yuno），梦限大"
+      ],
+      "scope": "ai",
+      "category": "身份"
+    },
+    {
+      "query": "你生日是什么时候",
+      "expected": [
+        "11月4日生，天蝎座，身高151cm，红瞳粉发"
+      ],
+      "scope": "ai",
+      "category": "身份"
+    },
+    {
+      "query": "你是什么星座",
+      "expected": [
+        "11月4日生，天蝎座，身高151cm，红瞳粉发"
+      ],
+      "scope": "ai",
+      "category": "身份"
+    },
+    {
+      "query": "你负责什么",
+      "expected": [
+        "小有人气的作曲家，团里 MV 也多半出自你手"
+      ],
+      "scope": "ai",
+      "category": "身份"
+    },
+    {
+      "query": "你住在哪",
+      "expected": [
+        "你住在北京·普通公寓"
+      ],
+      "scope": "ai",
+      "category": "身份"
+    },
+    {
+      "query": "阿拉蕾是做什么的",
+      "expected": [
+        "仲町阿拉蕾是乐队鼓手"
+      ],
+      "scope": "npc:仲町阿拉蕾",
+      "category": "人物"
+    },
+    {
+      "query": "阿拉蕾上次在哪见过伞",
+      "expected": [
+        "仲町阿拉蕾上次在排练室见过那把伞"
+      ],
+      "scope": "npc:仲町阿拉蕾",
+      "category": "人物"
+    },
+    {
+      "query": "阿拉蕾现在在哪",
+      "expected": [
+        "仲町阿拉蕾在排练室"
+      ],
+      "scope": "npc:仲町阿拉蕾",
+      "category": "空间"
+    },
+    {
+      "query": "牛奶在哪",
+      "expected": [
+        "牛奶找不到了"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "空间"
+    },
+    {
+      "query": "白巧克力在哪",
+      "expected": [
+        "用户把白巧克力放冰箱里了"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "空间"
+    },
+    {
+      "query": "演出是几号",
+      "expected": [
+        "用户月底30号周日有一场演出"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "日程"
+    },
+    {
+      "query": "31号是周几",
+      "expected": [
+        "31号是周一"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "日程"
     }
   ]
 }
