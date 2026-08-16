@@ -1,519 +1,595 @@
-# YUNO AI 2.4 —— 成长型 Agent Memory System
+# Yuno 2.5 —— 成长型 Agent 记忆系统
 
-> QQ 里聊天，App 里管理，MCP 串起所有能力。**记忆不是聊天记录，而是 AI 的长期认知。**
+Yuno 是一个把 **长期记忆、人格成长、关系建模、主动消息与可解释评测** 做成完整闭环的
+Agent 记忆系统。它以 QQ 机器人为前台，同时提供 Python SDK、FastAPI 服务和 Web 管理台。
 
-YUNO 2.2 是一个把 **AI 长期记忆 / 人格成长 / 关系系统 / 决策辅助 / 生活化世界层** 做成完整认知闭环的 QQ 机器人，
-同时把记忆系统抽成可独立接入任意 Agent 的 **Python SDK + FastAPI 服务**。
-
-当前版本：**v2.4**（在 2.0/2.1/2.2/2.3 仓库基础上迭代；功能基线 v31/v32/v33——记忆检索重排 +
-多维情绪 + 睡眠/日程/环境/分享/生活/空间/传感器世界层 + 认知层 + 对话质量评分闭环）。
-
-v2.4 相对 v2.3 的主要变化：对话质量评分闭环（convreview，评分对象从记忆轨迹升级为对话回合，
-五维：记得/自然/有情绪/主动/边界；真实对话自动记录 + 场景回放入队；管理台与 CLI 双通道评分；
-低分自动审计归因、第一版只诊断不自动调参）；CI 补齐 web 层依赖与全量语法检查，web 冒烟覆盖
-对话评分接口。详见下方「v2.4 迭代重点」。
-
-v2.3 相对 v2.2 的主要变化：三维情绪与议题系统打通（VAD 存储/质心聚合/心境一致性检索/情绪底色
-注入/评测探针/单一事实源 + 旧议题回填与慢通道桥接）；情绪调制遗忘（arousal 缩放半衰期）与双速
-情绪（快窗口 + 日级慢 EMA）；平面图几何层（房间多边形 → 面积/质心/实际路程，`floorplan-render`
-出 SVG）；事实分类子串误伤修复（强锚点 + 语境确认 + 过程标记降级，`policy-classify` 探针）；
-revive-companion 泊松触发 + 贝叶斯用户状态推断；cognitive-engine Thompson Sampling 回应策略
-bandit；评测管理台（webapp）补齐消融热插拔开关、多主体/情绪一致性详情、对话回放五维评分、
-bandit/revive 图表与分类页签。详见下方「v2.4 迭代重点」。
-
-v2.2 相对 v2.1 的主要变化：新增心智状态中枢 / 目标意图（BDI）/ 程序记忆（System 1/2）/
-单次结构化输出等认知层；物品位置历史（事件溯源）+ 激活分级找东西（静默搜索、话题暂停、
-重问续搜）；家内房间图与真实移动；空间事件进统一记忆检索（location 过滤）；队友确定性位置；
-空间评测探针与基线对比；运行计数器（tick/err）与裸 except 审计；kv 状态迁正规表；
-pytest 回归套件 + CI；日程夜晚槽合理化（22–02 在家夜生活、02–06 睡觉）与分享消息的时间/天气一致性。
-
-```mermaid
-flowchart LR
-    QQ[QQ 聊天前台 bot.py] --> AG[agent.ask 人格+记忆+LLM]
-    SDK[Python SDK / FastAPI yuno_memory] --> AG
-    EXT[其他 Agent / SDK] -->|HTTP / MCP| SDK
-    AG --> MEM[memory/ 统一记忆系统]
-    MEM --> DB[(SQLite data/bot.db)]
-    MEM --> ST[状态层: 情绪/日程/睡眠/环境/分享/生活/空间/传感器]
-```
+> 核心原则：**记忆不是聊天记录，而是可检索、可演化、可评分、可回滚的长期认知。**
 
 ---
 
-## 与 1.0 相比的变化
+## 1. 系统组成
 
-| 维度 | 1.x | 2.0 |
+| 组件 | 入口 | 说明 |
 |---|---|---|
-| 记忆 | 分场景简单事实列表 | 统一记忆认知系统：用户/AI/人物同表同格式，可信度演化、时间推理、遗忘巩固 |
-| 检索 | 关键词 LIKE | 7 路融合检索（BM25/FTS/向量/图谱/结构化/Rules/议题）+ RRF 重排 + MMR |
-| 纠错 | 无 | 调查机制：不盲从，update/keep/uncertain 三选一，历史可回滚 |
-| 人格 | 固定 prompt | 结构化人设字段（身份/性格/经历/动机）+ persona.md 单一来源 + AI 人格记忆成长分层 |
-| 关系 | 无 | AI-用户关系状态机（trust/familiarity/stage，行为证据驱动） |
-| 决策 | 无 | 一次一问的真人式顾问（结合记忆、考虑现实约束、去模板化） |
-| 世界层 | 无 | 情绪/睡眠/日程/天气/环境/分享欲/生活/空间/传感器——AI 有自己的生活节奏与作息 |
-| 管理 | 指令暴露在 QQ 聊天 | 管理迁出 QQ（MCP 能力层；App 见详细设计），QQ 只聊天 |
-| 接入 | 只能 QQ | Python SDK + FastAPI，任意 Agent 可接入同一份记忆 |
-| 工程化 | 无测试 | e2e / 负载 / 专项验收测试、记忆轨迹、五维人工评分、评测基线闭环 |
+| QQ 前台 | `bot.py` | 人格对话、自动记忆、主动消息、游戏与指令 |
+| 记忆核心 | `memory/` | 统一记忆、事件图谱、议题、情绪、睡眠、日程、空间、分享等 |
+| Agent 编排 | `agent/` | `agent.ask` 串起分析、记忆检索、人格与 LLM 回复 |
+| Python SDK | `yuno_memory/` | 任意 Agent 通过 `search / add / clear` 接入同一份记忆 |
+| Web 管理台 | `webapp.py` | 评测、评分审核、消融、成本、诊断、数据与系统运维 |
+| 运维工具 | `tools.py` | 健康检查、备份、评测、记忆治理、训练与导入导出 |
 
-## 功能一览
+## 2. 架构总览
 
-### QQ 端
+```mermaid
+flowchart LR
+    QQ[QQ 聊天前台 bot.py] --> AG[agent.ask 人格 + 记忆 + LLM 编排]
+    WEB[Web 管理台 webapp] --> AG
+    SDK[Python SDK / FastAPI yuno_memory] --> AG
+    MCP[外部 Agent / MCP] --> SDK
+    AG --> MEM[memory/ 统一记忆系统]
+    MEM --> DB[(PostgreSQL / SQLite)]
+    MEM --> STATE[情绪 / 睡眠 / 日程 / 环境 / 分享 / 空间 / 传感器]
+    MEM --> EVAL[probes 评测 / trace 评分 / conv 评分 / 消融]
+    EVAL --> WEB
+```
 
-- 人设对话（DeepSeek，慵懒毒舌角色千石由乃，自带心情、情绪状态与表达适配；人设单一来源 persona.md）
-- 自动记忆：信息增益触发提取、玩笑/临时情绪/敏感信息过滤、纠错调查
-- 决策顾问：`要不要/该不该/怎么选…` 触发一次一问的咨询流程
-- 目标管理：`/目标`、`/目标列表`、`/目标完成`
-- 人物设定：`/设定 <角色名>` 自动生成档案入记忆，并双写 `docs/characters/<名>.md`
-  供人工审阅/编辑，`tools.py character-sync <名>` 一键同步回记忆库（md 为权威来源）
-- 约定记忆（v23）：聊到「明天下午3点见」自动记录，到点你没出现会主动催你（带情绪，最多两次）
-- 错误与原谅（v23）：同类错误计数、生气度随时间衰减；涉及底线的事不道歉不松口，道歉后按关系好坏决定原谅概率
-- 生活化世界层（v31/v32）：AI 有自己的日程与作息、天气与环境感知、睡眠模式（省电/深睡）、
-  分享欲（主动发消息有分寸）、动态距离感、跨房间查看、生日与年龄
-- 游戏与播报：`/成语`、`/答题`、`/排名`、群动态播报
-- 记忆指令：`/我的记忆`、`/群记忆`、`/忘记`、`/公开`、`/我的风格`
+一条消息的完整旅程：
 
-### 记忆系统（memory/）
+```text
+用户消息
+→ expression 网络语言与表达画像
+→ analysis 意图 / 情绪 / 重要度 / 玩笑 / 纠错信号
+→ controller 信息增益、Consent、时间推理、纠错调查
+→ extract 两阶段提取（实体 / 属性 / 事实）
+→ 写入 memories + 事件图 + 议题 + 索引 + 关系证据 + 处理轨迹
+→ reasoning 七路融合检索 + RRF + 重排 + MMR
+→ context 预算分级注入
+→ LLM 生成回复
+→ after_chat 反馈学习、对话记录、主动消息候选
+→ grow / sleep 每日巩固、反思、遗忘与评测
+```
 
-统一记忆 + 7 路检索 + 贝叶斯可信度 + 时间推理 + 人脑式遗忘 + 议题化 + 事件图谱 +
-自我反思 + 世界模型 + 表达理解 + 多维情绪（VAD + Plutchik）+ 轨迹评分闭环。
-详见 [memory/README.md](memory/README.md)。
+## 3. 数据模型与 ER 图
 
-### SDK / HTTP（yuno_memory/）
+生产环境默认使用 **PostgreSQL**；测试与轻量部署可切 SQLite。数据库不依赖物理外键，
+关系由 `memory/` 层在事务内维护，索引表由 `memory-grow` 重建。
 
-任意 Python 程序或 Agent 接入同一套记忆：pip 可安装包 + FastAPI 服务 + 统一
-`memory.search / add / clear` 接口，供外部 Agent 读写同一份记忆库。
+```mermaid
+erDiagram
+    SCOPE_META ||--o{ MEMORIES : "scopes"
+    MEMORIES ||--o| MEMORY_META : "scope+key+fact"
+    MEMORIES ||--o{ MEMORY_ATTRS : "结构化属性"
+    MEMORIES ||--o{ MEMORY_HISTORY : "变更审计"
+    MEMORIES ||--o{ EVENTS : "memory_scope+key+fact"
 
-### MCP（tools.py mcp）
+    TOPICS ||--o{ TOPIC_PARAMS : "议题参数"
+    EVENTS ||--o{ EVENT_RELATIONS : "src/dst 图关系"
+    ENTITIES ||--o{ ENTITY_ALIASES : "别名"
+    ENTITIES ||--o{ ENTITY_EVENTS : "实体-事件"
+    EVENTS ||--o{ ENTITY_EVENTS : "事件-实体"
 
-服务管理、配置、审计、记忆读写、播报能力封装为 MCP 工具，供管理端 / 外部 Agent 调用；
-人设单一来源为 `persona.md`（Persona Pack），不随外部工具分发。
+    SESSIONS ||--o{ GOALS : "场景会话"
+    SESSIONS ||--o{ CONSULTATIONS : "决策咨询"
+    SCOPE_META ||--o{ RELATIONSHIPS : "关系状态"
+    SCOPE_META ||--o{ USER_EXPRESSION_PROFILE : "表达画像"
 
-## 新增功能介绍
+    MEMORY_TRACE ||--o| TRACE_REVIEW : "五维评分"
+    CONV_LOG ||--o| CONV_REVIEW : "对话五维评分"
+    QUERY_LOG }o--|| MEMORIES : "hits"
+    FEEDBACK_LOG }o--|| MEMORIES : "反馈证据"
+    PROCEDURES }o--|| MEMORIES : "程序记忆"
+    LLM_COST }o--|| MEMORIES : "调用归因"
 
-### v2.2 迭代重点
+    MEMORIES {
+        string scope PK
+        string key PK
+        string fact PK
+        float confidence
+        string source
+        string audience
+        string mclass
+        float privacy
+        float arousal
+        float valence
+        string valid_from
+        string valid_to
+        string status
+        string embedding
+    }
+    MEMORY_META {
+        string scope PK
+        string key PK
+        string fact PK
+        int access_count
+        float importance
+        string last_access
+    }
+    MEMORY_ATTRS {
+        string scope PK
+        string key PK
+        string attr PK
+        string value PK
+        float confidence
+    }
+    EVENTS {
+        int id PK
+        string scope
+        string etype
+        string title
+        string content
+        string ts
+        string ts_source
+        string memory_scope
+        string memory_key
+        string memory_fact
+    }
+    EVENT_RELATIONS {
+        int id PK
+        int src
+        int dst
+        string rel
+        float weight
+    }
+    ENTITIES {
+        int id PK
+        string scope
+        string key
+        string canonical
+    }
+    TOPICS {
+        int id PK
+        string scope
+        string category
+        string topic
+        float importance
+        float confidence
+        string status
+    }
+    TOPIC_PARAMS {
+        int topic_id PK
+        string param PK
+        string value PK
+        float confidence
+    }
+    SESSIONS {
+        int id PK
+        string scope
+        string topic
+        int message_count
+        string summary
+    }
+    RELATIONSHIPS {
+        string scope PK
+        float trust
+        float familiarity
+        float closeness
+        string stage
+    }
+    MEMORY_TRACE {
+        int id PK
+        string scope
+        string raw_content
+        string memory_action
+        float confidence
+        string reasoning
+    }
+    TRACE_REVIEW {
+        int trace_id
+        float score
+        string scores
+        string reviewer
+    }
+    CONV_LOG {
+        int id PK
+        string conversation_id
+        string scope
+        string user_text
+        string ai_text
+    }
+    CONV_REVIEW {
+        int conv_id
+        float score
+        string scores
+        string reviewer
+    }
+    QUERY_LOG {
+        int id PK
+        string query
+        string scopes
+        string hits
+        int exported
+    }
+    FEEDBACK_LOG {
+        int id PK
+        string scope
+        string kind
+        string fact
+        string source
+        float weight
+    }
+    PROCEDURES {
+        string situation PK
+        string action PK
+        float success
+        int tries
+    }
+    LLM_COST {
+        int id PK
+        string module
+        string detail
+        int prompt_tokens
+        int completion_tokens
+    }
+    SCOPE_META {
+        string scope PK
+        string kind
+        string agent_id
+        int enabled
+    }
+```
 
-- **认知层**：心智状态中枢（situation/情绪/目标/意图/命中的记忆/候选动作统一快照）、
-  目标强度 = 人设价值权重 × 优先级、BDI 式当前意图、程序记忆（情境→动作→成功率，
-  System 1 命中直接复用省一次 LLM 调用）、单次结构化输出（`mind.cognitive_turn`，JSON
-  解析失败自动回退普通路径）、人设价值函数化（`persona_weights`）、时间感知回忆
-  （口语时间 → 事件元数据 ts_source，检索窗口提升/软惩罚，注入时间标签，`time-eval` 探针）。
-- **空间与物品**：物品事件溯源 + `position_at`；"X 在哪"按激活值分级（直接答/模糊答/逐处搜索），
-  静默搜索只报结果、话题转移自动暂停、重问续搜不重启；家内房间图（邻接/门/灯）与真实移动；
-  空间事件写 `ai:episodic`（BM25 + 向量即时索引，检索支持 location 过滤）；队友确定性周表；
-  `tools.py space-eval --save/--compare` 评测与基线对比。
-- **工程化**：六个 kv 状态迁正规表（space_state / item_activation / item_search /
-  mind_intention / space_events / ai_actions，旧数据自动迁移）；内存缓冲运行计数器
-  （tick 各模块运行次数 / err 异常审计 / LLM 调用统计）；`tools.py mind-status` /
-  `procedures-list` / `living-bootstrap`；pytest 回归套件 + GitHub Actions CI；v29 路径参数化。
-- **行为一致性**：搜索停摆 bug 修复；日程夜晚槽只在家（22–02 夜生活、02–06 睡觉，
-  旧的不合理周计划自动重生成）；主动分享消息的时间/天气硬约束（素材没有就不许提）；
-  `repair_spatial` 扩展（数量/状态一致性、同名多容器、容量检查）。
-- **代码审计**：246 处裸 except 全部换成 `err:<模块>` 计数 + 日志，异常可观测、可消融。
+### 状态与索引 ER
 
-### v2.4 迭代重点（最近一轮）
+以下状态表与派生索引由 `memory-grow`、生活/空间层和主动消息层维护：
 
-- **对话质量评分闭环（convreview，北极星落地）**：
-  - 评分对象从"记忆处理轨迹"升级为"对话回合"（用户消息 + AI 回复），直接回答"这个 bot 活不活"；
-  - 五维：**记得**（引用历史不穿帮）/ **自然**（像人话不机械）/ **有情绪**（情绪连贯）/
-    **主动**（会主动分享/推进）/ **边界**（不乱编不泄密），每维 1~5；
-  - 数据源双通道：真实对话 `after_chat` 自动记录进 `conv_log` + `scenario-eval --review-export`
-    把场景回放对话写入同一队列；
-  - 管理台：`/api/review/queue?source=conv` 待评队列 + `/api/convreview/submit` 提交；
-    CLI：`memory-conv-md`（导出报告）/ `memory-conv-review <id> --remember 4 …`（评分）/
-    `memory-conv-report`（维度均值 + 低分归因）；
-  - 低分自动写审计 + 归因提示（如"记得低 → 查 query_log 样本 + 缺口守卫触发率"）；
-  - **第一版只诊断、不自动调参**（`conv_report.auto_adjust=false`），攒够人工评分再决定
-    哪些维度接入自动调整——与 trace 五维（驱动 confidence_factor 等参数）明确区分。
-- **工程化**：CI 补 web 层依赖（fastapi/httpx/uvicorn/jieba）与全量语法检查
-  （`git ls-files '*.py'`，修复前只查 7 个文件、web 层零覆盖）；web 冒烟新增对话评分接口用例。
+```mermaid
+erDiagram
+    SPACE_STATE {
+        int id PK
+        string scope
+        string position
+        string updated_at
+    }
+    SPACE_EVENTS_STATE {
+        int id PK
+        string scope
+        string event
+        string ts
+    }
+    ITEM_EVENTS {
+        int id PK
+        string item
+        string action
+        string ts
+    }
+    ITEM_ACTIVATION_STATE {
+        string item PK
+        int activation
+        string updated_at
+    }
+    ITEM_SEARCH_STATE {
+        string scope PK
+        string query
+        int step
+        string status
+    }
+    MIND_INTENTION_STATE {
+        string scope PK
+        string goal
+        string intention
+        string updated_at
+    }
+    HESITATION_LOG {
+        int id PK
+        string kind
+        string action
+        float delay_s
+        string reason
+    }
+    NOTIFICATIONS {
+        int id PK
+        string target
+        string content
+        string scheduled_at
+        string status
+    }
+    KV {
+        string namespace PK
+        string key PK
+        string value
+    }
+    AUDIT {
+        int id PK
+        string action
+        string target
+        string detail
+        string operator
+    }
+    BM25_TERMS {
+        string term PK
+        string scope PK
+        string key PK
+        string fact PK
+    }
+    BM25_DOCS {
+        string scope PK
+        string key PK
+        string fact PK
+    }
+    VEC_INDEX {
+        int id PK
+        string scope
+        string key
+        string fact
+    }
+    VEC_CENTROIDS {
+        int id PK
+        string vector
+    }
+    VEC_PG {
+        string scope PK
+        string key PK
+        string fact PK
+    }
+```
 
-### v2.3 迭代重点
+索引与状态派生表：
 
-- **情绪 ↔ 议题打通（三维情绪真正参与记忆）**：
-  - 存储：`topic.link_fact` 在 mood 标签之外并行写 `vad` 向量与 `compound` 复合情绪参数
-    （analysis 结果里本来就带着 VAD，之前只存了标签）；旧议题可用 `tools.py topic-vad-backfill`
-    或随 `memory-grow` 自动回填近似向量。
-  - 聚合：议题情绪从"标签集合"升级为 VAD 加权质心（时间衰减 + 位置加权，`mood_centroid`），
-    带趋势（近两周转开心/低落）与复合底色。
-  - 检索：心境一致性加权（用户情绪 VAD × 议题质心距离 → `mood_boost` 乘数）；语义检索弱时
-    用情绪做二级检索键（情绪寻址复核）；快状态 × 日级慢 EMA 合成检索情绪（`blended_estimate`）。
-  - 注入：`_topic_block` 升级为"情绪底色：低落（偏无力）→ 近两周转开心；复合底色：哭笑不得"。
-  - 评测：`emotion-eval` 新增 `topic_mood` 段（写入一致性 / 质心合理性 / 复合不坍缩 / 跨表 VAD 漂移）。
-  - 统一事实源：`LABEL_VAD` 从 `analysis.EMOTION_METRICS` 派生，同名标签 VAD 不再两表打架。
-- **情绪调制遗忘（Twig）**：记忆半衰期按 arousal 缩放（`policy.arousal_half_factor`，可配
-  `policy.arousal_boost`），高唤醒记得住、低唤醒尽快忘；NPC 衰减探针同口径。
-- **双速情绪（Sentipolis）**：消息级快窗口（12h 半衰期）+ 持久化日级慢 EMA（α=0.1），
-  单条消息不把长期状态带偏；注入块区分"当前状态"与"日级底色"。
-- **平面图几何层（floorplan）**：`personas/<pack>/world.json` 可配房间多边形 + 门，
-  自动推导面积（鞋带公式）/ 质心 / 邻接边表 / 实际路程（质心→门→质心 Dijkstra）；
-  `route_minutes` 从"每边 1 分钟"变成按真实距离；`tools.py floorplan-render` 出 SVG 预览；
-  persona-smoke 校验多边形合法性、门在墙上、图连通、大门可达。
-- **事实分类误伤修复**：子串匹配改为"强锚点 + 语境确认 + 过程标记降级"
-  （"今天工作很累"不再因含'工作'被判 stable）；`tools.py policy-classify` 内置 10 例探针。
-- **revive-companion 主动消息**：泊松过程触发（事件率按天，`revive.rate_per_day`）+ 贝叶斯
-  用户状态推断（活跃/忙/睡/需要关心 = 时段先验 × 消息活跃度似然），睡眠/忙碌自动让路；
-  broadcast 随机动态接入门控；`tools.py revive-status` 只读查看。
-- **cognitive-engine bandit**：Thompson Sampling 维护"什么回应策略对当前用户有效"的后验
-  （共情/方案/玩梗/倾听/转移 5 策略），回复前采样注入【回应策略】，用户下一条消息的情绪/
-  反馈作为奖励更新；`tools.py bandit-status` 看均值收敛。
-- **Persona Pack 去人设残留**：懒系数标签等收进 pack（`lazy_label`），代码层零人设硬编码。
-- **评测管理台（webapp，FastAPI + 静态页）**：总览/检索/空间/时间/情绪/多主体六类评测基线、
-  图表分析（趋势/对比/bandit/revive）、对话回放五维评分（人工 + LLM 机器分 + 雷达图）、
-  消融实验热插拔开关（13 个机制实时开关 + 矩阵表 + 柱状图）、数据诊断（分类探针/一致性/
-  实验日志回归门禁）；本地 vendor 离线资源（ECharts/SheetJS），启动 `python webapp.py --port 8600`。
+| 类别 | 表 |
+|---|---|
+| 词法索引 | `bm25_terms` / `bm25_docs` |
+| 向量索引 | `vec_index` / `vec_centroids` / `vec_pg` |
+| 生活与空间状态 | `space_state` / `space_events_state` / `item_activation_state` / `item_search_state` / `item_events` |
+| 运行状态 | `kv` / `state` / `mind_intention_state` / `ai_actions_state` / `hesitation_log` / `notifications` |
+| 审计与实验 | `audit` / `experiment_log` / `llm_cost` / `schema_migrations` |
 
-### 记忆与检索（v31）
+## 4. 核心能力
 
-- **7 路融合检索**：词法 BM25 / FTS / 向量 / 事件图谱 / 结构化属性 / Rules / 议题，
-  RRF 融合（权重可配）+ MMR 多样性去重；检索顺序改为**相关度优先**，
-  policy（重要度/时效）与置信度只做乘性微调，不再挤掉真正相关的记忆。
-- **按需路由 + 自适应**：按查询类型（属性/时间/短查询）动态调整各算法权重，
-  并记录每种算法的历史命中率自动微调（`route_stats`，即"学出来的按需调用"）。
-- **重排三档**：`light`（子串 + 词元覆盖 + 议题一致性，默认）→ `cross`（本地 CrossEncoder）→
-  `llm`（DeepSeek），失败自动降级。
-- **软过滤与分数分解**：低分记忆不硬剔除、降权保留；检索结果可输出
-  rrf / policy / confidence 分数来源分解（`tools.py memory-route` 诊断用）。
-- **按类别遗忘半衰期**：core 永不过期、stable ≈720 天、preference ≈360 天、long ≈240 天、
-  process ≈120 天、short ≈60 天；稳定事实与偏好只降模糊不硬删（conf=0.25）。
-- **自研 IVF 向量索引**：kmeans 质心 + nprobe 探测，`nlist/nprobe=0` 时按记忆量自动缩放
-  （`tools.py memory-index --tune` 可网格调优）。
-- **中文专名检测**：jieba 词性 + 姓氏正则（"林晓""小白"），修复中文专名漏召回。
-- **查询增强**：时间窗加权（"最近"降旧记忆）、活跃目标注意力、议题打包注入、
-  指代消解与同义扩展。
+### 记忆与检索
 
-### 情绪系统（memory/emotion.py，v31）
+- **统一记忆表**：用户、AI 自身、人物档案同表同格式。
+- **七路融合检索**：BM25 / FTS / 向量 / 事件图谱 / 结构化属性 / Rules / 议题，
+  RRF 融合 + light/cross/LLM 三档重排 + MMR 去重。
+- **按需路由**：根据查询类型动态调整算法权重，并记录各算法命中率。
+- **贝叶斯置信度**：确认 / 反驳 / 冲突按似然比更新，稳定事实对噪声纠错有阻力。
+- **分类遗忘**：core 永不过期，stable / preference / long / process / short 分级半衰期；
+  稳定事实只降模糊、不硬删除。
+- **自研 IVF 向量索引**：支持 nlist / nprobe 自动缩放与 `memory-index --tune` 网格调优。
+- **中文专名与查询增强**：jieba 专名、指代消解、时间窗加权、短查询前文补全。
 
-- **多维情绪模型**：Russell 环形（效价/唤醒）+ VAD（加支配度 3D）+ Plutchik 8 类情绪 × 强度档。
-- **AI 情绪状态机**：人设基线 + 消息事件增量 + 指数衰减（默认 90 分钟），kv 持久化重启不丢；
-  被冒犯会冷淡回击、被夸会别扭开心，情绪直接影响语气与行为。
-- **用户情绪估计**：滚动窗口 + 效价趋势，"连续失败后该耐心"这类历史融合只影响语气；
-  情绪归因块区分"我的情绪"和"用户的情绪"，避免穿帮。
-- 配置：`memory.core.emotion`（baseline / decay_minutes / user_window）。
+### 人格、情绪与生活世界
 
-### 睡眠与梦境（memory/sleep.py，v31）
+- **人设单一来源**：`personas/<pack>/persona.md`，经历沉淀为 `ai:experience`、巩固为 `ai:belief`。
+- **多维情绪**：VAD + Plutchik + 议题 mood 质心，情绪调制遗忘与检索。
+- **睡眠与梦境**：awake / standby / deep 三档，REM 生成梦境并可形成模糊记忆。
+- **日程与环境**：种子化周计划、天气缓存与季节兜底、环境感知。
+- **生活与空间**：房间-家具-容器物品系统、位置状态机、物品事件溯源、找东西分级搜索。
+- **主动消息**：分享欲 + revive 泊松触发 + 贝叶斯用户状态，带冷却和疲劳约束。
 
-- **三档作息**：`awake` 正常 / `standby` 省电待机（被消息唤醒 = 从省电里捞出来，半醒分层回应）/
-  `deep` 深睡（默认 02:00–05:00 真离线，消息进未读队列，醒来自然带一句"你昨晚找我了？"）。
-- **紧急唤醒**：连续 2 条紧急消息触发系统级唤醒；被打断次数记入"今日回忆"（"昨晚被吵醒 N 次"）。
-- **梦境（REM）**：DeepSeek 生成梦（类型/内容随机，防 AI 味词过滤），梦大概率忘记，
-  小概率留模糊 `dream` 记忆（1.5 天半衰期），清晨主动提一次。
-- 配置：`memory.core.sleep`（deep_window / emergency_threshold / dream_remember_prob）。
+### 认知与决策
 
-### 日程、天气与环境感知（memory/schedule.py + environment.py，v31）
+- **心智状态中枢**：situation / emotion / goals / intention / activated_memories / options。
+- **BDI 式目标**：目标强度 = 人设价值权重 × 优先级。
+- **程序记忆**：situation → action → success，高成功率习惯可省一次 LLM 调用。
+- **回应策略 bandit**：Thompson Sampling 学习“哪种哄法对当前用户有效”。
+- **约定与原谅**：预约催办、同类错误计数、底线不妥协、关系驱动原谅概率。
 
-- **日程**：`profile=yuno`（夜行、排练/演出/宅家）或 `office`（上班族），种子化周计划——
-  同一周稳定、跨周变化，演出前合练/演出后恢复等状态链；夜晚槽（22:00–06:00）只会安排
-  在家活动且 22:00–02:00 为夜生活、02:00–06:00 强制睡觉（对齐"凌晨 2 点后才睡"人设
-  与深睡档），旧的不合理周计划会自动重生成；用户约定优先于默认日程。
-- **天气**：和风/高德直连（`WEATHER_API_KEY`，2026 起支持专属 API Host），30 分钟缓存，
-  失败自动回退"按季节 + 当日种子"的模拟天气。
-- **环境感知**：日程 → 地点 → 周围人物（`cast` 队友名单，排练/演出/偶遇时具名出现）→
-  天气/光照；途中状态 + 信号较弱提示，`can_see` 同房间 + 光线双重判定。
-- 配置：`memory.core.schedule` / `weather` / `environment`。
+### 质量闭环
 
-### 分享欲（memory/sharing.py，v31）
+- **记忆轨迹五维评分**：extraction / decision / confidence / provenance / privacy，
+  评分驱动置信度因子、提取门槛与隐私阈值。
+- **对话质量五维评分**：remember / natural / emotional / proactive / boundary，
+  低分自动审计与归因，先诊断后调参。
+- **评测基线**：memory / space / time / emotion / subjects / evidence-gate / policy-classify。
+- **消融实验**：15 个机制开关热插拔，单变量关停后对比 recall / MRR / NDCG。
+- **成本归因**：按天、按模块、按检索路径统计 token 与费用。
 
-- **主动发消息**：事件增量（演出/作曲/梦/被夸）× 情绪 VAD 加成 × 关系门槛 × 疲劳修正，
-  指数衰减（半衰期 8 小时），LLM 生成人设消息走通知队列主动发给用户。
-- **有分寸**：冷却 3 小时、日上限 2 条、周上限 8 条、演出/睡觉时段静默；
-  用户嫌烦有分级惩罚（0.75/0.5/0.4）、正向反馈可提前解除，用户低落时不晒。
-- 配置：`memory.core.sharing`（threshold / cooldown_hours / max_per_day / max_per_week）。
+## 5. 快速开始
 
-### 生活层、空间层与传感器（living.py + space.py + sensors.py，v31/v32）
+### 环境要求
 
-- **家的布局**：房间 → 家具 → 容器，物品懒展开（箱子里有什么查询时才注入）；
-  `take / give / move` 数量增减与容量限制，联动分享欲。
-- **world_delta（v32）**：用户一句话改变世界（"我把你牛奶喝了一半"）→ 关键词预筛 →
-  LLM 输出结构化 JSON → 引擎校验后应用，60 秒节流，绝不直接改状态。
-- **动态距离**：基准分钟 × 交通方式 × 天气 × 懒散系数（yuno 1.15）× 情绪 × 当日种子。
-- **空间层**：位置状态机（在场/在途中，出发窗口 = 槽位开始 − 路程，自动出发/到达）、
-  场所拓扑（pair_times 可配）、事件流；行为记忆流（去过哪/做了什么只追加可注入，防穿帮）。
-- **传感器（v32）**：家庭设备（门铃/灯/冰箱/空调/电视…）状态 + 事件驱动传播；
-  `named_block` 支持跨房间点名查询（"客厅灯开着吗"）。
-- **物品位置历史与模糊找东西（P0-1/P0-3）**：物品事件溯源（move/give/see/lost… 落表），
-  "X 在哪"按激活值分级——直接答 / 模糊答 / 触发逐处搜索（静默推进只报结果；
-  话题转移自动暂停、重问续搜不重启；难度影响命中，彻底失败按概率标记"真丢了"）。
-- **家内房间图与真实移动（P1-1）**：房间邻接/门/灯状态，"跨房间看看"从定时器改为
-  沿房间图真实走过去（出发/到达进事件流与行为记忆）；`can_see` 支持邻接 + 门开 + 灯亮。
-- **人设→场景生成（P1-2）**：`tools.py living-bootstrap` 按 persona 生成家里该有的物品，
-  只新增不覆盖，并写 origin（"为什么有这个东西"的依据）。
-- **队友确定性位置（P2）**：cast 周表（`space.cast_schedule`），"谁在哪"有据可依，
-  替代随机人物桶。
-- **空间评测（P2）**：`tools.py space-eval`——X 在哪命中率 / 某时刻召回 / 找东西模拟
-  （平均步数与失败率），调遗忘/搜索参数先看这些数字。
-- **生日/年龄**：临近生日暗示（熟悉度达标）、祝贺反应、一年一长。
-- 配置：`memory.core.living` / `space` / `interaction`。
+- Python 3.10+
+- PostgreSQL 14+（生产默认；不配置 PG 时可用 SQLite）
+- DeepSeek 或其他 OpenAI 兼容 API Key
 
-### 对话与人格（v23/v29/v31）
-
-- **约定管理（appointment）**：识别「明天下午3点见」自动记录（按用户时区），
-  到点 + 宽限期后没出现会主动催（最多 2 次、情绪递增）；待履约约定注入上下文。
-- **错误与原谅（mistake）**：同类错误计数，生气度 = 次数封顶 3 × 0.5^(天/7)；
-  底线类不道歉松口概率为 0，道歉后按关系分/信任/熟悉度计算原谅概率。
-- **人物设定（character）**：`/设定 角色名` 生成档案入记忆并双写
-  `docs/characters/<名>.md`，`tools.py character-sync` 一键同步回（md 为权威来源）。
-- **人设单一来源**：`persona.md`（Persona Pack）；
-  AI 自身对话经历按重要度沉淀为 experience、每日巩固成 belief，人格随经历缓慢成长。
-- **会话结构**：时间窗口 + 同主题续接（sessions），跨天同主题自然衔接。
-- **对话质量**：自动消息自洽带前因、设备问题意图推测、反重复句式（同一梗一天最多一次）、
-  跨房间"我去看看"延迟自然汇报（20~45 秒）。
-
-### 认知层（mind / procedures）
-
-- **心智状态中枢**：情境解读（威胁/机会/无关）/ 情绪 / 激活目标 / 当前意图 /
-  命中的记忆 / 候选动作（效用分）统一成结构化快照注入；`tools.py mind-status` 可诊断。
-- **目标与意图（BDI 式承诺）**：目标强度 = 人设价值权重 × 优先级（`persona_weights` 可配），
-  最高强度激活目标成为当前 intention，持续到完成或放弃；appointment/schedule/living 都是目标源。
-- **程序记忆（System 1/2）**：情境 → 动作 → 成功率 落表，用户 praise/纠正自动学习；
-  命中高成功率习惯直接复用回复（省一次 LLM 调用），没命中才走深思。
-- **单次结构化输出（可选）**：`mind.cognitive_turn=true` 时把 appraisal/goals/intention/
-  action/reply 压进一次 LLM 调用（JSON），解析失败自动回退普通路径——延迟成本几乎不变，
-  但拿到决策的可解释结构。
-- **人设价值函数化**：persona 关键词 → 权重参与效用计算，人设从"描述"变"决策参数"。
-
-### 工程与运维（v10~v32）
-
-- **记忆轨迹 + 五维评分闭环**：每次处理记录轨迹（create/merge/update/decay/reject…），
-  人工按 extraction/decision/confidence/provenance/privacy 五维评分，
-  评分均值直接驱动 confidence_factor / 提取门槛 / 隐私阈值（"评分 → 行为"闭环）。
-- **对话质量评分闭环（v33 convreview）**：评分对象从记忆轨迹升级到对话回合（用户+AI），
-  五维（记得/自然/有情绪/主动/边界）；数据源 = 真实对话自动记录 + 场景回放
-  `scenario-eval --review-export`；低分自动审计 + 归因，只诊断不自动调参
-  （`memory-conv-md / memory-conv-review / memory-conv-report`）。
-- **隐私与加密**：规则检测（手机号/证件/财务/健康…），可选 AES-GCM 加密（`MEMORY_KEY`）；
-  私聊记忆不进群、`/忘记` `/公开` 控制可见性。
-- **纠错调查与时间推理**：用户否定先调查再决定 update/keep/uncertain（不盲从），
-  历史可回滚；"转/换/改用/戒"等状态变化自动 supersede 旧记忆。
-- **提取污染防护（v29）**：用户记忆不混入"机器人…"开头的 AI 自述。
-- **测试**：`e2e_test.py`（生活回流/礼物隐私/嫌烦惩罚/久别重逢/话题锚点/情绪归因）、
-  `load_test.py`（并发负载）、`v29_test.py`（污染专项验收）。
-- **运维命令**：`health` / `backup` / `recover` / `config-validate` / `data-export` / `data-import` /
-  `emotion-eval` / `emotion-log` / `memory-index --tune` / `memory-calibrate` 等。
-
-## 安装部署（Debian/Ubuntu 服务器）
-
-### 前置条件
-
-1. [q.qq.com](https://q.qq.com) 创建机器人，拿到 `AppID` / `AppSecret`。
-2. [platform.deepseek.com](https://platform.deepseek.com) 创建 API Key。
-3. （可选）[和风天气](https://dev.qweather.com) 注册 key 填 `WEATHER_API_KEY`，
-   不配置时环境感知自动回退到按季节种子的模拟天气。
-4. Linux 服务器（示例路径 `/home/ubuntu/qq-bot`）。
-
-### 步骤
+### 安装
 
 ```bash
-# 1) 上传代码并进入目录
-scp -r qq-bot-github ubuntu@<服务器IP>:~
-mv ~/qq-bot-github ~/qq-bot && cd ~/qq-bot
-
-# 2) 配置 .env（完整变量见 .env.example）
-cp .env.example .env
-nano .env    # 填 APPID / SECRET / DEEPSEEK_API_KEY / ADMIN_OPENIDS
-
-# 3) 先装 CPU 版 torch（避免 install.sh 拉取 2.5GB CUDA 版）
+cd qq-bot
 python3 -m venv venv
-./venv/bin/pip install torch -i https://pypi.tuna.tsinghua.edu.cn/simple -f https://mirrors.aliyun.com/pytorch-wheels/cpu
-./venv/bin/python -c "import torch; print(torch.__version__)"   # 应带 +cpu
-
-# 4) 一键安装（创建 aiagent 账号、systemd 服务、sudoers、日志轮转）
-bash install.sh
+./venv/bin/pip install -r requirements.txt
+./venv/bin/pip install -r requirements-pg.txt   # 生产 PostgreSQL
+cp .env.example .env
+nano .env                                        # 填写机器人凭证与 API Key
+./venv/bin/python scripts/pg_init_schema.py      # 初始化 PostgreSQL schema
+./venv/bin/python tools.py config-validate
 ```
+
+CPU 环境建议先安装 CPU 版 torch，避免 `install.sh` 拉取 CUDA 版：
+
+```bash
+./venv/bin/pip install torch -i https://pypi.tuna.tsinghua.edu.cn/simple -f https://mirrors.aliyun.com/pytorch-wheels/cpu
+```
+
+初始化 Persona Pack、向量索引与评测集：
+
+```bash
+./venv/bin/python tools.py init --pack yuno
+```
+
+启动服务：
+
+```bash
+./venv/bin/python bot.py                       # QQ Bot
+./venv/bin/python webapp.py                    # Web 管理台，默认 127.0.0.1:8600
+./venv/bin/python -m yuno_memory --port 8457   # SDK HTTP 服务
+```
+
+Web 地址：
+
+- 管理台：`http://127.0.0.1:8600/`
+- 公开状态页：`http://127.0.0.1:8600/public`
 
 ### 初始化记忆核心
 
-`memory.core.enabled` 自 v31 起默认 `true`（长期记忆检索 + 状态类模块），无需手动开启；
-改过配置可先跑 `tools.py config-validate` 校验。启动后初始化一次：
+`memory.core.enabled` 默认开启。首次部署建议执行：
 
 ```bash
-sudo systemctl restart qqbot
-sudo -u aiagent ./venv/bin/python tools.py memory-embed    # 为缺少向量的记忆回填 embedding
-sudo -u aiagent ./venv/bin/python tools.py memory-grow --dry-run
-sudo -u aiagent ./venv/bin/python tools.py memory-sleep    # 浅睡/深睡巩固 + REM 做梦
+./venv/bin/python tools.py memory-embed
+./venv/bin/python tools.py memory-grow --dry-run
+./venv/bin/python tools.py memory-sleep
 ```
 
-### 配置管理员
+## 6. 配置
 
-私聊机器人发任意消息，然后：
-
-```bash
-sudo grep "\[引导\]" /home/ubuntu/qq-bot/data/bot.log | tail -1
-```
-
-把返回的 `user_openid` 填入 `.env` 的 `ADMIN_OPENIDS=`，重启生效。
-
-### 定时维护（备份 + 每日成长）
-
-```bash
-printf '0 3 * * * cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py backup >> data/cron.log 2>&1\n30 3 * * * cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py memory-grow >> data/cron.log 2>&1\n0 9 * * 1 cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py reflection-report --limit 50 >> data/reflection_report.log 2>&1\n0 4 * * 1 cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py internal-db-prune --days 30 >> data/cron.log 2>&1\n30 4 * * 1 cd /home/ubuntu/qq-bot && ./venv/bin/python tools.py memory-consolidate >> data/cron.log 2>&1\n' | sudo -u aiagent crontab -
-```
-
-## 配置说明
-
-### .env（密钥与运行设置）
+### 环境变量（.env）
 
 | 变量 | 说明 |
 |---|---|
 | `APPID` / `SECRET` | q.qq.com 机器人凭证 |
-| `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL` | DeepSeek 接入 |
-| `SYSTEM_PROMPT` | 覆盖 persona.md 的人设（一般不填，默认 persona.md 单一来源） |
-| `ADMIN_OPENIDS` | 管理员 openid（逗号分隔） |
-| `WEATHER_API_KEY` | 和风/高德天气 key（不填则环境感知用模拟天气兜底） |
-| `EMBEDDING_API_KEY` | 云端 embedding API 密钥（provider=openai_compatible 时） |
-| `HF_HOME` / `HF_ENDPOINT` | 模型下载目录 / 国内镜像 |
-| `AGENT_ID` | 多 Agent 人格命名空间（可选） |
-| `MEMORY_KEY` | 高隐私记忆 AES-GCM 加密密钥（可选） |
-| `CONFIG_PATH` / `QQBOT_CONFIG` | 覆盖配置路径（可选） |
-| `TIMEZONE` | 默认 Asia/Shanghai；用户声明所在地时会自动记住并切换 |
-| `YUNO_API_TOKEN` | yuno-memory SDK 服务 Bearer token（可选；设置后所有 HTTP 请求需带 `Authorization: Bearer <token>`，公网暴露时务必设置） |
-| `YUNO_WEB_TOKEN` | 评测管理台 webapp Bearer token（可选；设置后所有请求含首页需鉴权） |
-| `YUNO_DB_BACKEND` | 数据库后端，默认 `postgresql`；如需强制 SQLite 可设为 `sqlite` |
-| `YUNO_PG_HOST/PORT/DB/USER/PASSWORD` | PostgreSQL 连接参数（默认 127.0.0.1:5432/yuno/esp/yuno） |
+| `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL` | LLM 接入 |
+| `ADMIN_OPENIDS` | 管理员 openid，逗号分隔 |
+| `WEATHER_API_KEY` | 和风 / 高德天气；不填则季节种子模拟 |
+| `EMBEDDING_API_KEY` | 云端 embedding（provider=openai_compatible 时） |
+| `HF_HOME` / `HF_ENDPOINT` | HuggingFace 缓存与镜像 |
+| `MEMORY_KEY` | 高隐私记忆 AES-GCM 密钥（可选） |
+| `TIMEZONE` | 默认 `Asia/Shanghai` |
+| `YUNO_DB_BACKEND` | `postgresql`（默认）或 `sqlite` |
+| `YUNO_PG_HOST` / `PORT` / `DB` / `USER` / `PASSWORD` | PostgreSQL 连接参数 |
+| `YUNO_PG_MINCONN` / `YUNO_PG_MAXCONN` | PG 连接池范围 |
+| `YUNO_API_TOKEN` | SDK HTTP Bearer token |
+| `YUNO_WEB_TOKEN` | Web 管理台 Bearer token |
+| `YUNO_WEB_PASSWORD` / `YUNO_WEB_OPS_PASSWORD` / `YUNO_WEB_READONLY_PASSWORD` | 管理台三级密码 |
 
-### config.json（关键段）
+### config.json 关键段
 
 | 段 | 说明 |
 |---|---|
-| `memory.core.enabled` | 记忆核心总开关（v31 起默认 true；关闭则长期记忆检索停用，状态类模块不受影响） |
-| `memory.core.weights` | 7 路检索融合权重 |
-| `memory.core.policy` | 遗忘/巩固/贝叶斯似然比参数（按类别半衰期） |
-| `memory.core.emotion` | 多维情绪模型（VAD 基线/衰减/用户窗口） |
-| `memory.core.sleep` | 睡眠与梦境（深睡窗口、紧急唤醒、梦保留概率） |
-| `memory.core.schedule` | AI 日程（profile: yuno / office 周计划生成） |
-| `memory.core.weather` | 天气提供方（和风/高德、专属 API Host、位置） |
-| `memory.core.environment` | 环境感知（快照缓存、具名队友 cast） |
-| `memory.core.sharing` | 分享欲（阈值、冷却、日/周上限） |
-| `memory.core.living` | 生活层（家布局、懒散系数、生日、搜索/激活参数、人设→场景生成 bootstrap） |
-| `memory.core.space` | 空间层（家内房间图/门灯、场所拓扑、队友确定性周表 cast_schedule） |
-| `memory.core.interaction` | 互动调节器（场景/关系/用户状态/频率公式） |
-| `memory.core.mind` | 心智状态中枢（system1 开关与阈值、cognitive_turn、persona_weights、意图 TTL） |
-| `memory.core.analysis` / `world` / `trace` | 情绪 LLM 兜底 / 世界模型 / 记忆轨迹 |
-| `memory.core.revive` | 主动消息：泊松事件率（rate_per_day）/ 冷却 / 睡眠窗口 |
-| `memory.core.bandit` | 回应策略 Thompson 采样（enabled / alpha0 / beta0） |
-| `memory.core.mood_boost` / `emotion_address` / `mood_alpha_fast` | 心境一致性检索开关与强度 |
-| `memory.core.policy.arousal_boost` | 情绪锚定：记忆半衰期随 arousal 缩放 |
-| `personas/<pack>/world.json` 的 `floorplan` 段 | 平面图几何：房间多边形 + 门（面积/质心/路程推导） |
-| `chat_bridge` | 慢响应衔接语开关 |
-| `services` | MCP 服务注册表（管理端 / 外部 Agent 用） |
+| `memory.core.enabled` | 记忆核心总开关 |
+| `memory.core.weights` | 七路检索融合权重 |
+| `memory.core.policy` | 遗忘、巩固、贝叶斯似然比 |
+| `memory.core.emotion` | 情绪模型 |
+| `memory.core.sleep` | 睡眠与梦境 |
+| `memory.core.schedule` | 日程生成 |
+| `memory.core.sharing` | 主动分享阈值与限频 |
+| `memory.core.living` | 生活层与物品 |
+| `memory.core.space` | 空间层与位置 |
+| `memory.core.mind` | 心智状态、System 1、cognitive_turn |
+| `memory.core.revive` | 主动消息泊松触发 |
+| `memory.core.bandit` | 回应策略 Thompson Sampling |
+| `memory.core.mood_boost` / `emotion_address` | 心境一致检索 |
+| `personas/<pack>/world.json` | 房间图与队友排班 |
 
-## 常用指令
+## 7. 常用指令
 
 | 指令 | 说明 |
 |---|---|
-| 直接聊天 | 人设对话（带记忆、心情、情绪、表达适配） |
-| `/帮助` | 指令菜单 |
 | `/目标 内容` / `/目标列表` / `/目标完成 内容` | 目标管理 |
-| `/设定 角色名` | 生成人物档案入记忆，并输出 `docs/characters/<名>.md`（改完用 `tools.py character-sync` 同步回） |
-| `/我的记忆` / `/群记忆` / `/我的风格` | 查看记忆 / 表达画像 |
+| `/设定 角色名` | 生成人物档案，编辑后 `tools.py character-sync` 同步 |
+| `/我的记忆` / `/群记忆` / `/我的风格` | 查看记忆与表达画像 |
 | `/忘记 关键词` / `/公开 关键词` | 隐私控制 |
-| `/绑定` / `/解绑` / `/昵称 名字` | 身份绑定 |
+| `/绑定` / `/解绑` / `/昵称` | 身份绑定 |
 | `/成语` / `/答题` / `/排名` | 游戏 |
 
-## SDK 与 HTTP 服务
+## 8. SDK 与 HTTP 服务
 
 ```bash
-python -m yuno_memory --host 127.0.0.1 --port 8457 --data-dir ./data --api-key <key> --embedder local --token <token>
+python -m yuno_memory \
+  --host 127.0.0.1 --port 8457 \
+  --data-dir ./data \
+  --api-key <DEEPSEEK_API_KEY> \
+  --embedder local \
+  --token <YUNO_API_TOKEN>
 ```
 
-参数说明：`--host/--port` 监听地址，`--api-key` LLM API key，`--embedder local` 使用本地
-sentence-transformers（`openai_compatible` 则走云端 API），`--data-dir` 指定记忆库目录，
-`--token` Bearer 鉴权 token（默认读环境变量 `YUNO_API_TOKEN`；空则不鉴权，本机使用）。
-`/memory/export` 的导出路径被限制在 `--data-dir` 内（防任意写盘）。
+```python
+from yuno_memory import Memory
 
-评测管理台（webapp）同理：设置 `YUNO_WEB_TOKEN` 后所有请求需带 `Authorization: Bearer <token>`。
+mem = Memory()
+mem.add_fact(scope="c2c:user1", key="cat", fact="养了一只叫煤球的橘猫", source="sdk")
+print(mem.search("猫叫什么", scopes=["c2c:user1"]))
+```
 
-## 测试与维护
+HTTP 接口：`/health`、`/memory/ingest`、`/memory/search`、`/memory/trace`、`/memory/review`、`/memory/eval`、`/memory/export`。
+设置 token 后所有请求需带 `Authorization: Bearer <token>`；导出路径限制在 `data-dir` 内。
+
+## 9. 测试、评测与运维
+
+### 回归测试
 
 ```bash
-python tools.py health              # 独立健康检查（有服务离线时退出码 1，可被 cron 门控）
-python tools.py config-validate     # 校验 config.json（有错误时退出码 1）
-python tools.py backup              # 每日 SQLite 备份（保留 7 份）
-python tools.py memory-governance   # 记忆治理报告
-python tools.py memory-trace-md --limit 20   # 记忆轨迹
-python tools.py memory-trace-review <id> --extraction 5 --decision 4  # 人工评分
-python tools.py memory-conv-md --limit 20    # 对话评分报告（v33）
-python tools.py memory-conv-review <id> --remember 4 --natural 5  # 对话五维评分（v33）
-python tools.py memory-conv-report           # 对话五维诊断（维度均值 + 低分归因，v33）
-python tools.py memory-sleep        # 睡眠/梦境：浅睡+深睡巩固，REM 做梦
-python tools.py emotion-eval        # 情绪判断评测（分类准确率 + VAD MAE）
-python tools.py emotion-log         # 导出情绪判断日志（训练数据原料）
-python tools.py memory-index --tune # 重建/调优自研 IVF 向量索引
-python tools.py memory-calibrate    # 用评测集训练置信度标定
-python tools.py data-export         # 全量数据打包
-python tools.py data-import <file>  # 导入数据
-python tools.py floorplan-render    # 平面图 SVG 预览 + 房间几何事实表
-python tools.py policy-classify     # 事实分类探针（含关键词但实为过程/指令）
-python tools.py revive-status       # 主动消息：泊松概率 + 贝叶斯用户状态（只读）
-python tools.py bandit-status       # 回应策略后验（各策略均值 + 上次选择）
-python tools.py topic-vad-backfill  # 旧议题补近似 VAD/复合情绪（幂等）
-python tools.py scenario-eval --score  # 场景回放五维评分（LLM）
-python tools.py scenario-eval --review-export  # 场景回放对话写入评分队列（v33）
-python tools.py ablation            # 机制消融矩阵（单开关 × probes + 实验日志）
-python tools.py subjects-eval       # 多主体评测（写入/隐私/引用/可信度衰减）
-python tools.py consistency-eval    # 双轨制一致性（失效队列 + 重算）
-python tools.py experiments         # 实验日志（基线前后 + 回归标记）
+make check                          # 配置校验 + diff 检查 + 全量 pytest
+./venv/bin/python -m pytest -q      # 单元与冒烟测试
+./venv/bin/python scripts/eval_ci.py      # CI 评测门禁，自动 baseline + 回归
+./venv/bin/python scripts/secret_scan.py  # 密钥扫描
+./venv/bin/python scripts/perf_ci.py      # 性能门禁
 ```
 
-自动化测试（CI 全量执行）：
+### 评测命令
 
 ```bash
-make check                          # 推荐：配置校验 + diff 空白检查 + 全量 pytest
-python -m pytest -q                 # 全量回归（自动只收集 tests/，不会再误收根目录脚本）
-python e2e_test.py                  # 端到端一致性（v31.2）：生活回流/礼物隐私/嫌烦惩罚/久别重逢/话题锚点/情绪归因
-python load_test.py [并发数]        # 轻量负载：并发消息走 分析→情绪→观测→分享钩子
-python v29_test.py                  # 专项验收：用户记忆不被 AI 自述污染
+./venv/bin/python tools.py memory-probes --limit 200     # 查询日志 → 评测集
+./venv/bin/python tools.py memory-eval --file <probes> --save
+./venv/bin/python tools.py space-eval --save
+./venv/bin/python tools.py time-eval --save
+./venv/bin/python tools.py emotion-eval
+./venv/bin/python tools.py subjects-eval --save
+./venv/bin/python tools.py evidence-gate-eval
+./venv/bin/python tools.py policy-classify
+./venv/bin/python tools.py ablation
+./venv/bin/python tools.py consistency-eval
+./venv/bin/python tools.py experiments
 ```
 
-测试隔离说明：全部 pytest 用例绑定各自临时数据库（`_db.init(force=True)`），不写真实
-`data/bot.db`；`tests/test_features.py` 按域拆成 9 个函数共享模块级环境，函数间有库状态
-顺序依赖，请整文件运行。
+### 评分与训练
 
-## 仓库内文档
+```bash
+./venv/bin/python tools.py memory-trace-md --limit 20
+./venv/bin/python tools.py memory-trace-review <id> --extraction 4 --decision 4
+./venv/bin/python tools.py memory-conv-md --limit 20
+./venv/bin/python tools.py memory-conv-review <id> --remember 4 --natural 4
+./venv/bin/python tools.py memory-conv-report
+./venv/bin/python tools.py emotion-log --days 14
+./venv/bin/python tools.py emotion-train --file train.json
+./venv/bin/python tools.py memory-calibrate --file <probes>
+./venv/bin/python tools.py memory-index --tune --file <probes>
+```
+
+### 运维
+
+```bash
+./venv/bin/python tools.py health --notify
+./venv/bin/python tools.py backup
+./venv/bin/python tools.py recover
+./venv/bin/python tools.py recover-drill
+./venv/bin/python tools.py pg-guard --notify
+./venv/bin/python tools.py memory-grow
+./venv/bin/python tools.py memory-sleep
+./venv/bin/python tools.py memory-consolidate
+./venv/bin/python tools.py memory-governance
+./venv/bin/python tools.py data-export
+./venv/bin/python tools.py data-import <file>
+```
+
+## 10. 当前评测基线
+
+> 基线会随评测集和参数迭代变化；CI 的自动基线见 `docs/baselines/ci_eval.json`。
+
+| 指标 | 当前值 | 样本 |
+|---|---:|---:|
+| 证据门控 accuracy | 1.000 | 50 |
+| 检索 recall@5 | 0.825 | 40 |
+| 检索 MRR | 0.557 | 40 |
+| 检索 NDCG | 0.623 | 40 |
+| 空间 where_accuracy | 0.875 | 8 |
+| 时间 window_recall | 0.900 | 10 |
+| 时间 timeline_order | 0.612 | 299 |
+| 情绪 accuracy | 0.918 | 61 |
+| 情绪 VAD MAE | 0.143 | 61 |
+| 多主体 privacy_rate | 1.000 | 4 |
+| 轨迹评分 decision | 2.71 | 69 |
+| 对话评分 proactive | 3.30 | 10 |
+
+## 11. 文档索引
 
 | 文档 | 内容 |
 |---|---|
-| [memory/README.md](memory/README.md) | 记忆系统框架、算法、设计决策、瓶颈 |
-| [agent/README.md](agent/README.md) | Agent 层：记忆/人设/LLM 编排与成长闭环 |
+| [docs/deployment.md](docs/deployment.md) | 部署、systemd、备份与安全 |
+| [docs/roadmap.md](docs/roadmap.md) | 路线图、待办与改进方向 |
+| [memory/README.md](memory/README.md) | 记忆核心模块、算法与接口 |
+| [agent/README.md](agent/README.md) | Agent / Persona 层 |
+| [docs/评分清单-20260814.md](docs/评分清单-20260814.md) | 轨迹评分清单与批量评分说明 |
 
-## 已知问题与未来方向
-
-当前的主要问题（按影响排序）：
-
-- **参数没有真实数据校准**：7 路检索权重、遗忘半衰期、信息增益阈值、情绪 VAD 基线等
-  都是经验值，没有 baseline 数字，无法证明这些机制真的有效。
-- **关键路径依赖 LLM**：提取/纠错调查/重排/world_delta 都调 LLM，成本和失败率不可控，
-  单条消息最坏会触发两次以上 LLM 调用。
-- **仍有内存态**：`_chat_busy`、检索结果缓存、route_stats 等重启即失（六个核心状态已迁
-  正规表，其余待迁）。
-- **管理面部分完成**：评测管理台（webapp）已覆盖评测/消融/回放评分/图表，但 probes 评测集
-  管理、trace 人工审核页、数据导出页尚未做；管理 App 仍是命令行 + 网页轮询。
-- **单机单用户**：SQLite + 内存态架构，无水平扩展与多租户设计。
-
-已修复（v2.3 工程轮）：
-
-- **回归测试从"3 个冒烟"到 22 项 pytest（164 check）**：`tests/test_features.py` 按域拆成
-  9 个函数；新增检索下推、web/SDK 冒烟、事务回滚用例；CI 全量语法检查（68 文件）+ 全依赖。
-- **CI 曾只查 7 个文件、web/SDK 零覆盖** → `py_compile $(git ls-files '*.py')` + fastapi/httpx 冒烟。
-- **两个 HTTP 服务曾零鉴权** → `YUNO_API_TOKEN` / `YUNO_WEB_TOKEN` Bearer 鉴权 + export 路径白名单。
-- **tools.py 退出码恒 0** → `health`/`config-validate` 失败返回非 0，cron 可门控。
-- **ingest 曾 10 次独立写无事务** → `_db.transaction()` 单事务原子写，中途失败整体回滚。
-- **检索全表扫描** → `fact IN (...)` 下推 + 隐式反馈批量提交。
-- **隐私加密曾静默降级明文** → 无密钥/失败显式告警日志。
-
-改进方向（按优先级）：
-
-1. **数据闭环**：每周导出评测集、人工五维评分、落 baseline；逐级上线权重网格搜索 →
-   置信度标定 → 提取门控 → LTR 排序 → GPU 微调；Bandit 在线调权（回应策略）与机制消融
-   矩阵已落地，下一步是把消融/评分闭环接入每日 grow 自动跑。
-2. **工程化**：回归测试与 CI 已起步，继续补状态层单测、剩余内存态落盘、
-   SQLite 迁移机制、锁依赖版本。
-3. **产品化**：管理 Web 已上线（评测管理台 MVP），继续补 probes 管理、trace 审核页、
-   API Gateway + 鉴权 + 公开统计页，高危操作二次确认，完成"管理迁出 QQ"。
-4. **成本与可靠性**：情绪/提取蒸馏成本地轻量模型，回复路径固定为单次 LLM 调用，
-   所有 LLM 调用点有降级方案。
-5. **认知研究**：空间-时间检索（location 过滤）与平面图几何层（面积/质心/实际路程）已落地；
-   继续完善遗忘曲线校准（情绪锚定已接入）、纠错调查可靠性评测、情绪寻址复核的长期效果。
-6. **SDK 化**：把记忆内核独立成可安装、可测试、多后端的包，接入更多平台。
-
-## License
+## 12. License
 
 [LICENSE](LICENSE)

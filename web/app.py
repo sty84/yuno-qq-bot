@@ -238,7 +238,7 @@ def create_app():
     from . import auth, routes_admin, routes_cognitive, routes_eval
 
     state = AppState()
-    app = FastAPI(title="Yuno Ops Web", version="0.3.0")
+    app = FastAPI(title="Yuno Ops Web", version="2.5.0")
 
     from memory import telemetry
 

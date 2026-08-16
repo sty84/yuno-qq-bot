@@ -1,4 +1,4 @@
-"""Yuno 评测管理台后端（v2.3）：把散在 tools.py 的评测/维护命令包成 HTTP。
+"""Yuno 评测管理台后端（v2.5）：把散在 tools.py 的评测/维护命令包成 HTTP。
 
 启动：
   python webapp.py                    # 默认 127.0.0.1:8600（只本机访问）

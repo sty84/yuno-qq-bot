@@ -1,4 +1,4 @@
-# memory/ —— 统一记忆系统（Memory Core）
+# memory/ —— 统一记忆系统（Memory Core · v2.5）
 
 > 让 Agent 从"拥有知识库"升级为"拥有长期认知系统"。记忆不是聊天记录，而是
 > 有**可信度演化、时间推理、遗忘巩固、纠错调查、人格与关系**的认知主体。
@@ -21,10 +21,11 @@ flowchart TD
     GR --> REF[reflect 反思] & REL[relationship 关系] & WD[world 世界模型]
 ```
 
-## 2. 数据模型（SQLite 单库 data/bot.db）
+## 2. 数据模型（PostgreSQL 生产 / SQLite 兼容）
 
-核心是统一 `memories` 表：用户（`c2c:<uid>` / `group:<gid>` / `group_all:<gid>`）、
-AI 自身（`ai` / `ai:<id>`）、人物档案（`char:<名>`）**同表同格式**。
+生产默认 PostgreSQL，测试与轻量部署可设 `YUNO_DB_BACKEND=sqlite`。核心是统一 `memories` 表：
+用户（`c2c:<uid>` / `group:<gid>` / `group_all:<gid>`）、AI 自身（`ai` / `ai:<id>`）、
+人物档案（`char:<名>`）**同表同格式**。
 
 | 表 | 作用 |
 |---|---|
@@ -39,23 +40,22 @@ AI 自身（`ai` / `ai:<id>`）、人物档案（`char:<名>`）**同表同格�
 | `relationships` | AI-用户关系状态机 |
 | `feedback_log` / `memory_history` / `policy_log` | 反馈分级 / 记忆变更审计 / 策略日志 |
 | `memory_trace` / `trace_review` | 记忆处理轨迹 / 五维人工评分 |
+| `conv_log` / `conv_review` | 真实对话回合 / 对话五维评分 |
 | `query_log` / `kv` | 查询遥测 / 标定·路由·baseline |
+| `scope_meta` / `relationships` | 场景元数据 / AI-用户关系状态 |
 | `language_context` / `user_expression_profile` | 网络词候选池 / 用户表达画像 |
+| `procedures` / `llm_cost` / `experiment_log` | 程序记忆 / 成本归因 / 实验日志 |
 
-派生索引（`bm25_*` / `vec_index` / `memories_fts`）不参与导出，由 grow 重建。
+派生索引（`bm25_*` / `vec_index` / `vec_pg` / `vec_centroids`）不参与导出，由 grow 重建。
 
-数据层工程化（v2.3 工程轮）：
+数据层工程化：
 
-- **写事务**：`_db.transaction()` 上下文管理器——事务内所有 helper 的提交点挂起，
-  `controller.ingest` 主写段（合并/替换/事件图/议题/词法/多主体/巩固/关系）单事务原子写，
-  中途失败整体回滚，不留"事实已存但图/索引/议题缺失"的半成品；嵌套安全。
-- **检索下推**：`_db.memory_rows_by_facts(scope, facts)` 把 `WHERE fact IN (...)` 下推 SQL，
-  `reasoning._retrieve_single` 不再全表拉取后 Python 过滤；隐式反馈改 `meta_touch_many`
-  批量提交（一次事务 vs 逐条 commit）。
-- **公共助手**：`plugins._shared.core_cfg(section, key, default)` 统一配置读取（各模块
-  `_cfg` 转发）；`memory/_llmutil.parse_json_object` 统一 LLM JSON 提取（9 处收敛）；
-  `emotion.vad_centroid` 统一 VAD 加权质心（议题质心与用户情绪估计共用，逐位等价）。
-- **观测**：`llm_cost_clear()` 清空成本表（测试隔离/运维重置）。
+- **写事务**：`_db.transaction()` 内 `controller.ingest` 主写段原子提交，
+  失败整体回滚，不留半成品状态。
+- **检索下推**：`memory_rows_by_facts` 将 `WHERE fact IN (...)` 下推 SQL。
+- **公共助手**：`core_cfg` 统一配置读取；`_llmutil.parse_json_object` 统一 LLM JSON 提取；
+  `vad_centroid` 统一 VAD 加权质心。
+- **观测**：`llm_cost_clear()` 清空成本表（测试隔离 / 运维重置）。
 
 ## 3. 一条消息的完整旅程
 
@@ -249,12 +249,39 @@ AI 自身（`ai` / `ai:<id>`）、人物档案（`char:<名>`）**同表同格�
    长尾仍会漏）；根治需提取质量门控模型（路线图 V14）。
 2. **阈值未校准**：关系阶段、遗忘半衰期、表达画像阈值都是经验值，需真实数据校准。
 3. **检索无数字基线**：评测管道就绪但 probes/评分还在积累，权重调整暂无数字依据。
-4. **单 SQLite + 内存态**：`_chat_busy` / 缓存 / 节流状态重启即失；大流量需评估迁移
-   PostgreSQL+pgvector（数据层已收敛在 `_db`，迁移路径清晰）。写入已事务化，半成品
-   状态已消除。
+4. **部分内存态**：检索缓存、`_chat_busy`、节流状态重启即失；核心状态已迁正规表，
+   其余待继续落盘。数据库已支持 PostgreSQL + pgvector，多实例部署仍受内存态限制。
 5. **prompt 级约束的极限**：防编造、防模板、防夸张是提示词层面，无法 100% 根除；
    彻底解决依赖 AI 味抽查集 + 训练。
 
-## 8. 相关文档
+## 8. 关键接口契约
 
-训练与调优、情绪判断、详细设计等规划文档与版本记录维护在仓库外的 docs 目录，不随本仓库分发。
+```python
+memory.retrieve(query, scopes, top_k=5, min_score=0.25) -> [(fact, score, scope)]
+memory.retrieve_detailed(...) -> [{fact, scope, score, rrf, policy, confidence, rerank}]
+memory.ingest(scope, key, text, reply="", facts=None, confidence=None, source=None) -> dict
+memory.assemble_context(query, scopes, ..., budget=None) -> str
+memory.backfill_run(batch=64) -> dict
+memory.run_eval(probes, k=5) -> dict
+```
+
+## 9. 运维
+
+```bash
+python tools.py memory-embed        # 回填向量
+python tools.py memory-grow         # 成长：巩固 / 反思 / 遗忘 / 索引
+python tools.py memory-eval --file probes.json --save
+python tools.py memory-probes       # 查询日志 → 评测集
+python tools.py memory-calibrate --file probes.json
+python tools.py memory-index --tune --file probes.json
+python tools.py memory-clear-user <uid>
+python tools.py memory-sessions / memory-topics / memory-route
+python tools.py memory-governance
+```
+
+## 10. 相关文档
+
+- 根目录 [README.md](../README.md)：系统总览、ER 图、部署与配置
+- [docs/deployment.md](../docs/deployment.md)：部署与运维
+- [docs/roadmap.md](../docs/roadmap.md)：路线图与待办
+- [agent/README.md](../agent/README.md)：Agent / Persona 层

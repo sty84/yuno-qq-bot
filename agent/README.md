@@ -1,6 +1,6 @@
-# Agent 层：Memory / Persona / Agent 系统
+# Agent 层：Memory / Persona / Agent 系统（v2.5）
 
-三层结构，全部接云端 LLM（默认 DeepSeek，`llm` 参数可换任意 OpenAI 兼容调用）：
+三层结构，全部接云端 LLM（默认 DeepSeek，可换任意 OpenAI 兼容调用）：
 
 ```mermaid
 flowchart LR
