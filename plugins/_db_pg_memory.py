@@ -95,16 +95,19 @@ def memory_rows(scope=None, key=None, exclude_status=None, limit=None):
         sql = f"SELECT {_memory_cols()} FROM memories"
         conds, params = [], []
         if scope:
-            conds.append("scope=%s"); params.append(scope)
+            conds.append("scope=%s")
+            params.append(scope)
         if key is not None:
-            conds.append("key=%s"); params.append(key)
+            conds.append("key=%s")
+            params.append(key)
         if exclude_status:
             conds.append("status NOT IN (" + ",".join(["%s"] * len(exclude_status)) + ")")
             params.extend(exclude_status)
         if conds:
             sql += " WHERE " + " AND ".join(conds)
         if limit is not None:
-            sql += " LIMIT %s"; params.append(int(limit))
+            sql += " LIMIT %s"
+            params.append(int(limit))
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
@@ -218,15 +221,19 @@ def meta_rows(scope=None, key=None, min_importance=None, limit=None):
         sql = "SELECT * FROM memory_meta"
         conds, params = [], []
         if scope:
-            conds.append("scope=%s"); params.append(scope)
+            conds.append("scope=%s")
+            params.append(scope)
         if key is not None:
-            conds.append("key=%s"); params.append(key)
+            conds.append("key=%s")
+            params.append(key)
         if min_importance is not None:
-            conds.append("importance>=%s"); params.append(float(min_importance))
+            conds.append("importance>=%s")
+            params.append(float(min_importance))
         if conds:
             sql += " WHERE " + " AND ".join(conds)
         if limit is not None:
-            sql += " LIMIT %s"; params.append(int(limit))
+            sql += " LIMIT %s"
+            params.append(int(limit))
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
@@ -270,18 +277,23 @@ def event_rows(scope=None, key=None, since=None, min_importance=None, limit=None
         sql = "SELECT * FROM events"
         conds, params = [], []
         if scope:
-            conds.append("scope=%s"); params.append(scope)
+            conds.append("scope=%s")
+            params.append(scope)
         if key is not None:
-            conds.append("key=%s"); params.append(key)
+            conds.append("key=%s")
+            params.append(key)
         if since:
-            conds.append("ts>=%s"); params.append(since)
+            conds.append("ts>=%s")
+            params.append(since)
         if min_importance is not None:
-            conds.append("importance>=%s"); params.append(min_importance)
+            conds.append("importance>=%s")
+            params.append(min_importance)
         if conds:
             sql += " WHERE " + " AND ".join(conds)
         sql += " ORDER BY importance DESC, id DESC"
         if limit:
-            sql += " LIMIT %s"; params.append(int(limit))
+            sql += " LIMIT %s"
+            params.append(int(limit))
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
@@ -306,8 +318,10 @@ def audit_query(limit=50, action=None):
         sql = "SELECT ts,action,target,detail,operator FROM audit"
         params = []
         if action:
-            sql += " WHERE action=%s"; params.append(action)
-        sql += " ORDER BY id DESC LIMIT %s"; params.append(max(1, int(limit)))
+            sql += " WHERE action=%s"
+            params.append(action)
+        sql += " ORDER BY id DESC LIMIT %s"
+        params.append(max(1, int(limit)))
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
@@ -332,12 +346,15 @@ def conv_rows(scope=None, since=None, limit=100):
         sql = "SELECT * FROM conv_log"
         conds, params = [], []
         if scope:
-            conds.append("scope=%s"); params.append(scope)
+            conds.append("scope=%s")
+            params.append(scope)
         if since:
-            conds.append("ts>=%s"); params.append(since)
+            conds.append("ts>=%s")
+            params.append(since)
         if conds:
             sql += " WHERE " + " AND ".join(conds)
-        sql += " ORDER BY id DESC LIMIT %s"; params.append(max(1, int(limit)))
+        sql += " ORDER BY id DESC LIMIT %s"
+        params.append(max(1, int(limit)))
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
@@ -517,10 +534,13 @@ def memory_search(q, scope=None, key=None, limit=10):
         sql = "SELECT scope,key,fact,embedding,updated_at,confidence FROM memories WHERE fact ILIKE %s"
         params = [f"%{q}%"]
         if scope:
-            sql += " AND scope=%s"; params.append(scope)
+            sql += " AND scope=%s"
+            params.append(scope)
         if key is not None:
-            sql += " AND key=%s"; params.append(key)
-        sql += " ORDER BY updated_at DESC LIMIT %s"; params.append(max(1, int(limit)))
+            sql += " AND key=%s"
+            params.append(key)
+        sql += " ORDER BY updated_at DESC LIMIT %s"
+        params.append(max(1, int(limit)))
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
@@ -685,15 +705,19 @@ def topic_rows(scope=None, key=None, category=None, limit=None):
         sql = "SELECT * FROM topics"
         conds, params = [], []
         if scope:
-            conds.append("scope=%s"); params.append(scope)
+            conds.append("scope=%s")
+            params.append(scope)
         if key is not None:
-            conds.append("key=%s"); params.append(key)
+            conds.append("key=%s")
+            params.append(key)
         if category:
-            conds.append("category=%s"); params.append(category)
+            conds.append("category=%s")
+            params.append(category)
         if conds:
             sql += " WHERE " + " AND ".join(conds)
         if limit is not None:
-            sql += " LIMIT %s"; params.append(int(limit))
+            sql += " LIMIT %s"
+            params.append(int(limit))
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
@@ -762,11 +786,14 @@ def attr_rows(scope=None, key=None, attr=None):
         sql = "SELECT * FROM memory_attrs"
         conds, params = [], []
         if scope:
-            conds.append("scope=%s"); params.append(scope)
+            conds.append("scope=%s")
+            params.append(scope)
         if key is not None:
-            conds.append("key=%s"); params.append(key)
+            conds.append("key=%s")
+            params.append(key)
         if attr:
-            conds.append("attr=%s"); params.append(attr)
+            conds.append("attr=%s")
+            params.append(attr)
         if conds:
             sql += " WHERE " + " AND ".join(conds)
         cur.execute(sql, params)
@@ -806,12 +833,15 @@ def history_rows(scope=None, key=None, limit=50):
         sql = "SELECT * FROM memory_history"
         conds, params = [], []
         if scope:
-            conds.append("scope=%s"); params.append(scope)
+            conds.append("scope=%s")
+            params.append(scope)
         if key is not None:
-            conds.append("key=%s"); params.append(key)
+            conds.append("key=%s")
+            params.append(key)
         if conds:
             sql += " WHERE " + " AND ".join(conds)
-        sql += " ORDER BY id DESC LIMIT %s"; params.append(max(1, int(limit)))
+        sql += " ORDER BY id DESC LIMIT %s"
+        params.append(max(1, int(limit)))
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
@@ -836,8 +866,10 @@ def feedback_rows(scope=None, limit=50):
         sql = "SELECT * FROM feedback_log"
         params = []
         if scope:
-            sql += " WHERE scope=%s"; params.append(scope)
-        sql += " ORDER BY id DESC LIMIT %s"; params.append(max(1, int(limit)))
+            sql += " WHERE scope=%s"
+            params.append(scope)
+        sql += " ORDER BY id DESC LIMIT %s"
+        params.append(max(1, int(limit)))
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
@@ -923,12 +955,15 @@ def goal_rows(scope=None, status=None, limit=50):
         sql = "SELECT * FROM goals"
         conds, params = [], []
         if scope:
-            conds.append("scope=%s"); params.append(scope)
+            conds.append("scope=%s")
+            params.append(scope)
         if status:
-            conds.append("status=%s"); params.append(status)
+            conds.append("status=%s")
+            params.append(status)
         if conds:
             sql += " WHERE " + " AND ".join(conds)
-        sql += " ORDER BY updated_at DESC LIMIT %s"; params.append(max(1, int(limit)))
+        sql += " ORDER BY updated_at DESC LIMIT %s"
+        params.append(max(1, int(limit)))
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
@@ -940,20 +975,27 @@ def goal_update(scope, title, progress=None, status=None, note=None, motivation=
         cur = _connect().cursor()
         sets, params = [], []
         if progress is not None:
-            sets.append("progress=%s"); params.append(float(progress))
+            sets.append("progress=%s")
+            params.append(float(progress))
         if status is not None:
-            sets.append("status=%s"); params.append(str(status))
+            sets.append("status=%s")
+            params.append(str(status))
         if note is not None:
-            sets.append("note=%s"); params.append(str(note))
+            sets.append("note=%s")
+            params.append(str(note))
         if motivation is not None:
-            sets.append("motivation=%s"); params.append(str(motivation))
+            sets.append("motivation=%s")
+            params.append(str(motivation))
         if confidence is not None:
-            sets.append("confidence=%s"); params.append(float(confidence))
+            sets.append("confidence=%s")
+            params.append(float(confidence))
         if current_state is not None:
-            sets.append("current_state=%s"); params.append(str(current_state))
+            sets.append("current_state=%s")
+            params.append(str(current_state))
         if not sets:
             return
-        sets.append("updated_at=%s"); params.append(datetime.now().isoformat(timespec="seconds"))
+        sets.append("updated_at=%s")
+        params.append(datetime.now().isoformat(timespec="seconds"))
         params.extend([scope, str(title)])
         cur.execute(f"UPDATE goals SET {', '.join(sets)} WHERE scope=%s AND title=%s", params)
         _maybe_commit()
@@ -1019,12 +1061,15 @@ def trace_rows(scope=None, since=None, limit=100):
         sql = "SELECT * FROM memory_trace"
         conds, params = [], []
         if scope:
-            conds.append("scope=%s"); params.append(scope)
+            conds.append("scope=%s")
+            params.append(scope)
         if since:
-            conds.append("ts>=%s"); params.append(since)
+            conds.append("ts>=%s")
+            params.append(since)
         if conds:
             sql += " WHERE " + " AND ".join(conds)
-        sql += " ORDER BY id DESC LIMIT %s"; params.append(max(1, int(limit)))
+        sql += " ORDER BY id DESC LIMIT %s"
+        params.append(max(1, int(limit)))
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()

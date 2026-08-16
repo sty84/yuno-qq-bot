@@ -9,7 +9,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from tools.core import (
+from tools.core import (  # noqa: E402
     ROOT,
     SCENARIO_RUBRIC,
     _emit,
@@ -23,7 +23,7 @@ from tools.core import (
     run_ablation,
     scenario_replay,
 )
-from tools.memory import (
+from tools.memory import (  # noqa: E402
     _PROBE_QUESTION_WORDS,
     _PROBE_SOCIAL_WORDS,
     _is_social_probe,
@@ -79,7 +79,7 @@ from tools.memory import (
     cmd_topic_vad_backfill,
     cmd_world,
 )
-from tools.eval import (
+from tools.eval import (  # noqa: E402
     cmd_ablation,
     cmd_emotion_eval,
     cmd_eval_dataset_save,
@@ -92,7 +92,7 @@ from tools.eval import (
     cmd_subjects_eval,
     cmd_time_eval,
 )
-from tools.admin import (
+from tools.admin import (  # noqa: E402
     cmd_backup,
     cmd_config_validate,
     cmd_data_dump_json,
@@ -107,7 +107,7 @@ from tools.admin import (
     cmd_persona_switch,
     cmd_recover,
 )
-from tools.main import main
+from tools.main import main  # noqa: E402
 
 __all__ = [
     'ROOT',

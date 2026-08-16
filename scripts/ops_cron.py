@@ -12,7 +12,7 @@ WS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if WS not in sys.path:
     sys.path.insert(0, WS)
 
-from tools.admin import cmd_backup, cmd_health, cmd_pg_guard
+from tools.admin import cmd_backup, cmd_health, cmd_pg_guard  # noqa: E402
 
 
 def main() -> int:

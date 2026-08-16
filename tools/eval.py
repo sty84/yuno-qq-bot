@@ -68,6 +68,8 @@ def cmd_eval_dataset_save(name: str, path: str) -> str:
         probes = raw.get("items") if isinstance(raw, dict) else raw
     except Exception as e:
         return f"评测集读取失败：{e}"
+    if not probes:
+        return f"评测集为空：{path}"
     _db.kv_set(
         "memory",
         f"dataset:{name}",

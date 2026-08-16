@@ -1,15 +1,15 @@
 """Memory Controller：分析 → 分类路由 → 提取 → 存储（多库）→ 记忆更新 → 策略反馈 → AI 自身记忆。"""
 
-from memory._llmutil import parse_json_object
 import logging
 import re
 import os
 from datetime import datetime
 
-_log = logging.getLogger(__name__)
-
+from memory._llmutil import parse_json_object
 from plugins import _db, _shared
 from memory import analysis, embedder, extract, graph, lexical, policy, topic, trace, world
+
+_log = logging.getLogger(__name__)
 
 
 _GROUND_NOISE = ("是", "的", "了", "我", "你", "他", "她", "它", "只", "有", "在", "很",

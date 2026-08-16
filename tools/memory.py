@@ -669,7 +669,7 @@ def cmd_pollution_scan(scope: str = "", apply: bool = False) -> str:
     if not cand:
         return "污染扫描：无 source=user 的记忆"
     # 3) 逐条分级
-    buckets = {"strong": [], "partial": [], "weak": [], "none": [], "empty": []}
+    buckets: dict[str, list] = {"strong": [], "partial": [], "weak": [], "none": [], "empty": []}
     for r in cand:
         lv = ctl.pollution_level(r["fact"], stmt_msgs, quest_msgs)
         buckets.setdefault(lv, []).append(r)

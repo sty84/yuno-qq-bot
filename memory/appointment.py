@@ -10,6 +10,10 @@
 import re
 import json
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from plugins import _db, _shared
+from memory import tz as tz_mod
 
 
 def _persona_name() -> str:
@@ -18,10 +22,6 @@ def _persona_name() -> str:
         return persona.persona_name()
     except Exception:
         return "YUNO"
-from zoneinfo import ZoneInfo
-
-from plugins import _db, _shared
-from memory import tz as tz_mod
 
 KV_NS = "memory"
 KV_KEY = "appointments"

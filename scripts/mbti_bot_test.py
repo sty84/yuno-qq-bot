@@ -17,13 +17,13 @@ import tempfile
 
 # 测试数据与 LLM 成本写入临时 SQLite，避免污染生产 PostgreSQL
 os.environ["YUNO_DB_BACKEND"] = "sqlite"
-from plugins import _db
+from plugins import _db  # noqa: E402
 _db.init(tempfile.mkdtemp(prefix="mbti_test_"), force=True)
 
-from plugins import _shared
-from agent import persona
-from plugins.mbti import DIMENSIONS, QUESTIONS
-from plugins import _db_internal
+from plugins import _shared  # noqa: E402
+from agent import persona  # noqa: E402
+from plugins.mbti import DIMENSIONS, QUESTIONS  # noqa: E402
+from plugins import _db_internal  # noqa: E402
 
 
 def ask_choice(q, system):

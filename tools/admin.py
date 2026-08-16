@@ -161,7 +161,7 @@ def cmd_recover_drill() -> str:
     return f"恢复演练失败：{latest.name} SQLite 完整性检查异常：{row}"
 
 
-def cmd_config_validate() -> str:
+def cmd_config_validate() -> tuple[int, str]:
     """校验 config.json：未知段、数值字段类型、窗口类字段长度、分享参数取值。"""
     _capability, _db, _shared = _plugins()
     cfg = _shared.CONFIG
@@ -231,19 +231,20 @@ def cmd_data_export(out: str = "", with_config: bool = False) -> str:
     from datetime import datetime
     from plugins import _db
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out = out or str(ROOT / "data" / f"export-{ts}.tar.gz")
-    out = pathlib.Path(out)
-    out.parent.mkdir(parents=True, exist_ok=True)
+    out_path = pathlib.Path(out or str(ROOT / "data" / f"export-{ts}.tar.gz"))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmpd:
         tmp = pathlib.Path(tmpd)
         db_path = tmp / "bot.db"
         _db.backup_to(db_path)
         data = _db.dump_all()
         (tmp / "data.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        table_sizes = {t: len(rows) for t, rows in data.items()}
+        total_rows = sum(table_sizes.values())
         meta = {
             "version": "v12",
             "exported_at": datetime.now().isoformat(timespec="seconds"),
-            "tables": {t: len(rows) for t, rows in data.items()},
+            "tables": table_sizes,
             "db_size": db_path.stat().st_size,
         }
         (tmp / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -253,10 +254,10 @@ def cmd_data_export(out: str = "", with_config: bool = False) -> str:
                 shutil.copyfile(src, tmp / name)
         if with_config:
             shutil.copyfile(ROOT / "config.json", tmp / "config.json")
-        with tarfile.open(out, "w:gz") as tar:
+        with tarfile.open(out_path, "w:gz") as tar:
             for f in tmp.iterdir():
                 tar.add(f, arcname=f.name)
-    return f"已导出全量数据到 {out}（{sum(meta['tables'].values())} 行）"
+    return f"已导出全量数据到 {out_path}（{total_rows} 行）"
 
 
 def cmd_data_import(path: str, replace: bool = False, dry_run: bool = False) -> str:
@@ -264,18 +265,18 @@ def cmd_data_import(path: str, replace: bool = False, dry_run: bool = False) -> 
     import tarfile
     import tempfile
     from plugins import _db
-    path = pathlib.Path(path)
-    if not path.exists():
-        return f"文件不存在：{path}"
+    path_obj = pathlib.Path(path)
+    if not path_obj.exists():
+        return f"文件不存在：{path_obj}"
     data, db_bytes = None, None
-    if path.suffix == ".json":
-        data = json.loads(path.read_text(encoding="utf-8"))
-    elif path.suffix == ".db":
-        db_bytes = path.read_bytes()
-    elif path.suffix == ".gz" or str(path).endswith(".tar.gz"):
+    if path_obj.suffix == ".json":
+        data = json.loads(path_obj.read_text(encoding="utf-8"))
+    elif path_obj.suffix == ".db":
+        db_bytes = path_obj.read_bytes()
+    elif path_obj.suffix == ".gz" or str(path_obj).endswith(".tar.gz"):
         with tempfile.TemporaryDirectory() as tmpd:
             tmp = pathlib.Path(tmpd)
-            with tarfile.open(path, "r:gz") as tar:
+            with tarfile.open(path_obj, "r:gz") as tar:
                 try:
                     tar.extractall(tmp, filter="data")
                 except TypeError:
@@ -334,7 +335,7 @@ def cmd_mcp() -> int:
         return cap.services_list()
 
     @mcp.tool()
-    def services_status(keyword: str = None):
+    def services_status(keyword: str | None = None):
         """查询服务健康状态，keyword 可省略以查询全部。"""
         return cap.services_status(keyword)
 
@@ -369,7 +370,7 @@ def cmd_mcp() -> int:
         return cap.config_set(section, key, value)
 
     @mcp.tool()
-    def audit_query(limit: int = 50, action: str = None):
+    def audit_query(limit: int = 50, action: str | None = None):
         """查询操作审计记录。"""
         return cap.audit_query(limit, action)
 
@@ -384,7 +385,7 @@ def cmd_mcp() -> int:
         return cap.memory_clear(kind, key)
 
     @mcp.tool()
-    def memory_search(query: str, scope: str = None, key: str = None, limit: int = 10):
+    def memory_search(query: str, scope: str | None = None, key: str | None = None, limit: int = 10):
         """统一记忆检索（关键词 + 可选向量）。"""
         return cap.memory_search(query, scope, key, limit)
 
@@ -420,7 +421,7 @@ def cmd_persona_smoke() -> str:
     rooms = list(layout.keys())
     edges = w.get("edges") or []
     if rooms:
-        adj = {}
+        adj: dict[str, list[str]] = {}
         for a, b in edges:
             adj.setdefault(a, []).append(b)
             adj.setdefault(b, []).append(a)
@@ -581,7 +582,7 @@ def cmd_floorplan_render(pack_name: str = "", out: str = "") -> str:
     )
 
 
-def cmd_persona_freshcheck(pack: str = "") -> str:
+def cmd_persona_freshcheck(pack: str = "") -> tuple[int, str] | str:
     """新 pack 可迁移性验收（2026-08-15 起）：在完全干净的临时环境（空库+该 pack）
     跑核心链路——身份 stable 分类/core 升迁/常驻注入、记忆检索、约定（归属+内容+问句过滤）、
     防编造（来源声称硬门+会话内证据）、情绪词表、概念分类回归。

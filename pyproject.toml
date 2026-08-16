@@ -27,10 +27,7 @@ python_files = ["test_*.py"]
 [tool.ruff.lint]
 # 先启用关键错误类；历史风格问题分批放开
 select = ["E4", "E7", "E9", "F"]
-ignore = [
-  "E402",  # 模块级 import 顺序（历史代码较多，后续分批修）
-  "E702",  # 单行多条语句（历史代码）
-]
+ignore = []
 
 [tool.mypy]
 python_version = "3.10"
@@ -38,13 +35,14 @@ follow_imports = "skip"
 ignore_missing_imports = true
 files = [
   "memory/interfaces.py",
+  "memory/telemetry.py",
   "agent/core.py",
   "web/app.py",
   "web/auth.py",
   "web/routes_admin.py",
   "web/routes_cognitive.py",
   "web/routes_eval.py",
-  "tools/core.py",
+  "tools",
 ]
 
 [tool.pyright]

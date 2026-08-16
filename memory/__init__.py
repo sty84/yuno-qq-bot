@@ -61,8 +61,8 @@ reflect = advisor
 sensitive = controller
 update = controller
 weather = environment
-from plugins import _db
-from memory import backfill as backfill_mod
+from plugins import _db  # noqa: E402
+from memory import backfill as backfill_mod  # noqa: E402
 
 # session 会话管理已并入 controller（保留别名，兼容 from memory import session）
 session = controller

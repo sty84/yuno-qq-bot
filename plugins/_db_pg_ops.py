@@ -107,10 +107,13 @@ def session_rows(scope=None, key=None, closed=0, limit=20):
         sql = "SELECT * FROM sessions WHERE closed=%s"
         params = [int(closed)]
         if scope:
-            sql += " AND scope=%s"; params.append(scope)
+            sql += " AND scope=%s"
+            params.append(scope)
         if key is not None:
-            sql += " AND key=%s"; params.append(key)
-        sql += " ORDER BY updated_at DESC LIMIT %s"; params.append(max(1, int(limit)))
+            sql += " AND key=%s"
+            params.append(key)
+        sql += " ORDER BY updated_at DESC LIMIT %s"
+        params.append(max(1, int(limit)))
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
@@ -189,9 +192,11 @@ def entity_rows(scope=None, key=None):
         sql = "SELECT * FROM entities"
         conds, params = [], []
         if scope:
-            conds.append("scope=%s"); params.append(scope)
+            conds.append("scope=%s")
+            params.append(scope)
         if key is not None:
-            conds.append("key=%s"); params.append(key)
+            conds.append("key=%s")
+            params.append(key)
         if conds:
             sql += " WHERE " + " AND ".join(conds)
         cur.execute(sql, params)
@@ -267,16 +272,22 @@ def llm_cost_summary(days=30) -> dict:
         total["completion"] += c
         day = str(r["ts"])[:10]
         d = by_day.setdefault(day, {"calls": 0, "prompt": 0, "completion": 0})
-        d["calls"] += 1; d["prompt"] += p; d["completion"] += c
+        d["calls"] += 1
+        d["prompt"] += p
+        d["completion"] += c
         m = by_module.setdefault(str(r["module"] or "chat"), {"calls": 0, "prompt": 0, "completion": 0})
-        m["calls"] += 1; m["prompt"] += p; m["completion"] += c
+        m["calls"] += 1
+        m["prompt"] += p
+        m["completion"] += c
         if str(r["module"]) == "rerank":
             for path in str(r["detail"] or "").split(","):
                 path = path.strip()
                 if not path:
                     continue
                 q = by_path.setdefault(path, {"calls": 0, "prompt": 0, "completion": 0})
-                q["calls"] += 1; q["prompt"] += p; q["completion"] += c
+                q["calls"] += 1
+                q["prompt"] += p
+                q["completion"] += c
     return {
         "days": int(days),
         "total": total,
@@ -349,16 +360,21 @@ def skill_update(situation, action, success=None, result=None, failure_reason=No
         cur = _connect().cursor()
         sets, params = [], []
         if success is not None:
-            sets.append("success=%s"); params.append(float(success))
+            sets.append("success=%s")
+            params.append(float(success))
         if result is not None:
-            sets.append("result=%s"); params.append(str(result)[:500])
+            sets.append("result=%s")
+            params.append(str(result)[:500])
         if failure_reason is not None:
-            sets.append("failure_reason=%s"); params.append(str(failure_reason)[:300])
+            sets.append("failure_reason=%s")
+            params.append(str(failure_reason)[:300])
         if condition is not None:
-            sets.append("condition=%s"); params.append(str(condition)[:200])
+            sets.append("condition=%s")
+            params.append(str(condition)[:200])
         if not sets:
             return
-        sets.append("updated_at=%s"); params.append(datetime.now().isoformat(timespec="seconds"))
+        sets.append("updated_at=%s")
+        params.append(datetime.now().isoformat(timespec="seconds"))
         params.extend([str(situation), str(action)])
         cur.execute(f"UPDATE skills SET {', '.join(sets)} WHERE situation=%s AND action=%s", params)
         _maybe_commit()
@@ -487,8 +503,10 @@ def ai_action_rows(scope="", limit=60):
         sql = "SELECT * FROM ai_actions_state"
         params = []
         if scope:
-            sql += " WHERE scope=%s"; params.append(scope)
-        sql += " ORDER BY id DESC LIMIT %s"; params.append(max(1, int(limit)))
+            sql += " WHERE scope=%s"
+            params.append(scope)
+        sql += " ORDER BY id DESC LIMIT %s"
+        params.append(max(1, int(limit)))
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
@@ -512,8 +530,10 @@ def item_event_rows(item=None, limit=500):
         sql = "SELECT * FROM item_events"
         params = []
         if item:
-            sql += " WHERE item=%s"; params.append(item)
-        sql += " ORDER BY id DESC LIMIT %s"; params.append(max(1, int(limit)))
+            sql += " WHERE item=%s"
+            params.append(item)
+        sql += " ORDER BY id DESC LIMIT %s"
+        params.append(max(1, int(limit)))
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
