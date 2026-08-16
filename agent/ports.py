@@ -473,19 +473,23 @@ class _AgentActionPort(ActionPort):
         mem_ctx = (memory.last_mem_ctx if memory else "") or ""
         mem_evidence = list(memory.last_evidence) if memory else []
 
+        from memory.controller import _is_social_message
+        is_social = _is_social_message(text)
+
         if memory and memory.last_current_topic:
             ctx_parts.append(
                 f"【当前话题】{memory.last_current_topic}（跨轮保持主线，别聊跑题）"
             )
-        if memory and memory.last_world_block:
+        # 寒暄/短社交消息不注入世界模型和记忆检索，避免被旧记忆带偏
+        if not is_social and memory and memory.last_world_block:
             ctx_parts.append(memory.last_world_block)
 
-        if mem_ctx:
+        if not is_social and mem_ctx:
             ctx_parts.append(mem_ctx)
             hint = _time_fragment_hint(mem_ctx)
             if hint:
                 ctx_parts.append(hint)
-        if mem_ctx and scopes:
+        if not is_social and mem_ctx and scopes:
             ctx_parts.append(
                 "【证据规则·硬性要求】只有上面检索注入记忆里能对应到的内容才能作为事实陈述："
                 "用户亲口说的（·用户亲口说）与人设设定（·人设设定）可引用；"
@@ -518,10 +522,17 @@ class _AgentActionPort(ActionPort):
                 if bandit_mod._cfg("enabled", True):
                     st = bandit_mod.select(scopes[0])
                     meta["bandit"] = {"id": st["id"], "label": st["label"], "mean": st.get("mean")}
-                    ctx_parts.append(f"【回应策略】{st['label']}：{st['hint']}")
+                    if not is_social:
+                        ctx_parts.append(f"【回应策略】{st['label']}：{st['hint']}")
             except Exception as e:
                 _stats_err(e)
                 pass
+        if is_social:
+            ctx_parts.append(
+                "【寒暄模式·硬性要求】用户只是在寒暄/问你在干嘛。"
+                "直接简短自然地回答当前状态（例如“没干嘛，在休息”），"
+                "不要主动提起记忆、日程、旧话题、音乐术语或具体项目。"
+            )
 
         call = llm or _default_llm
         llm_text = text
