@@ -1319,24 +1319,51 @@ def lexicon_sync(scope, key):
 
 
 def lexicon_rebuild() -> int:
-    return 0
+    """尝试为 memories.fact 建立 PG 原生全文索引；失败返回 0（保留 ILIKE 降级）。"""
+    try:
+        with _lock:
+            cur = _connect().cursor()
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS memories_fts_idx "
+                "ON memories USING GIN (to_tsvector('simple', fact))"
+            )
+            _maybe_commit()
+            cur.close()
+            return 1
+    except Exception:
+        return 0
 
 
 def lexicon_search(query, scopes, limit=10):
-    """PG 简易词法检索：用 ILIKE 子串匹配（后续可换 pg_trgm）。"""
+    """PG 词法检索：优先原生全文检索，异常时降级 ILIKE 子串匹配。"""
     q = str(query or "").strip()
     if not q:
         return []
     with _lock:
         cur = _connect().cursor(cursor_factory=RealDictCursor)
-        sql = "SELECT scope,key,fact,0 AS rank FROM memories WHERE fact ILIKE %s"
-        params = [f"%{q}%"]
+        params = [q]
+        sql = (
+            "SELECT scope,key,fact,"
+            "ts_rank(to_tsvector('simple', fact), plainto_tsquery('simple', %s)) AS rank "
+            "FROM memories WHERE to_tsvector('simple', fact) @@ plainto_tsquery('simple', %s)"
+        )
+        params.append(q)
         if scopes:
             marks = ",".join(["%s"] * len(scopes))
             sql += f" AND scope IN ({marks})"
             params += list(scopes)
-        sql += " LIMIT %s"; params.append(max(1, int(limit)))
-        cur.execute(sql, params)
+        sql += " ORDER BY rank DESC LIMIT %s"
+        params.append(max(1, int(limit)))
+        try:
+            cur.execute(sql, params)
+        except Exception:
+            # 降级：FTS 不可用时退回 ILIKE
+            cur.execute(
+                "SELECT scope,key,fact,0 AS rank FROM memories WHERE fact ILIKE %s"
+                + (f" AND scope IN ({','.join(['%s'] * len(scopes or []))})" if scopes else "")
+                + " LIMIT %s",
+                [f"%{q}%", *(scopes or []), max(1, int(limit))],
+            )
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
         return rows

@@ -100,8 +100,10 @@ def init(data_dir=None, force=False):
     _conn = None
     if ThreadedConnectionPool is None:
         raise RuntimeError("psycopg2.pool 不可用")
+    minconn = max(1, int(os.getenv("YUNO_PG_MINCONN", "1")))
+    maxconn = max(minconn, int(os.getenv("YUNO_PG_MAXCONN", "8")))
     _pool = ThreadedConnectionPool(
-        1, 8,
+        minconn, maxconn,
         dsn(),
         keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3,
     )

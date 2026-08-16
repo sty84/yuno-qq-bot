@@ -239,6 +239,25 @@ def create_app():
 
     state = AppState()
     app = FastAPI(title="Yuno Ops Web", version="0.3.0")
+
+    from memory import telemetry
+
+    @app.middleware("http")
+    async def _log_request(request, call_next):
+        rid = telemetry.request_id()
+        request.state.request_id = rid
+        start = time.time()
+        response = await call_next(request)
+        telemetry.log_event(
+            "web.request",
+            request_id=rid,
+            method=request.method,
+            path=request.url.path,
+            status=response.status_code,
+            duration_ms=round((time.time() - start) * 1000, 2),
+        )
+        return response
+
     auth.install_auth(app, state)
     routes_eval.register(app, state)
     routes_cognitive.register(app, state)

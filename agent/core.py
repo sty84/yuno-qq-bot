@@ -4,7 +4,7 @@
 实际记忆/决策/动作端口实现已拆分到 agent.ports。
 """
 
-from memory import ingest
+from memory import ingest, telemetry
 from memory.interfaces import CognitiveArchitecture
 
 from agent.ports import _AgentMemoryPort, _AgentDecisionPort, _AgentActionPort
@@ -27,6 +27,13 @@ def ask(
     决策端口准备上下文与状态，记忆端口执行检索，动作端口生成回复；
     返回 (reply, meta)。
     """
+    rid = telemetry.request_id()
+    telemetry.log_event(
+        "agent.ask.start",
+        request_id=rid,
+        query=(text or "")[:200],
+        scope=scopes[0] if scopes else "",
+    )
     arch = CognitiveArchitecture(
         memory=_AgentMemoryPort(),
         decision=_AgentDecisionPort(),
@@ -45,6 +52,12 @@ def ask(
         facts=facts,
         system=system,
         llm=llm,
+    )
+    telemetry.log_event(
+        "agent.ask.end",
+        request_id=rid,
+        reply_len=len(turn.reply or ""),
+        error=bool(turn.meta.get("evidence_gate")) if turn.meta else False,
     )
     return turn.reply, turn.meta
 
