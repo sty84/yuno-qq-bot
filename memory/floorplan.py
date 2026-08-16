@@ -12,9 +12,10 @@
 
 import json
 import math
+from typing import Any
 
 
-_cache = {"key": None, "data": None}
+_cache: dict[str, Any] = {"key": None, "data": None}
 
 
 def active_pack() -> str:
@@ -35,10 +36,10 @@ def _raw(pack_name=None) -> dict:
         if _cache["key"] == key:
             return _cache["data"]
         if not p.exists():
-            _cache.update({"key": key, "data": {}})  # type: ignore[dict-item]
+            _cache.update({"key": key, "data": {}})
             return {}
         fp = json.loads(p.read_text(encoding="utf-8")).get("floorplan") or {}
-        _cache.update({"key": key, "data": fp})  # type: ignore[dict-item]
+        _cache.update({"key": key, "data": fp})
         return fp
     except Exception:
         return {}

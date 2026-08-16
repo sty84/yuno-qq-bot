@@ -76,13 +76,13 @@ def link_fact(scope, key, fact, category, confidence=0.7, an=None) -> int:
     return tid
 
 
-def mood_centroid_from_params(params, window_days=180) -> dict:
+def mood_centroid_from_params(params, window_days=180) -> dict | None:
     """议题情绪质心：vad 参数按时间衰减 + 位置加权平均（复用 emotion.vad_centroid）。
     返回 {vad, label, intensity, label_zh, trend, n, compound}；无有效 vad 参数返回 None。"""
     from memory import emotion as emotion_mod
     vads = [(i, p) for i, p in enumerate(params or []) if p.get("param") == "vad"]
     if not vads:
-        return None  # type: ignore[return-value]
+        return None
     n = len(vads)
     now = time.time()
     samples = []
@@ -101,9 +101,11 @@ def mood_centroid_from_params(params, window_days=180) -> dict:
             pass
         samples.append((age_days, v3))
     if not samples:
-        return None  # type: ignore[return-value]
+        return None
     c = emotion_mod.vad_centroid(samples, float(window_days))
-    s = c["vad"]  # type: ignore[index]
+    if c is None:
+        return None
+    s = c["vad"]
     label, intensity, _ = emotion_mod.label_from_vad(s)
     compound = next((p.get("value") for p in reversed(params or []) if p.get("param") == "compound"), "")
     return {
@@ -111,13 +113,13 @@ def mood_centroid_from_params(params, window_days=180) -> dict:
         "label": label,
         "intensity": round(intensity, 2),
         "label_zh": emotion_mod.label_zh(s),
-        "trend": c["trend"],  # type: ignore[index]
+        "trend": c["trend"],
         "n": n,
         "compound": str(compound or ""),
     }
 
 
-def mood_centroid(topic_id, window_days=180) -> dict:
+def mood_centroid(topic_id, window_days=180) -> dict | None:
     """按 topic_id 取议题情绪质心。"""
     return mood_centroid_from_params(_db.topic_params(topic_id), window_days)
 

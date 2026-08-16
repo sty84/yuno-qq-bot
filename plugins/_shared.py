@@ -42,7 +42,7 @@ deepseek = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
 def _load_persona() -> str:
     """人设单一来源：优先 .env 的 SYSTEM_PROMPT，否则读 Persona Pack 的 persona.md。"""
     if os.getenv("SYSTEM_PROMPT"):
-        return os.getenv("SYSTEM_PROMPT")  # type: ignore[return-value]
+        return os.getenv("SYSTEM_PROMPT") or ""
     try:
         try:
             pk = str(
@@ -84,9 +84,9 @@ def load_config():
 CONFIG = load_config()
 BASE_SYSTEM_PROMPT = _load_persona()  # 必须在 CONFIG 定义之后（读取 persona_pack 需要 CONFIG）
 try:
-    _config_mtime = os.path.getmtime(CONFIG_PATH)
+    _config_mtime: float | None = os.path.getmtime(CONFIG_PATH)
 except OSError:
-    _config_mtime = None  # type: ignore[assignment]
+    _config_mtime = None
 
 
 def _sync_config_deps():
@@ -277,7 +277,9 @@ def ask_deepseek(
             print(f"[AI] DeepSeek 第 {attempt + 1} 次调用失败：{e}")
             if attempt < 2:
                 time.sleep(1 + attempt)
-    raise last_err  # type: ignore[misc]
+    if last_err is None:
+        raise RuntimeError("DeepSeek 调用失败")
+    raise last_err
 
 
 # ===== 身份 =====

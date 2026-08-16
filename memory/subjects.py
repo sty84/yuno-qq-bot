@@ -5,6 +5,8 @@
 - scope_of(name): npc:<name> 独立命名空间。
 """
 
+from typing import Any
+
 from plugins import _shared
 
 
@@ -121,7 +123,7 @@ def eval_run(compare=False, save=False) -> dict:
 
     from plugins import _db
     names = registered()
-    write_ok = sum(1 for n in names if _db.memory_rows(scope_of(n)))  # type: ignore[misc]
+    write_ok = sum(1 for n in names if _db.memory_rows(scope_of(n)))
     priv_leak = npc_total = 0
     for n in names:
         for r in _db.memory_rows(scope_of(n)):
@@ -136,7 +138,7 @@ def eval_run(compare=False, save=False) -> dict:
                 ref_ok = 1
         except Exception:
             pass
-    metrics = {
+    metrics: dict[str, Any] = {
         "subjects": len(names),
         "write_ok": write_ok,
         "write_rate": round(write_ok / max(1, len(names)), 3),
@@ -160,16 +162,16 @@ def eval_run(compare=False, save=False) -> dict:
             if baseline_path.exists():
                 base = json.loads(baseline_path.read_text(encoding="utf-8"))
                 metrics["delta"] = {
-                    "write_rate": round(metrics["write_rate"] - float(base.get("write_rate", 0)), 3),  # type: ignore[operator]
-                    "privacy_rate": round((metrics["privacy_rate"] or 0) - float(base.get("privacy_rate", 0) or 0), 3),  # type: ignore[operator]
+                    "write_rate": round(metrics["write_rate"] - float(base.get("write_rate", 0)), 3),
+                    "privacy_rate": round((metrics["privacy_rate"] or 0) - float(base.get("privacy_rate", 0) or 0), 3),
                     "cap_rate": round(
-                        (metrics["decay"].get("cap_rate") or 0)  # type: ignore[union-attr]
+                        (metrics["decay"].get("cap_rate") or 0)
                         - float((base.get("decay") or {}).get("cap_rate", 0) or 0), 3,
                     ),
                     "decay_rate": round(
-                        (metrics["decay"].get("decay_rate") or 0)  # type: ignore[union-attr]
+                        (metrics["decay"].get("decay_rate") or 0)
                         - float((base.get("decay") or {}).get("decay_rate", 0) or 0), 3,
-                    ) if metrics["decay"].get("decay_eligible") else None,  # type: ignore[union-attr]
+                    ) if metrics["decay"].get("decay_eligible") else None,
                 }
             else:
                 metrics["delta"] = {"error": "无 baseline（先 --save）"}

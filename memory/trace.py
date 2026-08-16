@@ -8,6 +8,7 @@ import json
 import re
 import time
 from datetime import datetime
+from typing import Any
 
 from plugins import _db, _shared
 
@@ -165,7 +166,7 @@ def score(trace_id, scores=None, comment="", reviewer="", total=None):
     return f"已记录评分（trace #{trace_id}）：{float(total):g}/5"
 
 
-_adjust_cache = {"ts": 0.0, "data": None}
+_adjust_cache: dict[str, Any] = {"ts": 0.0, "data": None}
 
 
 def _compute_adjustments() -> dict:
@@ -200,8 +201,8 @@ def _compute_adjustments() -> dict:
 def adjustments(force=False) -> dict:
     """当前评分驱动的行为调整（10 分钟缓存）。"""
     now = time.time()
-    if _adjust_cache["data"] and not force and now - _adjust_cache["ts"] < 600:  # type: ignore[operator]
-        return _adjust_cache["data"]  # type: ignore[return-value]
+    if _adjust_cache["data"] and not force and now - _adjust_cache["ts"] < 600:
+        return _adjust_cache["data"]
     data = _compute_adjustments()
     try:
         conv = _db.kv_get("memory", "conv_adjustments") or {}
@@ -217,7 +218,7 @@ def adjustments(force=False) -> dict:
                 data["convreview_applied"] = True
     except Exception:
         pass
-    _adjust_cache.update({"ts": now, "data": data})  # type: ignore[dict-item]
+    _adjust_cache.update({"ts": now, "data": data})
     return data
 
 

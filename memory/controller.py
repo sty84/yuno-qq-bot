@@ -1242,8 +1242,9 @@ def encrypt_text(text) -> str:
         _warn_no_key("写入明文")
         return str(text)
     try:
+        assert _crypto_key is not None
         nonce = os.urandom(12)
-        ct = _crypto_key.encrypt(nonce, str(text).encode("utf-8"), None)  # type: ignore[union-attr]
+        ct = _crypto_key.encrypt(nonce, str(text).encode("utf-8"), None)
         return "enc:" + nonce.hex() + ":" + ct.hex()
     except Exception as e:
         _stats_err(e)
@@ -1258,8 +1259,9 @@ def decrypt_text(text) -> str:
         _warn_no_key("存在 enc: 密文但无法解密")
         return text
     try:
+        assert _crypto_key is not None
         _, nonce_hex, ct_hex = text.split(":", 2)
-        return _crypto_key.decrypt(bytes.fromhex(nonce_hex), bytes.fromhex(ct_hex), None).decode("utf-8")  # type: ignore[union-attr]
+        return _crypto_key.decrypt(bytes.fromhex(nonce_hex), bytes.fromhex(ct_hex), None).decode("utf-8")
     except Exception as e:
         _stats_err(e)
         _log.warning("AES-GCM 解密失败（密钥变更或数据损坏），返回原文：%s", e)

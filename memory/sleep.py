@@ -14,6 +14,7 @@
 
 import random
 import re
+from typing import Any
 from datetime import datetime, date, timedelta
 
 from plugins import _db, _shared
@@ -480,9 +481,9 @@ def night_run(force=False) -> dict:
         return {"skipped": "already"}
     _mark_slept()  # 先标记，避免崩溃后同夜重复跑
 
-    report = {"ts": _now_ts(), "date": _today()}
-    report["light"] = _light_consolidate()  # type: ignore[assignment]
-    report["deep"] = _deep_consolidate()  # type: ignore[assignment]
+    report: dict[str, Any] = {"ts": _now_ts(), "date": _today()}
+    report["light"] = _light_consolidate()
+    report["deep"] = _deep_consolidate()
 
     cycles = max(1, min(4, int(_cfg("cycles", 2))))
     dreams = [_dream() for _ in range(cycles)]
@@ -512,9 +513,9 @@ def night_run(force=False) -> dict:
         except Exception as e:
             _stats_err(e)
             pass
-    report["dreams"] = len(dreams)  # type: ignore[assignment]
-    report["remembered"] = remember  # type: ignore[assignment]
-    report["samples"] = [d["text"] for d in dreams]  # type: ignore[assignment]
+    report["dreams"] = len(dreams)
+    report["remembered"] = remember
+    report["samples"] = [d["text"] for d in dreams]
     return report
 
 

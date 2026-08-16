@@ -79,12 +79,12 @@ def detect_expressions(text) -> list:
     out = []
     for word, spec in SLANG.items():
         if word.lower() in t:
-            best = max(m[1] for m in spec["meanings"])  # type: ignore[index]
+            best = max(m[1] for m in spec["meanings"])
             out.append(
                 {
                     "expression": word,
                     "possible_intents": [
-                        {"meaning": m[0], "confidence": m[1]} for m in spec["meanings"]  # type: ignore[index]
+                        {"meaning": m[0], "confidence": m[1]} for m in spec["meanings"]
                     ],
                     "confidence": best,
                     "need_context": spec.get("need_context", False),

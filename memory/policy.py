@@ -8,6 +8,7 @@ v22：① 贝叶斯更新按事实类型加阻力（稳定事实 3x / 主观偏�
 import re
 import time
 from datetime import datetime, timedelta
+from typing import Any
 
 from plugins import _db, _shared
 
@@ -227,7 +228,7 @@ def calibrate_train(probes, k=5) -> dict:
                     b["n"] += 1
                     b["pos"] += label
                     break
-    report = {}
+    report: dict[str, Any] = {}
     mapping = {}
     for (lo, hi), v in buckets.items():
         acc = v["pos"] / v["n"] if v["n"] else None
@@ -236,8 +237,8 @@ def calibrate_train(probes, k=5) -> dict:
             mapping[(lo, hi)] = round(min(0.99, max(0.05, acc)), 3)
     if samples:
         naive = sum(label for _c, label in samples) / len(samples)
-        report["naive_accuracy"] = round(naive, 3)  # type: ignore[arg-type]
-        report["samples"] = len(samples)  # type: ignore[assignment]
+        report["naive_accuracy"] = round(naive, 3)
+        report["samples"] = len(samples)
     _db.kv_set(*_calibration_key(), {"mapping": [[lo, hi, v] for (lo, hi), v in mapping.items()]})
     return report
 
@@ -301,14 +302,14 @@ def calibrate_from_feedback(limit=500) -> dict:
         report[f"{lo:.1f}-{hi:.1f}"] = {"n": int(v["n"]), "accuracy": round(acc, 3) if acc is not None else None}
         if v["n"] >= 2 and acc is not None:
             mapping[(lo, hi)] = round(min(0.99, max(0.05, acc)), 3)
-    report["samples"] = len(samples)  # type: ignore[assignment]
-    report["naive_accuracy"] = round(sum(label for _c, label in samples) / len(samples), 3)  # type: ignore[arg-type]
+    report["samples"] = len(samples)
+    report["naive_accuracy"] = round(sum(label for _c, label in samples) / len(samples), 3)
     if mapping:
         _db.kv_set(*_calibration_key(), {"mapping": [[lo, hi, v] for (lo, hi), v in mapping.items()],
                                           "source": "feedback"})
-        report["trained"] = True  # type: ignore[assignment]
+        report["trained"] = True
     else:
-        report["trained"] = False  # type: ignore[assignment]
+        report["trained"] = False
     return report
 
 
@@ -395,7 +396,7 @@ def _activity_density(scope, window_days=7.0) -> float:
     if hit and now - hit["ts"] < _DENSITY_TTL:
         return hit["density"]
     cutoff = (datetime.now() - timedelta(days=window_days)).isoformat(timespec="seconds")
-    n = sum(1 for r in _db.memory_rows(scope) if (r.get("updated_at") or "") >= cutoff)  # type: ignore[misc]
+    n = sum(1 for r in _db.memory_rows(scope) if (r.get("updated_at") or "") >= cutoff)
     density = n / window_days
     _density_cache[scope] = {"ts": now, "density": density}
     return density

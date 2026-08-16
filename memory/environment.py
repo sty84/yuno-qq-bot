@@ -148,7 +148,7 @@ def snapshot(scope="", now=None, force=False) -> dict:
         try:
             from memory import schedule as schedule_mod
             cur = schedule_mod.current_activity(now)
-            activity = cur.get("activity") if cur else "home_rest"  # type: ignore[assignment]
+            activity = str(cur.get("activity") or "home_rest") if cur else "home_rest"
         except Exception as e:
             _stats_err(e)
             activity = "home_rest"

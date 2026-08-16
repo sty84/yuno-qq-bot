@@ -14,6 +14,7 @@ import json
 import random
 import re
 from datetime import date, datetime, timedelta
+from typing import Any
 
 from plugins import _db, _shared
 
@@ -1145,7 +1146,7 @@ def target_place_of(dt) -> str:
         act = ""
     return {"performance": "演出场地", "rehearsal": "排练室", "work": "公司",
             "shopping": "便利店", "exercise": "公园", "friend": "公园",
-            "out_entertain": "外面"}.get(act, "家")  # type: ignore[arg-type]
+            "out_entertain": "外面"}.get(act or "", "家")
 
 
 # ===== 注入块 =====
@@ -1178,7 +1179,7 @@ def room_now(now=None) -> str:
     except Exception as e:
         _stats_err(e)
         act = ""
-    return _ACTIVITY_ROOM.get(act, "")  # type: ignore[arg-type]
+    return _ACTIVITY_ROOM.get(act or "", "")
 
 
 def visible(room) -> list:
@@ -1296,11 +1297,14 @@ def home_block(scope="", text="", now=None) -> str:
         return ""
     now = now or datetime.now()
     ldata = _load()  # 单次加载，容器循环复用（P0 性能优化）
+    _space_mod: Any = None
     try:
-        from memory import space as space_mod
+        from memory import space as _space_module
+        _space_mod = _space_module
     except Exception as e:
         _stats_err(e)
-        space_mod = None  # type: ignore[assignment]
+        _space_mod = None
+    space_mod: Any = _space_mod
     pos = space_mod.position(now) if space_mod else {}
     parts = []
     if pos.get("state") == "在途中":
@@ -1326,10 +1330,10 @@ def home_block(scope="", text="", now=None) -> str:
         containers = ("储物箱", "冰箱", "零食柜", "床头柜", "茶几", "电视柜")
         any_named = any(c in t for c in containers)
         generic = any(w in t for w in ("有什么", "还有", "找找", "看看", "箱", "抽屉"))
-        vis = set(visible(room) or [])  # type: ignore[assignment]
+        vis_set = set(visible(room) or [])
         for container in containers:
             named = container in t
-            if not named and (not generic or any_named or container not in vis):
+            if not named and (not generic or any_named or container not in vis_set):
                 continue
             items = lookup(container, data=ldata)
             if items:

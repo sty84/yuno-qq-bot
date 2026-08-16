@@ -39,8 +39,8 @@ _DEICTIC_RE = re.compile(
 def _event_time_map(scopes) -> dict:
     """fact → (事件 ts, ts_source)，供时间窗口加权（时间当元数据，不污染事实文本）。"""
     key = tuple(sorted(scopes or []))
-    if _event_time_cache["key"] == key and time.time() - _event_time_cache["ts"] < 60:  # type: ignore[operator]
-        return _event_time_cache["map"]  # type: ignore[return-value]
+    if _event_time_cache["key"] == key and time.time() - _event_time_cache["ts"] < 60:
+        return _event_time_cache["map"]
     m: dict = {}
     for scope in scopes or []:
         try:
@@ -50,7 +50,7 @@ def _event_time_map(scopes) -> dict:
                     m.setdefault(mf, (str(ev.get("ts") or ""), str(ev.get("ts_source") or "approx")))
         except Exception as e:
             _stats_err(e)
-    _event_time_cache.update({"key": key, "map": m, "ts": time.time()})  # type: ignore[dict-item]
+    _event_time_cache.update({"key": key, "map": m, "ts": time.time()})
     return m
 
 

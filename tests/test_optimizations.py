@@ -496,6 +496,26 @@ def test_tools_memory_probes():
     assert "已导出" in res
 
 
+def test_tools_eval_more_commands():
+    _db, _shared = _setup("yuno_evalmore_")
+    from tools.eval import (
+        cmd_emotion_eval,
+        cmd_experiments,
+        cmd_space_eval,
+        cmd_subjects_eval,
+        cmd_time_eval,
+    )
+    import pathlib as _p
+    probes = [{"text": "哈哈太好笑了", "emotion": "开心", "v": 0.8, "a": 0.5, "d": 0.5}]
+    p = _p.Path(tempfile.mkdtemp()) / "emotion_probes.json"
+    p.write_text(json.dumps(probes, ensure_ascii=False), encoding="utf-8")
+    assert isinstance(cmd_emotion_eval(str(p)), str)
+    assert isinstance(cmd_space_eval(), str)
+    assert isinstance(cmd_time_eval(), str)
+    assert isinstance(cmd_subjects_eval(), str)
+    assert isinstance(cmd_experiments(limit=5), str)
+
+
 def test_time_extract():
     _db, _shared = _setup("yuno_time_")
     from datetime import datetime

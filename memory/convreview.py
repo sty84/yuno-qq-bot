@@ -15,6 +15,7 @@
 import json
 import time
 from datetime import datetime
+from typing import Any
 
 from plugins import _db, _shared
 
@@ -29,7 +30,7 @@ CONV_DIMENSION_LABELS = {
 }
 # 自动调参第一版映射：低分维度 → 覆盖 trace 行为参数
 # 仅当 auto_adjust=true 且 apply_adjustments 写入后才生效。
-ADJUSTMENT_MAP = {
+ADJUSTMENT_MAP: dict[str, dict[str, Any]] = {
     "remember": {"confidence_factor": 0.9, "igt_threshold": 0.35},
     "natural": {"extraction_strict": True},
     "boundary": {"privacy_threshold": 0.6},
@@ -156,15 +157,15 @@ def render_markdown(rows, reviews=None) -> str:
     return "\n".join(lines)
 
 
-_report_cache = {"ts": 0.0, "data": None}
+_report_cache: dict[str, Any] = {"ts": 0.0, "data": None}
 
 
 def report(force=False) -> dict:
     """对话五维诊断（第一版只出诊断，不自动调参）：
     各维度均值 + 低分归因方向，供每周看板/消融使用。"""
     now = time.time()
-    if _report_cache["data"] and not force and now - _report_cache["ts"] < 600:  # type: ignore[operator]
-        return _report_cache["data"]  # type: ignore[return-value]
+    if _report_cache["data"] and not force and now - _report_cache["ts"] < 600:
+        return _report_cache["data"]
     reviews = _db.conv_review_recent(limit=200)
     dim_avg: dict = {}
     for r in reviews:
@@ -183,7 +184,7 @@ def report(force=False) -> dict:
         "low_dimension_hints": low,
         "auto_adjust": False,  # 明确：第一版不自动调参
     }
-    _report_cache.update({"ts": now, "data": data})  # type: ignore[dict-item]
+    _report_cache.update({"ts": now, "data": data})
     return data
 
 
@@ -237,10 +238,10 @@ def apply_adjustments() -> dict:
     auto_adjust=true 时会根据 ADJUSTMENT_MAP 生成实际参数覆盖，trace 等模块可读取。"""
     data = report()
     sugg = adjustments().get("suggestions", {})
-    params: dict = {}
+    params: dict[str, Any] = {}
     if auto_adjust_enabled():
         for dim in sugg:
-            params.update(ADJUSTMENT_MAP.get(dim, {}))  # type: ignore[call-overload]
+            params.update(ADJUSTMENT_MAP.get(dim, {}))
         params = _clamp_params(params)
         if params:
             _db.audit_add(

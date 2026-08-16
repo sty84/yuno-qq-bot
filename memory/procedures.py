@@ -8,6 +8,7 @@
 
 import time
 from datetime import datetime
+from typing import Any
 
 from plugins import _db, _shared
 
@@ -24,7 +25,7 @@ def _tokens(text) -> set:
         return {x for x in t.replace("，", " ").replace("。", " ").replace("？", " ").split() if len(x) >= 2}
 
 
-_match_cache = {"ts": 0.0, "text": "", "result": None}
+_match_cache: dict[str, Any] = {"ts": 0.0, "text": "", "result": None}
 
 
 def learn(scope, situation, action, success):
@@ -53,9 +54,9 @@ def match(text, scope=None) -> dict | None:
     if not _cfg("system1", True) or not str(text or "").strip():
         return None
     ttl = float(_cfg("system1_cache_ttl", 30))
-    if _match_cache["text"] == text and time.time() - _match_cache["ts"] < ttl:  # type: ignore[operator]
+    if _match_cache["text"] == text and time.time() - _match_cache["ts"] < ttl:
         r = _match_cache["result"]
-        return dict(r) if r else None  # type: ignore[call-overload]
+        return dict(r) if r else None
     qt = _tokens(text)
     if not qt:
         return None

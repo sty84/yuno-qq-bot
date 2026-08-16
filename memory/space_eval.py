@@ -62,11 +62,12 @@ def _where_recall() -> dict:
                 query_ts = (t0 + (t1 - t0) / 2).isoformat(timespec="seconds")
             p = living.position_at(item, query_ts)
             total += 1
+            ok: bool = False
             if ev == "lost":
                 ok = not p.get("known")  # 丢失事件的 ground truth = 未知
             else:
-                ok = (
-                    bool(to_place)  # type: ignore[assignment]
+                ok = bool(
+                    bool(to_place)
                     and p.get("known")
                     and f"{p.get('room', '')}/{p.get('container', '')}" == to_place
                 )

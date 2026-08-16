@@ -60,7 +60,7 @@ def migrate(sqlite_path: str, pg_dsn: str, dry_run: bool = False) -> dict:
                 report["skipped"].append(name)
                 continue
             if dry_run:
-                report["tables"][name] = "dry-run"  # type: ignore[index]
+                report["tables"][name] = "dry-run"
                 continue
             try:
                 cur.execute(f'DROP TABLE IF EXISTS "{name}" CASCADE')
@@ -76,10 +76,10 @@ def migrate(sqlite_path: str, pg_dsn: str, dry_run: bool = False) -> dict:
                         [tuple(r[c] for c in cols) for r in rows],
                         page_size=500,
                     )
-                report["tables"][name] = len(rows)  # type: ignore[index]
+                report["tables"][name] = len(rows)
             except Exception as e:
                 dst.rollback()
-                report["tables"][name] = f"ERROR: {e}"  # type: ignore[index]
+                report["tables"][name] = f"ERROR: {e}"
                 # 继续其他表
                 dst.rollback()
 

@@ -100,11 +100,11 @@ def recent_events(seconds=3600) -> list:
     for e in (_data().get("events") or []):
         try:
             ts = datetime.fromisoformat(e["ts"])
-        except Exception as e:
-            _stats_err(e)
+        except Exception as exc:
+            _stats_err(exc)
             continue
         if now - ts <= timedelta(seconds=seconds):
-            out.append(e)  # type: ignore[misc]
+            out.append(e)
     return out
 
 

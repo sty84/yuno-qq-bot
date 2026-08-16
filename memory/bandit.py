@@ -62,8 +62,9 @@ def select(scope, store=True) -> dict:
         sample = random.betavariate(p["alpha"], p["beta"])
         if sample > best_v:
             best, best_v = s, sample
-    out = {"id": best["id"], "label": best["label"], "hint": best["hint"],  # type: ignore[index]
-           "mean": post[best["id"]]["mean"]}  # type: ignore[index]
+    assert best is not None
+    out = {"id": best["id"], "label": best["label"], "hint": best["hint"],
+           "mean": post[best["id"]]["mean"]}
     if store:
         _db.kv_set("memory", _last_key(scope), {"id": out["id"], "ts": time.time()})
     return out
@@ -104,12 +105,12 @@ def reward_from_message(text, an=None) -> float:
     return 0.5
 
 
-def status(scope="") -> str:
+def status(scope="") -> dict:
     """策略后验一览（bandit-status 数据源）。"""
     post = _posterior(scope)
     last = _db.kv_get("memory", _last_key(scope)) or {}
     rows = [{"id": s["id"], "label": s["label"], **post[s["id"]]} for s in STRATEGIES]
-    return {  # type: ignore[return-value]
+    return {
         "scope": scope or "default",
         "strategies": sorted(rows, key=lambda x: -x["mean"]),
         "last": last.get("id"),

@@ -11,6 +11,7 @@
 import hashlib
 import random
 from datetime import date, datetime, timedelta
+from typing import Any
 
 from plugins import _db, _shared
 
@@ -22,7 +23,7 @@ SLOTS = [
     ("night", 22, 30),
 ]
 
-ACTIVITIES = {
+ACTIVITIES: dict[str, dict[str, Any]] = {
     "work": {"label": "上班", "energy": 0.6, "home": False, "social": 0.2},
     "study": {"label": "学习", "energy": 0.5, "home": True, "social": 0.0},
     "rehearsal": {"label": "乐队排练", "energy": 0.8, "home": False, "social": 0.8},
@@ -153,10 +154,11 @@ def generate_week(profile, week_key, rng=None) -> dict:
     rng = rng or random.Random(_week_seed(profile.get("seed_id", "?"), week_key))
     pool = profile.get("pool") or {"home_rest": 1.0}
     slot_pool = profile.get("slot_pool") or {}
-    plan, fixed_marks = {}, {}
+    plan: dict[int, list[Any]] = {}
+    fixed_marks: dict[int, list[bool]] = {}
     for wd in range(7):
-        day = [None] * 4
-        marks = [False] * 4
+        day: list[Any] = [None] * 4
+        marks: list[bool] = [False] * 4
         for slot, act in (profile.get("fixed") or {}).get(wd, {}).items():
             day[slot] = act
             marks[slot] = True
@@ -184,14 +186,14 @@ def generate_week(profile, week_key, rng=None) -> dict:
         fixed_marks[wd] = marks
     # 能量预算：一天高能耗 → 把第一个非固定高能耗槽换成休息
     for wd in range(7):
-        day_energy = sum(float(ACTIVITIES.get(a, {"energy": 0})["energy"]) for a in plan[wd])  # type: ignore[call-overload, misc]
+        day_energy = sum(float(ACTIVITIES.get(a, {"energy": 0})["energy"]) for a in plan[wd])
         if day_energy > 1.6:
             for slot in range(4):
                 if fixed_marks[wd][slot]:
                     continue
                 act = plan[wd][slot]
                 if act in ("rehearsal", "performance", "work", "exercise", "out_entertain", "friend"):
-                    plan[wd][slot] = "home_rest"  # type: ignore[call-overload]
+                    plan[wd][slot] = "home_rest"
                     break
     # 状态链（Persona Pack 配置）：{"activity": {"before": "x", "after": "y"}}
     _CHAIN_ALIAS = {"rest": "home_rest", "workday": "work", "class": "study"}
@@ -290,7 +292,7 @@ def current_activity(now=None) -> dict:
         "label": meta["label"],
         "weekday": wd,
         "slot": slot,
-        "energy": float(meta["energy"]),  # type: ignore[arg-type]
+        "energy": float(meta["energy"]),
         "home": bool(meta["home"]),
     }
 
@@ -299,11 +301,11 @@ def _next_activity(plan, wd, slot) -> str:
     for s in range(slot + 1, 4):
         a = plan[wd][s]
         if a not in ("sleep", "home_rest", "idle"):
-            return ACTIVITIES.get(a, ACTIVITIES["idle"])["label"]  # type: ignore[return-value]
+            return ACTIVITIES.get(a, ACTIVITIES["idle"])["label"]
     for s in range(4):
         a = plan[(wd + 1) % 7][s]
         if a not in ("sleep", "home_rest", "idle"):
-            return "明天" + ACTIVITIES.get(a, ACTIVITIES["idle"])["label"]  # type: ignore[operator]
+            return "明天" + ACTIVITIES.get(a, ACTIVITIES["idle"])["label"]
     return ""
 
 
@@ -336,7 +338,7 @@ def _energy_hint(plan, wd) -> str:
     prev = plan[(wd - 1) % 7]
     if "performance" in prev:
         hints.append("昨天刚演出完，还没缓过来，很累")
-    day_energy = sum(float(ACTIVITIES.get(a, {"energy": 0})["energy"]) for a in plan[wd])  # type: ignore[arg-type, misc]
+    day_energy = sum(float(ACTIVITIES.get(a, {"energy": 0})["energy"]) for a in plan[wd])
     if day_energy > 1.4:
         hints.append("今天安排比较满，消耗大")
     if prof.get("nocturnal") and plan[wd][0] == "sleep" and slot_index(datetime.now().hour) == 0:
@@ -382,7 +384,7 @@ def today_summary(d=None) -> str:
         for a in plan[wd]
         if a not in ("sleep", "home_rest", "idle")
     ]
-    return "、".join(labels) if labels else ""  # type: ignore[arg-type]
+    return "、".join(labels) if labels else ""
 
 
 

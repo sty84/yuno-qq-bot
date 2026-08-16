@@ -4,6 +4,7 @@
 外部统一 `from plugins import _db`，接口名由各后端模块保持一致。
 """
 import os
+from typing import Any
 
 
 def _install(module):
@@ -22,7 +23,7 @@ else:
     class _Impl:
         pass
 
-    _impl = _Impl()  # type: ignore[assignment]
+    _impl: Any = _Impl()
     for _mod in (_core, _memory, _ops):
         for _name in dir(_mod):
             if not _name.startswith("__"):
