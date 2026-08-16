@@ -15,5 +15,17 @@
     "n": 61,
     "accuracy": 0.918,
     "vad_mae": 0.143
+  },
+  "space": {
+    "where_accuracy": 1.0,
+    "where_recall": null
+  },
+  "time": {
+    "window_recall": null,
+    "date_accuracy": null
+  },
+  "subjects": {
+    "write_rate": 0.25,
+    "privacy_rate": 1.0
   }
 }

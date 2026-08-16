@@ -1,0 +1,9 @@
+{"_key": "我的角色是什么|c2c:B8898E1A9DEA134FBF303C9442E194DB|身份", "query": "我的角色是什么", "expected": ["用户是乐队的经纪人助理"], "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB", "category": "身份"}
+{"_key": "我家猫叫什么|c2c:B8898E1A9DEA134FBF303C9442E194DB|偏好", "query": "我家猫叫什么", "expected": ["煤球是猫", "用户养了一只叫煤球的橘猫"], "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB", "category": "偏好"}
+{"_key": "猫是什么品种|c2c:B8898E1A9DEA134FBF303C9442E194DB|偏好", "query": "猫是什么品种", "expected": ["用户养了一只叫煤球的橘猫"], "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB", "category": "偏好"}
+{"_key": "我怕什么|c2c:B8898E1A9DEA134FBF303C9442E194DB|偏好", "query": "我怕什么", "expected": ["用户害怕虫子"], "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB", "category": "偏好"}
+{"_key": "这周初干了什么|c2c:B8898E1A9DEA134FBF303C9442E194DB|时间", "query": "这周初干了什么", "expected": ["上周三买了只猫"], "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB", "category": "时间"}
+{"_key": "你是谁|ai|身份", "query": "你是谁", "expected": ["你是千石由乃（Sengoku Yuno），梦限大"], "scope": "ai", "category": "身份"}
+{"_key": "你生日是什么时候|ai|身份", "query": "你生日是什么时候", "expected": ["11月4日生，天蝎座，身高151cm，红瞳粉发"], "scope": "ai", "category": "身份"}
+{"_key": "你是什么星座|ai|身份", "query": "你是什么星座", "expected": ["11月4日生，天蝎座，身高151cm，红瞳粉发"], "scope": "ai", "category": "身份"}
+{"_key": "你负责什么|ai|身份", "query": "你负责什么", "expected": ["小有人气的作曲家，团里 MV 也多半出自你手"], "scope": "ai", "category": "身份"}

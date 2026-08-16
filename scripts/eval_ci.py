@@ -28,6 +28,8 @@ os.environ["YUNO_DB_BACKEND"] = "sqlite"
 RETRIEVAL_PROBES = WS / "eval" / "retrieval_probes.json"
 EMOTION_PROBES = WS / "data" / "persona-yuno" / "emotion_probes.json"
 EMOTION_EXAMPLE = WS / "memory" / "emotion_probes.example.json"
+RETRIEVAL_BADCASES = WS / "eval" / "badcases" / "retrieval_badcases.jsonl"
+GATE_BADCASES = WS / "eval" / "badcases" / "gate_badcases.jsonl"
 BASELINE_FILE = WS / "docs" / "baselines" / "ci_eval.json"
 
 REGRESSION_DELTA = 0.05
@@ -69,6 +71,31 @@ def _load_emotion_probes():
     return json.loads(p.read_text(encoding="utf-8"))
 
 
+def _append_badcases(path: pathlib.Path, rows: list[dict]):
+    """把 badcase 追加到 JSONL，按稳定 key 去重。"""
+    if not rows:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    seen = set()
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                seen.add(obj.get("_key", ""))
+            except Exception:
+                continue
+    with open(path, "a", encoding="utf-8") as f:
+        for row in rows:
+            key = row.get("_key", "")
+            if key in seen:
+                continue
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            seen.add(key)
+
+
 def _run():
     from plugins import _db, _shared
 
@@ -91,9 +118,49 @@ def _run():
     items = probes.get("items", probes) if isinstance(probes, dict) else probes
     retrieval = memory.run_eval(items, k=5)
 
+    # badcase 自动回流：检索未命中 + 门控误判写入 JSONL，供后续扩充评测集
+    retrieval_bad = []
+    for item, detail in zip(items, retrieval.get("details", [])):
+        if not detail.get("hit"):
+            retrieval_bad.append({
+                "_key": f"{detail.get('query')}|{item.get('scope')}|{item.get('category')}",
+                "query": detail.get("query"),
+                "expected": item.get("expected", []),
+                "scope": item.get("scope"),
+                "category": item.get("category"),
+            })
+    _append_badcases(RETRIEVAL_BADCASES, retrieval_bad)
+    gate_bad = []
+    for err in gate.get("errors", []):
+        gate_bad.append({
+            "_key": f"{err.get('index')}|{err.get('reply')}",
+            "reply": err.get("reply"),
+            "got": err.get("got"),
+            "expected_block": err.get("expected_block"),
+        })
+    _append_badcases(GATE_BADCASES, gate_bad)
+
     # 3) 情绪评测
     emotion_probes = _load_emotion_probes()
     emotion = memory.emotion_eval(emotion_probes) if emotion_probes else {"error": "无情绪评测集"}
+
+    # 4) 空间 / 时间 / 多主体评测（作为模块级 smoke + 回归基线）
+    from memory import space_eval, subjects, time_eval
+    space_raw = space_eval.run()
+    time_raw = time_eval.run()
+    subj_raw = subjects.eval_run()
+    space = {
+        "where_accuracy": (space_raw.get("where_accuracy") or {}).get("accuracy"),
+        "where_recall": (space_raw.get("where_recall") or {}).get("recall"),
+    }
+    time = {
+        "window_recall": (time_raw.get("window_recall") or {}).get("recall"),
+        "date_accuracy": (time_raw.get("date_accuracy") or {}).get("accuracy"),
+    }
+    subj = {
+        "write_rate": subj_raw.get("write_rate"),
+        "privacy_rate": subj_raw.get("privacy_rate"),
+    }
 
     return {
         "seeded_facts": seeded,
@@ -109,6 +176,9 @@ def _run():
             "accuracy": emotion.get("accuracy"),
             "vad_mae": emotion.get("vad_mae"),
         },
+        "space": space,
+        "time": time,
+        "subjects": subj,
     }
 
 
@@ -119,6 +189,12 @@ def _regression(before: dict, after: dict) -> list[str]:
         ("retrieval.recall_at_k", "retrieval", "recall_at_k"),
         ("retrieval.mrr", "retrieval", "mrr"),
         ("emotion.accuracy", "emotion", "accuracy"),
+        ("space.where_accuracy", "space", "where_accuracy"),
+        ("space.where_recall", "space", "where_recall"),
+        ("time.window_recall", "time", "window_recall"),
+        ("time.date_accuracy", "time", "date_accuracy"),
+        ("subjects.write_rate", "subjects", "write_rate"),
+        ("subjects.privacy_rate", "subjects", "privacy_rate"),
     ]
     for label, section, key in checks:
         old = (before.get(section) or {}).get(key)
