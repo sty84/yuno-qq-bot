@@ -1,0 +1,103 @@
+{
+  "说明": "检索命中率评测集（v2.3 P2）：以库内确认事实为 ground truth，自然问法测 7 路检索召回",
+  "items": [
+    {
+      "query": "我是谁，在乐队里负责什么",
+      "expected": [
+        "用户是乐队的经纪人助理"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "身份"
+    },
+    {
+      "query": "我的角色是什么",
+      "expected": [
+        "用户是乐队的经纪人助理"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "身份"
+    },
+    {
+      "query": "月底演出定在哪天",
+      "expected": [
+        "用户月底30号周日有一场演出"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "日程"
+    },
+    {
+      "query": "演出是周几",
+      "expected": [
+        "用户月底30号周日有一场演出"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "日程"
+    },
+    {
+      "query": "31号是星期几",
+      "expected": [
+        "31号是周一"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "日程"
+    },
+    {
+      "query": "我家猫叫什么",
+      "expected": [
+        "煤球是猫",
+        "用户养了一只叫煤球的橘猫"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "偏好"
+    },
+    {
+      "query": "猫是什么品种",
+      "expected": [
+        "用户养了一只叫煤球的橘猫"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "偏好"
+    },
+    {
+      "query": "猫什么时候接回家的",
+      "expected": [
+        "接回家时间是上周",
+        "用户养了一只叫煤球的橘猫"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "偏好"
+    },
+    {
+      "query": "设备预算批了多少",
+      "expected": [
+        "用户预算10万，买设备花3万"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "事务"
+    },
+    {
+      "query": "买设备花了多少钱",
+      "expected": [
+        "用户预算10万，买设备花3万"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "事务"
+    },
+    {
+      "query": "我的白巧克力放哪了",
+      "expected": [
+        "用户把白巧克力放冰箱里了"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "空间"
+    },
+    {
+      "query": "我喜欢听什么声音",
+      "expected": [
+        "用户喜欢单纯享受雨声"
+      ],
+      "scope": "c2c:B8898E1A9DEA134FBF303C9442E194DB",
+      "category": "偏好"
+    }
+  ]
+}
