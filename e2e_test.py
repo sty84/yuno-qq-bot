@@ -51,7 +51,11 @@ def main():
 
     import agent  # noqa: E402
     from memory import emotion, living, relationship, sharing  # noqa: E402
+    from memory import sleep as sleep_mod  # noqa: E402
     from plugins import _db  # noqa: E402
+
+    # e2e 不依赖真实时钟：固定为 awake，避免凌晨深睡窗口导致 agent.ask 直接离线。
+    sleep_mod.sleep_mode = lambda now=None: "awake"
 
     checks = []
 
