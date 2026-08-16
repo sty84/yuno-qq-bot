@@ -33,7 +33,7 @@ def cmd_memory_eval(path: str, k: int, save: bool, dataset: str = "") -> str:
     probes = None
     if dataset:
         from plugins import _db
-        data = _db.kv_get("memory", f"dataset:{dataset}") or {}  # type: ignore[attr-defined]
+        data = _db.kv_get("memory", f"dataset:{dataset}") or {}
         probes = data.get("probes")
         if not probes:
             return f"评测集不存在：{dataset}"
@@ -53,7 +53,7 @@ def cmd_memory_eval(path: str, k: int, save: bool, dataset: str = "") -> str:
     result = memory.run_eval(probes, k=k)
     if save:
         from plugins import _db
-        _db.kv_set("memory", "eval_baseline", result)  # type: ignore[attr-defined]
+        _db.kv_set("memory", "eval_baseline", result)
         return json.dumps(result, ensure_ascii=False, indent=2) + "\n（已存为 baseline）\n" + memory.eval_report()
     return json.dumps(result, ensure_ascii=False, indent=2) + "\n" + memory.eval_report()
 
@@ -70,7 +70,7 @@ def cmd_eval_dataset_save(name: str, path: str) -> str:
         return f"评测集读取失败：{e}"
     if not probes:
         return f"评测集为空：{path}"
-    _db.kv_set(  # type: ignore[attr-defined]
+    _db.kv_set(
         "memory",
         f"dataset:{name}",
         {"probes": probes, "created": datetime.now().isoformat(timespec="seconds")},
@@ -121,7 +121,7 @@ def cmd_ablation(save=False) -> str:
 def cmd_experiments(limit=50) -> str:
     """实验日志：改动/评测的基线前后与回归标记。"""
     from plugins import _db
-    return json.dumps(_db.exp_log_rows(limit), ensure_ascii=False, indent=2)  # type: ignore[attr-defined]
+    return json.dumps(_db.exp_log_rows(limit), ensure_ascii=False, indent=2)
 
 
 def cmd_scenario_eval(path: str = "", score: bool = False, review_export: bool = False) -> str:

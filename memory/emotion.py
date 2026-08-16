@@ -306,7 +306,7 @@ def attribution_block(scope="") -> str:
     """情绪归因（v31.2）：情绪是别人惹的，对当前用户收着点。"""
     if not scope:
         return ""
-    data = _db.kv_get("memory", "ai_emotion") or {}  # type: ignore[attr-defined]
+    data = _db.kv_get("memory", "ai_emotion") or {}
     trigger = str(data.get("last_trigger_scope") or "")
     if not trigger or trigger == scope:
         return ""
@@ -432,7 +432,7 @@ def judge(text="", an=None, scope="") -> dict:
     conf = _confidence_of(text, an, src)
     # 上下文：近几条明显低落时，"哈哈/还行"更像苦笑/强颜欢笑
     if scope:
-        rows = (_db.kv_get("memory", f"user_emotion:{scope}") or {}).get("rows") or []  # type: ignore[attr-defined]
+        rows = (_db.kv_get("memory", f"user_emotion:{scope}") or {}).get("rows") or []
         if len(rows) >= 2:
             recent = rows[-3:]
             avg_v = sum(float(r.get("v", 0.0)) for r in recent) / len(recent)
@@ -682,7 +682,8 @@ def user_block(scope):
 def eval_probes(probes, scope="") -> dict:
     """情绪判断评测：分类准确率 + VAD MAE + 分桶。
     probes: [{"text": ..., "emotion": "开心", "v": 0.8, "a": 0.5, "d": 0.5}]。"""
-    results, cats = [], {}  # type: ignore[var-annotated]
+    results: list = []
+    cats: dict = {}
     for p in probes or []:
         text = str(p.get("text", ""))
         j = judge(text, scope=scope)
@@ -736,7 +737,7 @@ def emotion_log_rows(days=14) -> list:
     out = []
     for i in range(max(1, int(days))):
         d = (date.today() - timedelta(days=i)).isoformat()
-        data = _db.kv_get("memory", f"emotion_log:{d}") or {}  # type: ignore[attr-defined]
+        data = _db.kv_get("memory", f"emotion_log:{d}") or {}
         for r in (data.get("rows") or []):
             r = dict(r)
             r.setdefault("date", d)

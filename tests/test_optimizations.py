@@ -363,7 +363,7 @@ def test_trace_review_and_render():
     from memory import trace
     trace._dedup_cache.clear()
     trace.record("c2c:trace", raw_content="用户说月底有演出", action="create", reasoning="test")
-    rows = _db.trace_rows(scope="c2c:trace", limit=10)  # type: ignore[attr-defined]
+    rows = _db.trace_rows(scope="c2c:trace", limit=10)
     assert rows
     tid = rows[0]["id"]
     res = trace.score(tid, {"extraction": 5, "decision": 5, "confidence": 5, "provenance": 5, "privacy": 5}, reviewer="test")

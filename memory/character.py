@@ -70,8 +70,8 @@ def md_path(name, out_dir=None) -> pathlib.Path:
 
 def _dossier_from_memory(name, limit=200) -> dict:
     """从记忆库读回档案（按 key 映射回 md 段落）。"""
-    out = {k: [] for k, _t in CHAR_MD_SECTIONS}  # type: ignore[var-annotated]
-    rows = _db.memory_rows(f"char:{name}")[:limit]  # type: ignore[attr-defined]
+    out: dict[str, list] = {k: [] for k, _t in CHAR_MD_SECTIONS}
+    rows = _db.memory_rows(f"char:{name}")[:limit]
     for r in rows:
         dk = _MKEY_TO_DOSSIER.get(r.get("key") or "")
         if dk:
@@ -110,7 +110,7 @@ def write_markdown(name, dossier=None, out_dir=None) -> pathlib.Path:
 
 def parse_markdown(text) -> dict:
     """解析 md 档案回 dossier：按段落标题分组，忽略引用块与（暂无）。"""
-    out = {k: [] for k, _t in CHAR_MD_SECTIONS}  # type: ignore[var-annotated]
+    out: dict[str, list] = {k: [] for k, _t in CHAR_MD_SECTIONS}
     cur = None
     for line in (text or "").splitlines():
         s = line.strip()
@@ -169,7 +169,7 @@ def _llm_dossier(name, llm=None) -> dict:
         data = parse_json_object(raw)
         if data is None:
             return {}
-        out = {}  # type: ignore[var-annotated]
+        out: dict = {}
         for key in KIND_META:
             items = data.get(key) or []
             if isinstance(items, dict):
@@ -243,7 +243,7 @@ def sync_from_markdown(name=None, path=None) -> dict:
 def search(name, limit=30) -> list:
     """按人物名读取已存档案。"""
     scope = f"char:{(name or '').strip()}"
-    rows = _db.memory_rows(scope)  # type: ignore[attr-defined]
+    rows = _db.memory_rows(scope)
     rows.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
     return rows[:limit]
 
@@ -251,7 +251,7 @@ def search(name, limit=30) -> list:
 def list_names() -> list[str]:
     """已收录的人物名列表。"""
     names = []
-    for r in _db.memory_rows():  # type: ignore[attr-defined]
+    for r in _db.memory_rows():
         sc = r.get("scope") or ""
         if sc.startswith("char:"):
             n = sc.split(":", 1)[1].strip()

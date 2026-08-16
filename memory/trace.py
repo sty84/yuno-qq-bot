@@ -139,7 +139,7 @@ def detect_modules(scope, key="", text="") -> list:
 
 def prune(days=None) -> int:
     """清理超过保留期的轨迹（默认 7 天）。"""
-    return _db.trace_prune(int(days if days is not None else _cfg("retention_days", 7)))  # type: ignore[attr-defined]
+    return _db.trace_prune(int(days if days is not None else _cfg("retention_days", 7)))
 
 
 def score(trace_id, scores=None, comment="", reviewer="", total=None):
@@ -170,8 +170,8 @@ _adjust_cache = {"ts": 0.0, "data": None}
 
 def _compute_adjustments() -> dict:
     """按近期人工评分聚合各维度平均分，推导行为调整参数。"""
-    reviews = _db.trace_review_recent(limit=100)  # type: ignore[attr-defined]
-    dim_avg = {}  # type: ignore[var-annotated]
+    reviews = _db.trace_review_recent(limit=100)
+    dim_avg: dict = {}
     for r in reviews:
         try:
             s = json.loads(r.get("scores") or "{}")
@@ -204,7 +204,7 @@ def adjustments(force=False) -> dict:
         return _adjust_cache["data"]  # type: ignore[return-value]
     data = _compute_adjustments()
     try:
-        conv = _db.kv_get("memory", "conv_adjustments") or {}  # type: ignore[attr-defined]
+        conv = _db.kv_get("memory", "conv_adjustments") or {}
         if conv:
             data["convreview"] = {
                 "auto_adjust": bool(conv.get("auto_adjust", False)),

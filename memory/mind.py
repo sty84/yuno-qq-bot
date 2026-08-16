@@ -7,6 +7,7 @@
 """
 
 from datetime import datetime, timedelta
+from typing import Any
 
 from plugins import _db, _shared
 
@@ -65,7 +66,7 @@ def goal_strength(goal) -> float:
 
 
 def _intention_data() -> dict:
-    return _db.mind_intention_rows()  # type: ignore[attr-defined]
+    return _db.mind_intention_rows()
 
 
 def _save_intention(data):
@@ -204,23 +205,23 @@ def prune_expired(now=None):
 def appraise(text, scope="") -> dict:
     """AI 侧情境解读：威胁/机会/无关 + 触发信念 + 想做的事（规则快路径）。"""
     t = str(text or "")
-    out = {"stance": "无关", "beliefs": [], "wants": []}
+    out: dict[str, Any] = {"stance": "无关", "beliefs": [], "wants": []}
     if not t:
         return out
     threat = ("烦", "讨厌", "滚", "闭嘴", "别吵", "浪费", "无聊", "嫌弃", "又", "错", "骗", "撒谎")
     oppo = ("喜欢", "棒", "好耶", "太", "谢谢", "厉害", "夸", "记住", "礼物", "送", "一起", "去", "帮我", "约")
     if any(w in t for w in threat):
         out["stance"] = "威胁"
-        out["beliefs"].append("用户对我有负面情绪，先接住情绪再讲事")  # type: ignore[attr-defined]
-        out["wants"].append("保持边界但不激化")  # type: ignore[attr-defined]
+        out["beliefs"].append("用户对我有负面情绪，先接住情绪再讲事")
+        out["wants"].append("保持边界但不激化")
     elif any(w in t for w in oppo):
         out["stance"] = "机会"
-        out["beliefs"].append("用户带着好感或需求来，是拉近关系/推进目标的窗口")  # type: ignore[attr-defined]
-        out["wants"].append("回应需求并顺势推进当前意图")  # type: ignore[attr-defined]
+        out["beliefs"].append("用户带着好感或需求来，是拉近关系/推进目标的窗口")
+        out["wants"].append("回应需求并顺势推进当前意图")
     else:
         out["stance"] = "无关"
-        out["beliefs"].append("日常对话，按人设自然回应即可")  # type: ignore[attr-defined]
-        out["wants"].append("不硬找意义，别生硬推销")  # type: ignore[attr-defined]
+        out["beliefs"].append("日常对话，按人设自然回应即可")
+        out["wants"].append("不硬找意义，别生硬推销")
     return out
 
 

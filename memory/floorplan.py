@@ -346,7 +346,7 @@ def validate(pack_name=None) -> list:
         if d == 0:
             issues.append(f"房间 {name} 没有门（图不连通）")
     # 门图连通性
-    adj = {}  # type: ignore[var-annotated]
+    adj: dict = {}
     for a, b in adjacency_edges(pack_name):
         adj.setdefault(a, set()).add(b)
         adj.setdefault(b, set()).add(a)

@@ -11,7 +11,7 @@ HELP = (
     "（游戏中发「结束」可退出）"
 )
 
-_games = {}  # type: ignore[var-annotated]
+_games: dict = {}
 
 IDIOMS = set(
     """一心一意 一帆风顺 一马当先 一见如故 一鸣惊人 一诺千金 一石二鸟 一言九鼎

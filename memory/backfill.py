@@ -12,7 +12,7 @@ from memory import advisor, controller, embedder, graph, lexical, policy, reason
 
 
 def _embed_count(batch=64) -> int:
-    rows = [r for r in _db.memory_rows() if not _db.vec_loads(r.get("embedding"))]  # type: ignore[attr-defined]
+    rows = [r for r in _db.memory_rows() if not _db.vec_loads(r.get("embedding"))]
     total = 0
     for i in range(0, len(rows), batch):
         part = rows[i:i + batch]
@@ -20,17 +20,17 @@ def _embed_count(batch=64) -> int:
         if not vecs:
             break
         for r, vec in zip(part, vecs):
-            _db.memory_update_embedding(r["scope"], r["key"], r["fact"], vec)  # type: ignore[attr-defined]
+            _db.memory_update_embedding(r["scope"], r["key"], r["fact"], vec)
             total += 1
     return total
 
 
 def build_graph(scope=None, key=None) -> int:
     """为尚无事件表示的事实补建事件与关系边。返回新增事件数。"""
-    rows = _db.memory_rows(scope, key)  # type: ignore[attr-defined]
+    rows = _db.memory_rows(scope, key)
     added = 0
     for r in rows:
-        if _db.event_id_by_title(r["scope"], r["key"], graph.title_of(r["fact"])):  # type: ignore[attr-defined]
+        if _db.event_id_by_title(r["scope"], r["key"], graph.title_of(r["fact"])):
             continue
         eid, _linked = graph.build_for_fact(
             r["scope"], r["key"], r["fact"], ts=r.get("updated_at") or ""
@@ -115,8 +115,8 @@ def _llm_consolidate(topic, items) -> dict:
 
 def consolidate(limit=30) -> int:
     """把同类型事件总结成 AI 观点（belief，可信度 0.5）。返回写入条数。"""
-    rows = _db.event_rows(limit=limit)  # type: ignore[attr-defined]
-    by_type = {}  # type: ignore[var-annotated]
+    rows = _db.event_rows(limit=limit)
+    by_type: dict = {}
     for ev in rows:
         if ev["etype"] != "event":
             by_type.setdefault(ev["etype"], []).append(ev["title"])
@@ -130,7 +130,7 @@ def consolidate(limit=30) -> int:
         )
         belief = _llm_one(prompt)
         if belief:
-            _db.memory_add(  # type: ignore[attr-defined]
+            _db.memory_add(
                 "ai",
                 "belief",
                 belief,
@@ -150,14 +150,14 @@ def consolidate_topics(limit=30) -> int:
     情绪线索不再被压成一句空话；LLM 失败时回退为过程链（A → B → C），绝不丢链条。"""
     written = 0
     ts = datetime.now().isoformat(timespec="seconds")
-    for t in _db.topic_rows(limit=limit):  # type: ignore[attr-defined]
-        params = _db.topic_params(t["id"])  # type: ignore[attr-defined]
+    for t in _db.topic_rows(limit=limit):
+        params = _db.topic_params(t["id"])
         facts = [p["value"] for p in params if p["param"] == "fact"]
         if len(facts) < 5:
             continue
         # 按记忆时间排序 + 情绪标注，保留过程与转折
         rows_by_fact = {}
-        for r in _db.memory_rows(t["scope"], t["key"]):  # type: ignore[attr-defined]
+        for r in _db.memory_rows(t["scope"], t["key"]):
             rows_by_fact[r["fact"]] = r
         ordered = [f for f in facts if f in rows_by_fact]
         if len(ordered) < 5:
@@ -183,20 +183,20 @@ def consolidate_topics(limit=30) -> int:
             summary = (chain + (" …" if len(items) > 6 else ""))[:100]
         valences = [float((rows_by_fact.get(f) or {}).get("valence", 0.0)) for f in ordered]
         avg_v = round(sum(valences) / len(valences), 3) if valences else 0.0
-        _db.memory_add(  # type: ignore[attr-defined]
+        _db.memory_add(
             t["scope"], "consolidated", summary,
             ts, None, 0.7, "consolidation",
             valence=avg_v,
         )
         for field, value in details.items():
-            _db.attr_set(t["scope"], "consolidated", f"consolidation:{field}", value, 0.7, ts)  # type: ignore[attr-defined]
+            _db.attr_set(t["scope"], "consolidated", f"consolidation:{field}", value, 0.7, ts)
         for f in facts:
             row = next(
-                (r for r in _db.memory_rows(t["scope"], t["key"]) if r["fact"] == f), None  # type: ignore[attr-defined]
+                (r for r in _db.memory_rows(t["scope"], t["key"]) if r["fact"] == f), None
             )
             if row:
                 cur = float(row.get("confidence", 0.7))
-                _db.memory_set_confidence(t["scope"], t["key"], f, round(cur * 0.8, 3))  # type: ignore[attr-defined]
+                _db.memory_set_confidence(t["scope"], t["key"], f, round(cur * 0.8, 3))
         written += 1
     return written
 
@@ -241,10 +241,10 @@ def _group_frags_by_time(frags, window_minutes) -> list:
 def merge_fragments(scope=None, window_minutes=10, limit=30) -> int:
     """时序引导碎片合并：把同一时间窗口内的孤立短事实合并成完整事实。
     用 valid_from（事件时间）分组，避免全量判断导致的机械拼接；合并出的完整事实写入，旧碎片降权。"""
-    scopes = [scope] if scope else list(dict.fromkeys(r["scope"] for r in _db.memory_rows()))  # type: ignore[attr-defined]
+    scopes = [scope] if scope else list(dict.fromkeys(r["scope"] for r in _db.memory_rows()))
     total = 0
     for sc in scopes:
-        rows = _db.memory_rows(sc)  # type: ignore[attr-defined]
+        rows = _db.memory_rows(sc)
         frags = [r for r in rows if len(str(r.get("fact") or "")) < 15]
         if len(frags) < 2:
             continue
@@ -274,13 +274,13 @@ def merge_fragments(scope=None, window_minutes=10, limit=30) -> int:
             orig = {r["fact"] for r in group}
             for f in merged_facts:
                 if f not in orig:  # 合并出的完整事实 → 写入
-                    _db.memory_add(sc, "", f, ts, None, 0.6, "merge")  # type: ignore[attr-defined]
+                    _db.memory_add(sc, "", f, ts, None, 0.6, "merge")
                     total += 1
             for r in group:
                 if r["fact"] not in merged_facts:  # 被合并的旧碎片 → 降权
                     try:
                         cur = float(r.get("confidence", 0.5))
-                        _db.memory_set_confidence(sc, r.get("key") or "", r["fact"], round(cur * 0.5, 3))  # type: ignore[attr-defined]
+                        _db.memory_set_confidence(sc, r.get("key") or "", r["fact"], round(cur * 0.5, 3))
                     except Exception:
                         pass
     return total
@@ -295,7 +295,7 @@ def run(batch=64) -> dict:
         "events": build_graph(),
         "timeline": graph.link_follows(),
         "topics_built": topic.build(),
-        "topics": _db.topics_count(),  # type: ignore[attr-defined]
+        "topics": _db.topics_count(),
         "beliefs": consolidate(),
         "consolidated": consolidate_topics(),
         "fragments_merged": merge_fragments(),
@@ -304,13 +304,13 @@ def run(batch=64) -> dict:
         "fuzzy": 0,
         "forgotten": 0,
         "promoted": 0,
-        "lexicon": _db.lexicon_rebuild(),  # type: ignore[attr-defined]
+        "lexicon": _db.lexicon_rebuild(),
         "bm25": lexical.bm25_rebuild(),
         "reflection": advisor.reflect_beliefs(),
         "insights": advisor.daily_reflect(),
         "vector_index": vecindex.build() if embedder.enabled() else {"skipped": True},
         "trace_pruned": trace.prune(),
-        "query_log_pruned": _db.query_log_prune(30),  # type: ignore[attr-defined]
+        "query_log_pruned": _db.query_log_prune(30),
     }
     forget_result = policy.forget()
     report["fuzzy"] = forget_result["fuzzy"]
@@ -325,7 +325,7 @@ def run(batch=64) -> dict:
         from memory import living as living_mod
         report["living"] = living_mod.daily_tick()  # 生活演化（v31）
         report["living_repair"] = living_mod.repair_spatial()  # 空间一致性修复（P1-3）
-        report["item_events_pruned"] = _db.item_events_prune(90)  # type: ignore[attr-defined]  # 物品事件保留期（P0-1）
+        report["item_events_pruned"] = _db.item_events_prune(90)    # 物品事件保留期（P0-1）
         report["birthday"] = living_mod.birthday_celebrate()  # 生日（v31.3）
     except Exception as e:
         report["living"] = {"error": str(e)}
@@ -339,7 +339,7 @@ def run(batch=64) -> dict:
     report["relations_tagged"] = graph.tag_relations()
     try:
         # 证据门控（v2.3）：历史 source 归一（ingest→user / persona→pack）
-        report["source_normalized"] = _db.memory_source_normalize()  # type: ignore[attr-defined]
+        report["source_normalized"] = _db.memory_source_normalize()
     except Exception as e:
         report["source_normalized"] = {"error": str(e)}
     try:
@@ -378,14 +378,14 @@ def run(batch=64) -> dict:
     if probes_path.exists():
         try:
             report["eval"] = eval_run_file(str(probes_path))
-            baseline = _db.kv_get("memory", "eval_baseline", {}) or {}  # type: ignore[attr-defined]
+            baseline = _db.kv_get("memory", "eval_baseline", {}) or {}
             if baseline.get("recall_at_k") is not None:
                 report["eval_delta_recall"] = round(
                     report["eval"].get("recall_at_k", 0.0) - float(baseline.get("recall_at_k", 0.0)), 3
                 )
         except Exception as e:
             report["eval"] = {"error": str(e)}
-    rows = _db.memory_rows()  # type: ignore[attr-defined]
+    rows = _db.memory_rows()
     report["memories"] = len(rows)
     report["confidence_avg"] = (
         round(sum(float(r.get("confidence", 0.7)) for r in rows) / len(rows), 3) if rows else 0.0
@@ -397,10 +397,10 @@ def run(batch=64) -> dict:
 def eval_run(probes, k=5) -> dict:
     """probes: [{"query": ..., "expected": [...], "scope": ...}]，返回评估指标。"""
     results = []
-    cats = {}  # type: ignore[var-annotated]
+    cats: dict = {}
     for p in probes:
         scopes = [p["scope"]] if p.get("scope") else list(
-            dict.fromkeys(r["scope"] for r in _db.memory_rows())  # type: ignore[attr-defined]
+            dict.fromkeys(r["scope"] for r in _db.memory_rows())
         )
         hits = reasoning.retrieve(p["query"], scopes, top_k=max(1, int(k)), min_score=0.0)
         rank = next(
@@ -445,17 +445,17 @@ def eval_run_file(path, k=5) -> dict:
 
 def eval_report() -> str:
     """记忆库统计 + 可信度概览（工程化成长报告的输入）。"""
-    rows = _db.memory_rows()  # type: ignore[attr-defined]
+    rows = _db.memory_rows()
     if not rows:
         return "记忆库为空"
     confs = [float(r.get("confidence", 0.7)) for r in rows]
-    sources = {}  # type: ignore[var-annotated]
+    sources: dict = {}
     for r in rows:
         sources[r.get("source") or "unknown"] = sources.get(r.get("source") or "unknown", 0) + 1
     return (
         f"记忆 {len(rows)} 条 · 平均可信度 {sum(confs) / len(confs):.2f} · "
-        f"事件 {len(_db.event_rows())} · 属性 {len(_db.attr_rows())} · "  # type: ignore[attr-defined]
-        f"词法索引 {'FTS5 BM25' if _db.fts_available() else 'LIKE 降级'} · "  # type: ignore[attr-defined]
+        f"事件 {len(_db.event_rows())} · 属性 {len(_db.attr_rows())} · "
+        f"词法索引 {'FTS5 BM25' if _db.fts_available() else 'LIKE 降级'} · "
         f"来源分布 {sources}"
     )
 

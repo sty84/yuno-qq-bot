@@ -100,7 +100,7 @@ def _known(scope, name) -> bool:
     if not scope or not name or name in ("路人", "观众", "工作人员", "独自一人", "队友", "同事", "朋友"):
         return False
     try:
-        for r in _db.memory_rows(scope):  # type: ignore[attr-defined]
+        for r in _db.memory_rows(scope):
             if name in str(r.get("fact", "")):
                 return True
     except Exception as e:
@@ -121,7 +121,7 @@ def snapshot(scope="", now=None, force=False) -> dict:
     now = now or datetime.now()
     key = _snapshot_key(now)
     ttl_s = float(_cfg("ttl_min", 60)) * 60
-    data = _db.kv_get("memory", "env_snapshot") or {}  # type: ignore[attr-defined]
+    data = _db.kv_get("memory", "env_snapshot") or {}
     old_snap = data.get("snap") or {}
     if not force and data.get("key") == key and data.get("ts") and not old_snap.get("transit"):
         try:
@@ -194,7 +194,7 @@ def snapshot(scope="", now=None, force=False) -> dict:
         _stats_err(e)
         pass
     if not transit:
-        _db.kv_set(  # type: ignore[attr-defined]
+        _db.kv_set(
             "memory", "env_snapshot",
             {"key": key, "ts": datetime.now().isoformat(timespec="seconds"), "snap": snap},
         )
@@ -357,7 +357,7 @@ def fetch(now=None, force=False) -> dict:
         return {}
     now = now or datetime.now()
     ttl = float(_weather_cfg("ttl_s", 1800))
-    data = _db.kv_get("memory", "weather_cache") or {}  # type: ignore[attr-defined]
+    data = _db.kv_get("memory", "weather_cache") or {}
     if not force and data.get("ts") and (datetime.now() - datetime.fromisoformat(data["ts"])).total_seconds() < ttl:
         return data.get("w") or {}
     prev_src = (data.get("w") or {}).get("source")
@@ -374,12 +374,12 @@ def fetch(now=None, force=False) -> dict:
             pass
     w["light"] = _light(now, str(w.get("text", "")))
     w["ts"] = datetime.now().isoformat(timespec="seconds")
-    _db.kv_set("memory", "weather_cache", {"ts": w["ts"], "w": w})  # type: ignore[attr-defined]
+    _db.kv_set("memory", "weather_cache", {"ts": w["ts"], "w": w})
     try:  # keep env snapshot weather in sync after refresh
-        snap_data = _db.kv_get("memory", "env_snapshot") or {}  # type: ignore[attr-defined]
+        snap_data = _db.kv_get("memory", "env_snapshot") or {}
         if snap_data.get("snap"):
             snap_data["snap"]["weather"] = describe(now)
-            _db.kv_set("memory", "env_snapshot", snap_data)  # type: ignore[attr-defined]
+            _db.kv_set("memory", "env_snapshot", snap_data)
     except Exception as e:
         _stats_err(e)
         pass

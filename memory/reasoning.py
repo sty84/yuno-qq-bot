@@ -17,8 +17,8 @@ _query_cache = {"ts": 0.0, "text": "", "vec": None}
 _route_cache = None
 _route_flush_ts = {"ts": 0.0}
 RRF_K = 60
-_event_time_cache = {"key": None, "map": {}, "ts": 0.0}  # type: ignore[var-annotated]
-_rewrite_cache = {}  # type: ignore[var-annotated]
+_event_time_cache: dict = {"key": None, "map": {}, "ts": 0.0}
+_rewrite_cache: dict = {}
 
 # ai scope 里的人设元字段（说话示例/行为规则/风格参数/性格设定/关系/动机）不该进普通记忆检索——
 # 否则宽泛查询会命中"你是做什么的"这类示例文本（v2.3 改动 1）。
@@ -41,10 +41,10 @@ def _event_time_map(scopes) -> dict:
     key = tuple(sorted(scopes or []))
     if _event_time_cache["key"] == key and time.time() - _event_time_cache["ts"] < 60:  # type: ignore[operator]
         return _event_time_cache["map"]  # type: ignore[return-value]
-    m = {}  # type: ignore[var-annotated]
+    m: dict = {}
     for scope in scopes or []:
         try:
-            for ev in _db.event_rows(scope, limit=3000):  # type: ignore[attr-defined]
+            for ev in _db.event_rows(scope, limit=3000):
                 mf = str(ev.get("memory_fact") or "")
                 if mf:
                     m.setdefault(mf, (str(ev.get("ts") or ""), str(ev.get("ts_source") or "approx")))
@@ -140,7 +140,7 @@ def _plan(query_text) -> dict:
 def _route_stats() -> dict:
     global _route_cache
     if _route_cache is None:
-        _route_cache = _db.kv_get("memory", "route_stats", {}) or {}  # type: ignore[attr-defined]
+        _route_cache = _db.kv_get("memory", "route_stats", {}) or {}
     return _route_cache
 
 
@@ -223,10 +223,10 @@ def _rerank_cfg() -> dict:
 
 def _graph_boost_facts(query_text, scopes) -> dict:
     """图谱：查询命中的种子事件扩展。语义边（related_to）权重 1.0，时间线（follows）权重 0.5。"""
-    boost = {}  # type: ignore[var-annotated]
+    boost: dict = {}
     qt = fact_keywords(query_text)
     for scope in scopes:
-        evs = _db.event_rows(scope, limit=200)  # type: ignore[attr-defined]
+        evs = _db.event_rows(scope, limit=200)
         if not evs:
             continue
         seed = [
@@ -268,8 +268,8 @@ def _structured_facts(query_text, scopes, limit):
 
 def _ranked_lists(query_text, scopes, top_k, weights, plan) -> dict:
     """每个算法独立产出有序候选（供 RRF）。"""
-    lists = {"lexical": [], "vector": [], "graph": [], "structured": [], "rules": [], "topics": []}  # type: ignore[var-annotated]
-    seen = {k: set() for k in lists}  # type: ignore[var-annotated]
+    lists: dict[str, list] = {"lexical": [], "vector": [], "graph": [], "structured": [], "rules": [], "topics": []}
+    seen: dict[str, set] = {k: set() for k in lists}
 
     if weights["lexical"] > 0 and plan["lexical"] > 0:
         for r in lexical.search(query_text, scopes, limit=top_k * 3):
@@ -288,11 +288,11 @@ def _ranked_lists(query_text, scopes, top_k, weights, plan) -> dict:
             else:
                 scored = []
                 for scope in scopes:
-                    for r in _db.memory_rows(scope):  # type: ignore[attr-defined]
+                    for r in _db.memory_rows(scope):
                         if r["fact"] in seen["vector"]:
                             continue
                         seen["vector"].add(r["fact"])
-                        vec = _db.vec_loads(r.get("embedding"))  # type: ignore[attr-defined]
+                        vec = _db.vec_loads(r.get("embedding"))
                         if vec:
                             scored.append((embedder.cosine(qvec, vec), r["fact"]))
                 scored.sort(key=lambda x: -x[0])
@@ -354,12 +354,12 @@ def _scene_kind(scopes):
     return None
 
 
-_result_cache = OrderedDict()  # type: ignore[var-annotated]
+_result_cache: OrderedDict = OrderedDict()
 _RESULT_CACHE_MAX = 16
-_last_details = {}  # type: ignore[var-annotated]
-_last_retrieval = {}  # type: ignore[var-annotated]
+_last_details: dict = {}
+_last_retrieval: dict = {}
 _RETRIEVAL_FEEDBACK_WINDOW = 600.0
-_retrieval_ctx = contextvars.ContextVar("reasoning_retrieval", default={})  # type: ignore[var-annotated]
+_retrieval_ctx: contextvars.ContextVar = contextvars.ContextVar("reasoning_retrieval", default={})
 
 
 def _ctx() -> dict:
@@ -785,12 +785,12 @@ def anchor_time(query_text, scopes, top_k=3, max_depth=3) -> dict:
             return {}
         evs, seen = [], set()
         for scope in list(scopes or []):
-            for ev in _db.event_rows(scope, limit=3000):  # type: ignore[attr-defined]
+            for ev in _db.event_rows(scope, limit=3000):
                 if ev["id"] in seen:
                     continue
                 seen.add(ev["id"])
                 evs.append(ev)
-        by_fact = {}  # type: ignore[var-annotated]
+        by_fact: dict = {}
         for ev in evs:
             by_fact.setdefault(str(ev.get("memory_fact") or ev.get("title") or ""), []).append(ev)
         for fact, _s, _sc in hits:
@@ -1022,11 +1022,11 @@ def explain(query_text, scopes, top_k=3) -> str:
     lines = [f"因为你提到「{query_text}」，我想起了："]
     for fact, _score, scope in hits:
         lines.append(f"- {fact}")
-        evs = _db.event_rows(scope, limit=200)  # type: ignore[attr-defined]
+        evs = _db.event_rows(scope, limit=200)
         ev = next((e for e in evs if e["title"] == graph.title_of(fact)), None)
         if ev:
             related = []
-            for e in _db.relations_for([ev["id"]])[:3]:  # type: ignore[attr-defined]
+            for e in _db.relations_for([ev["id"]])[:3]:
                 other_id = e["dst"] if e["src"] == ev["id"] else e["src"]
                 other = next((x for x in evs if x["id"] == other_id), None)
                 if other:

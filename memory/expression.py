@@ -12,7 +12,7 @@ import re
 from plugins import _db
 
 # 网络用语词典：词 → 可能意图 + 是否需要上下文
-SLANG = {
+SLANG: dict[str, dict] = {
     "笑死": {"meanings": [("觉得有趣", 0.8), ("嘲讽", 0.15)], "need_context": True},
     "绷不住了": {"meanings": [("搞笑到忍不住笑", 0.8), ("压力大到撑不住", 0.2)], "need_context": True},
     "破防": {"meanings": [("情绪被戳中/崩溃", 0.85)], "need_context": True},
@@ -87,7 +87,7 @@ def detect_expressions(text) -> list:
                         {"meaning": m[0], "confidence": m[1]} for m in spec["meanings"]  # type: ignore[index]
                     ],
                     "confidence": best,
-                    "need_context": spec.get("need_context", False),  # type: ignore[attr-defined]
+                    "need_context": spec.get("need_context", False),
                 }
             )
     return out
@@ -152,9 +152,9 @@ def profile_update(scope, text) -> dict:
         and 2 <= len(str(text or "").strip()) <= 8
     ):
         raw = str(text).strip()
-        recent = {r["raw_expression"] for r in _db.expr_log_rows(limit=50)}  # type: ignore[attr-defined]
+        recent = {r["raw_expression"] for r in _db.expr_log_rows(limit=50)}
         if raw not in recent:
-            _db.expr_log_add(raw, "", [], 0.3, "候选：疑似网络词待收录")  # type: ignore[attr-defined]
+            _db.expr_log_add(raw, "", [], 0.3, "候选：疑似网络词待收录")
     cur = profile_get(scope)
     n = 0.1
     slang = float(cur["slang_frequency"]) * (1 - n) + (1.0 if an["expressions"] else 0.0) * n
@@ -182,7 +182,7 @@ def profile_update(scope, text) -> dict:
         "communication_style": comm,
         "formality_level": round(formal, 3),
     }
-    _db.expr_profile_upsert(scope, **row)  # type: ignore[attr-defined]
+    _db.expr_profile_upsert(scope, **row)
     return row
 
 

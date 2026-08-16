@@ -132,14 +132,14 @@ def cmd_memory_clear_user(uid: str) -> str:
     """按用户彻底清除（隐私权）：记忆/事件/议题/属性/索引。"""
     from plugins import _db
     scope = f"c2c:{uid}"
-    _db.purge_scope(scope, subsystems=True, confirm=scope)  # type: ignore[attr-defined]
+    _db.purge_scope(scope, subsystems=True, confirm=scope)
     removed_appts = 0
     try:
         from memory import appointment
         removed_appts = appointment.clear_scope(scope)  # 约定在 kv，不在 memories，需单独清
     except Exception:
         pass
-    _db.audit_add("memory.clear_user", scope)  # type: ignore[attr-defined]
+    _db.audit_add("memory.clear_user", scope)
     return f"已清除 {scope} 的全部记忆/事件/议题/索引（约定 {removed_appts} 条）"
 
 
@@ -178,7 +178,7 @@ def cmd_memory_probes(limit: int, out: str) -> str:
             return "emotion"
         return "lexical"
 
-    rows = _db.query_log_pending(limit)  # type: ignore[attr-defined]
+    rows = _db.query_log_pending(limit)
     probes = []
     seen_q = set()
     for r in rows:
@@ -204,7 +204,7 @@ def cmd_memory_probes(limit: int, out: str) -> str:
     dest = pathlib.Path(out) if out else _shared.DATA_DIR / "probes.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(probes, ensure_ascii=False, indent=2), encoding="utf-8")
-    _db.query_log_mark_exported([r["id"] for r in rows])  # type: ignore[attr-defined]
+    _db.query_log_mark_exported([r["id"] for r in rows])
     return f"已导出 {len(probes)} 条评测集到 {dest}（下次 memory-grow 自动跑 eval 对比 baseline）"
 
 
@@ -226,7 +226,7 @@ def cmd_persona_probes(out: str = "") -> str:
     _add("experience_persona", ["你是怎么出道的"], "identity")
 
     # 偏好按喜欢/讨厌方向区分，expected 各取对应方向的 fact 子串
-    pref = [r["fact"] for r in _db.memory_rows("ai") if r.get("key") == "preference"]  # type: ignore[attr-defined]
+    pref = [r["fact"] for r in _db.memory_rows("ai") if r.get("key") == "preference"]
     likes = [f for f in pref if "喜欢" in f]
     dislikes = [f for f in pref if "讨厌" in f or "不喜欢" in f]
     if likes:
@@ -266,7 +266,7 @@ def cmd_init(pack_name: str = "") -> str:
         steps.append(f"人设失败: {e}")
 
     # 2. 向量化缺少 embedding 的记忆
-    rows = [r for r in _db.memory_rows() if not _db.vec_loads(r.get("embedding"))]  # type: ignore[attr-defined]
+    rows = [r for r in _db.memory_rows() if not _db.vec_loads(r.get("embedding"))]
     embedded = 0
     if embedder.enabled() and rows:
         for i in range(0, len(rows), 64):
@@ -275,7 +275,7 @@ def cmd_init(pack_name: str = "") -> str:
             if not vecs:
                 break
             for r, vec in zip(part, vecs):
-                _db.memory_update_embedding(r["scope"], r["key"], r["fact"], vec)  # type: ignore[attr-defined]
+                _db.memory_update_embedding(r["scope"], r["key"], r["fact"], vec)
                 embedded += 1
     steps.append(f"向量化: {embedded} 条")
 
@@ -289,7 +289,7 @@ def cmd_init(pack_name: str = "") -> str:
         cmd_persona_probes(str(probes_path))
         probes = json.loads(probes_path.read_text(encoding="utf-8"))
         result = memory.run_eval(probes, k=5)
-        _db.kv_set("memory", "eval_baseline", result)  # type: ignore[attr-defined]
+        _db.kv_set("memory", "eval_baseline", result)
         steps.append(f"基线: recall={result.get('recall_at_k')}（{len(probes)} 条探针）")
     except Exception as e:
         steps.append(f"基线跳过: {e}")
@@ -326,14 +326,14 @@ def cmd_memory_sessions(scope: str, limit: int) -> str:
 def cmd_memory_history(scope: str, limit: int) -> str:
     """查看记忆变更历史（合并/纠错/遗忘的旧值与新值）。"""
     from plugins import _db
-    rows = _db.history_rows(scope or None, limit=limit)  # type: ignore[attr-defined]
+    rows = _db.history_rows(scope or None, limit=limit)
     return json.dumps(rows, ensure_ascii=False, indent=2) or "（暂无历史）"
 
 
 def cmd_memory_feedback(scope: str, limit: int) -> str:
     """查看用户反馈日志（纠错/确认/点赞），弱监督学习数据源。"""
     from plugins import _db
-    rows = _db.feedback_rows(scope or None, limit=limit)  # type: ignore[attr-defined]
+    rows = _db.feedback_rows(scope or None, limit=limit)
     return json.dumps(rows, ensure_ascii=False, indent=2) or "（暂无反馈）"
 
 
@@ -354,7 +354,7 @@ def cmd_memory_governance(scope: str) -> str:
 def cmd_memory_trace(scope: str, since: str, limit: int, out: str) -> str:
     """导出记忆处理轨迹（JSON，程序分析用）。"""
     from plugins import _db
-    rows = _db.trace_rows(scope or None, since or None, limit)  # type: ignore[attr-defined]
+    rows = _db.trace_rows(scope or None, since or None, limit)
     text = json.dumps(rows, ensure_ascii=False, indent=2)
     if out:
         pathlib.Path(out).write_text(text, encoding="utf-8")
@@ -366,8 +366,8 @@ def cmd_memory_trace_md(scope: str, since: str, limit: int) -> str:
     """导出记忆处理轨迹（Markdown，人工阅读用）。"""
     from plugins import _db
     import memory
-    rows = _db.trace_rows(scope or None, since or None, limit)  # type: ignore[attr-defined]
-    reviews = _db.trace_review_map([r["id"] for r in rows])  # type: ignore[attr-defined]
+    rows = _db.trace_rows(scope or None, since or None, limit)
+    reviews = _db.trace_review_map([r["id"] for r in rows])
     return memory.trace_markdown(rows, reviews)
 
 
@@ -407,8 +407,8 @@ def cmd_memory_conv_md(scope: str, since: str, limit: int) -> str:
     """导出对话评分报告（v33，Markdown 人工阅读用）。"""
     from plugins import _db
     import memory
-    rows = _db.conv_rows(scope or None, since or None, limit)  # type: ignore[attr-defined]
-    reviews = _db.conv_review_map([r["id"] for r in rows])  # type: ignore[attr-defined]
+    rows = _db.conv_rows(scope or None, since or None, limit)
+    reviews = _db.conv_review_map([r["id"] for r in rows])
     return memory.conv_markdown(rows, reviews)
 
 
@@ -450,7 +450,7 @@ def cmd_reflection_report(limit: int = 20) -> str:
     """反思抽检报告：输出最近写入的反思 + 质量统计，供人工审阅。"""
     from plugins import _db
     import memory.stats as st
-    rows = _db.memory_rows("ai", "reflection")  # type: ignore[attr-defined]
+    rows = _db.memory_rows("ai", "reflection")
     rows.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
     c = st.counters()
     lines = [
@@ -602,7 +602,7 @@ def cmd_subjects_status():
 def cmd_consistency_eval() -> str:
     """双轨制一致性：失效队列长度 + 本次重算数。"""
     from plugins import _db
-    pending = len(_db.invalidation_rows(100))  # type: ignore[attr-defined]
+    pending = len(_db.invalidation_rows(100))
     from memory import controller
     done = controller.reconcile_pending()
     return json.dumps({"pending": pending, "reconciled": done["reconciled"]}, ensure_ascii=False, indent=2)
@@ -635,7 +635,7 @@ def cmd_topic_vad_backfill() -> str:
 def cmd_memory_source_backfill() -> str:
     """证据门控：历史记忆 source 归一（ingest→user / persona→pack），幂等。"""
     from plugins import _db
-    return json.dumps(_db.memory_source_normalize(), ensure_ascii=False, indent=2)  # type: ignore[attr-defined]
+    return json.dumps(_db.memory_source_normalize(), ensure_ascii=False, indent=2)
 
 
 def cmd_pollution_scan(scope: str = "", apply: bool = False) -> str:
@@ -653,9 +653,9 @@ def cmd_pollution_scan(scope: str = "", apply: bool = False) -> str:
     from plugins import _db
     from memory import controller as ctl
     # 1) 出处池：用户历史消息（conv_log 全文 + sessions 摘要）
-    rows = _db.conv_rows(limit=10 ** 6)  # type: ignore[attr-defined]
+    rows = _db.conv_rows(limit=10 ** 6)
     msgs = [(r.get("user_text") or "").strip() for r in rows]
-    for s in _db.session_rows(limit=10 ** 6):  # type: ignore[attr-defined]
+    for s in _db.session_rows(limit=10 ** 6):
         sm = (s.get("summary") or "").strip()
         if sm:
             msgs.append(sm)
@@ -664,7 +664,7 @@ def cmd_pollution_scan(scope: str = "", apply: bool = False) -> str:
     stmt_msgs = [m for m in msgs if not quest.search(m)]
     quest_msgs = [m for m in msgs if quest.search(m)]
     # 2) 待检记忆：source=user 且 active
-    rows = _db.memory_rows(scope=scope or None)  # type: ignore[attr-defined]
+    rows = _db.memory_rows(scope=scope or None)
     cand = [r for r in rows if (r.get("source") or "") == "user" and (r.get("status") or "") == "active"]
     if not cand:
         return "污染扫描：无 source=user 的记忆"
@@ -681,17 +681,17 @@ def cmd_pollution_scan(scope: str = "", apply: bool = False) -> str:
         # partial（部分出处，用户说过大部分）→ 降级；core 身份记忆只降不删
         for r in buckets["none"] + buckets["weak"] + buckets["partial"]:
             if (r.get("mclass") or "") == "core":
-                _db.memory_set_source(r["scope"], r["key"], r["fact"], "ai_edit")  # type: ignore[attr-defined]
-                _db.audit_add("pollution_demote", f"core保护降级 {r['fact'][:40]}", "auto")  # type: ignore[attr-defined]
+                _db.memory_set_source(r["scope"], r["key"], r["fact"], "ai_edit")
+                _db.audit_add("pollution_demote", f"core保护降级 {r['fact'][:40]}", "auto")
                 n_dem += 1
                 continue
             if r in buckets["none"] or r in buckets["weak"]:
-                _db.memory_delete(r["scope"], r["key"], r["fact"])  # type: ignore[attr-defined]
-                _db.audit_add("pollution_del", f"无陈述出处删除 {r['fact'][:40]}", "auto")  # type: ignore[attr-defined]
+                _db.memory_delete(r["scope"], r["key"], r["fact"])
+                _db.audit_add("pollution_del", f"无陈述出处删除 {r['fact'][:40]}", "auto")
                 n_del += 1
             else:
-                _db.memory_set_source(r["scope"], r["key"], r["fact"], "ai_edit")  # type: ignore[attr-defined]
-                _db.audit_add("pollution_demote", f"部分支撑降级 {r['fact'][:40]}", "auto")  # type: ignore[attr-defined]
+                _db.memory_set_source(r["scope"], r["key"], r["fact"], "ai_edit")
+                _db.audit_add("pollution_demote", f"部分支撑降级 {r['fact'][:40]}", "auto")
                 n_dem += 1
         lines.append(f"已执行：删除 {n_del}，降级 {n_dem}")
     for lv, label in (("strong", "保留（有陈述出处）"), ("partial", "降级候选（部分出处）"),

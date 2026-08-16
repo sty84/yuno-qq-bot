@@ -105,7 +105,7 @@ def profile() -> dict:
         if ps:
             base_key = str(ps.get("profile") or profile_id())
             prof = PROFILES.get(base_key, PROFILES["yuno"])
-            merged = dict(prof)
+            merged: dict = dict(prof)
             for k in ("fixed", "pool", "slot_pool", "state_chains", "nocturnal", "activities"):
                 if k in ps:
                     merged[k] = ps[k]
@@ -114,12 +114,12 @@ def profile() -> dict:
             if "fixed" in merged:
                 merged["fixed"] = {
                     int(k): {int(s): v for s, v in (v or {}).items()}
-                    for k, v in merged["fixed"].items()  # type: ignore[attr-defined]
+                    for k, v in merged["fixed"].items()
                 }
             if "slot_pool" in merged:
                 merged["slot_pool"] = {
                     int(k): {int(s): v for s, v in v.items()}
-                    for k, v in merged["slot_pool"].items()  # type: ignore[attr-defined]
+                    for k, v in merged["slot_pool"].items()
                 }
             return merged
     except Exception:
@@ -231,7 +231,7 @@ def _plan_night_ok(plan) -> bool:
     return True
 
 
-_plan_cache = {}  # type: ignore[var-annotated]
+_plan_cache: dict = {}
 
 
 def get_week_plan() -> dict:
@@ -243,17 +243,17 @@ def get_week_plan() -> dict:
     hit = _plan_cache.get(pid)
     if hit and hit[0] == wk:
         return hit[1]
-    data = _db.kv_get("memory", "schedule_week") or {}  # type: ignore[attr-defined]
+    data = _db.kv_get("memory", "schedule_week") or {}
     if data.get("week") == wk and data.get("profile") == pid and data.get("plan"):
         # JSON 持久化后顶层键变成字符串，还原为 int（槽位索引仍为数组）
         plan = {int(k): v for k, v in data["plan"].items()}
         if not _plan_night_ok(plan):
             # 旧计划夜晚槽不合理（凌晨演出/外出）→ 重新生成
             plan = generate_week(profile(), wk)
-            _db.kv_set("memory", "schedule_week", {"week": wk, "profile": pid, "plan": plan})  # type: ignore[attr-defined]
+            _db.kv_set("memory", "schedule_week", {"week": wk, "profile": pid, "plan": plan})
     else:
         plan = generate_week(profile(), wk)
-        _db.kv_set("memory", "schedule_week", {"week": wk, "profile": pid, "plan": plan})  # type: ignore[attr-defined]
+        _db.kv_set("memory", "schedule_week", {"week": wk, "profile": pid, "plan": plan})
     _plan_cache[pid] = (wk, plan)
     return plan
 

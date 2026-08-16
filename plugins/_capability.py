@@ -165,7 +165,7 @@ def recover_one(entry) -> dict:
 
 def run_recovery() -> list[dict]:
     results = [recover_one(s) for s in services()]
-    _db.audit_add(  # type: ignore[attr-defined]
+    _db.audit_add(
         "recovery.run",
         "all",
         "；".join(f"{r['keyword']}:{r['status']}" for r in results),

@@ -1636,8 +1636,8 @@ def test_21_social_message_resets_topic():
     from memory import session as session_mod
     scope = "c2c:soc"
     _db.kv_set("memory", "lastmsg:" + scope, None)
-    _db.session_close_old(days=0)  # type: ignore[attr-defined]
-    _db.session_create(scope, "", topic="月底演出/曲子准备", summary="月底演出曲子准备")  # type: ignore[attr-defined]
+    _db.session_close_old(days=0)
+    _db.session_create(scope, "", topic="月底演出/曲子准备", summary="月底演出曲子准备")
     old = session_mod.current(scope, "")
     _check("social-old-topic-exists", bool(old and old.get("topic")), old)
     session_mod.touch(scope, "", "你在干嘛")
@@ -1652,16 +1652,16 @@ def test_22_trace_low_info_dedup():
     _db = e["_db"]
     from memory import trace
     scope = "c2c:trace_filter"
-    before = len(_db.trace_rows(scope, limit=1000))  # type: ignore[attr-defined]
+    before = len(_db.trace_rows(scope, limit=1000))
     trace.record(scope, raw_content="你好", action="reject", reasoning="低信息")
     trace.record(scope, raw_content="再见", action="reject", reasoning="低信息")
-    after_low = len(_db.trace_rows(scope, limit=1000))  # type: ignore[attr-defined]
+    after_low = len(_db.trace_rows(scope, limit=1000))
     _check("trace-low-info-skip", after_low == before, (before, after_low))
 
     trace.record(scope, raw_content="月底有一场演出", action="create", reasoning="测试")
-    n1 = len(_db.trace_rows(scope, limit=1000))  # type: ignore[attr-defined]
+    n1 = len(_db.trace_rows(scope, limit=1000))
     trace.record(scope, raw_content="月底有一场演出", action="create", reasoning="重复")
-    n2 = len(_db.trace_rows(scope, limit=1000))  # type: ignore[attr-defined]
+    n2 = len(_db.trace_rows(scope, limit=1000))
     _check("trace-dedup", n2 == n1, (n1, n2))
 
 

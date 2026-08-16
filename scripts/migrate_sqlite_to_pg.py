@@ -46,7 +46,7 @@ def migrate(sqlite_path: str, pg_dsn: str, dry_run: bool = False) -> dict:
     src.row_factory = sqlite3.Row
     dst = psycopg2.connect(pg_dsn)
     dst.autocommit = False
-    report = {"tables": {}, "skipped": []}  # type: ignore[var-annotated]
+    report: dict = {"tables": {}, "skipped": []}
 
     tables = src.execute(
         "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
@@ -57,7 +57,7 @@ def migrate(sqlite_path: str, pg_dsn: str, dry_run: bool = False) -> dict:
             name = row["name"]
             ddl = translate_ddl(row["sql"])
             if ddl is None:
-                report["skipped"].append(name)  # type: ignore[attr-defined]
+                report["skipped"].append(name)
                 continue
             if dry_run:
                 report["tables"][name] = "dry-run"  # type: ignore[index]

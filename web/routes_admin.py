@@ -185,7 +185,7 @@ def register(app, state):
     def data_dump(request: Request):
         """全量数据 JSON 导出（只读，含用户数据表；索引类由 grow 重建）。"""
         require_role(request, "ops", "admin")
-        return _db.dump_all()  # type: ignore[attr-defined]
+        return _db.dump_all()
 
     @app.post("/api/data/import")
     def data_import(req: DataImportRequest, request: Request):
@@ -199,12 +199,12 @@ def register(app, state):
             raise HTTPException(400, "数据导入为高危操作，需要 confirm=true")
         if not req.data:
             raise HTTPException(400, "data 不能为空")
-        _db.audit_add(  # type: ignore[attr-defined]
+        _db.audit_add(
             "web.data_import", "import",
             f"tables={len(req.data)} replace={req.replace}",
             operator="web",
         )
-        counts = _db.restore_all(req.data, replace=req.replace)  # type: ignore[attr-defined]
+        counts = _db.restore_all(req.data, replace=req.replace)
         return {"ok": True, "counts": counts}
 
     @app.post("/api/ops/notify")
@@ -242,7 +242,7 @@ def register(app, state):
             raise HTTPException(400, "高危操作需要 confirm=true")
         if req.name in _HIGH_RISK:
             require_role(request, "admin")
-            _db.audit_add(  # type: ignore[attr-defined]
+            _db.audit_add(
                 "web.high_risk", req.name,
                 f"uid={req.uid} scope={req.scope}",
                 operator="web",
@@ -251,7 +251,7 @@ def register(app, state):
             from memory import appointment
             return appointment.clean()
         if req.name == "memory-source-backfill":
-            return _db.memory_source_normalize()  # type: ignore[attr-defined]
+            return _db.memory_source_normalize()
         if req.name == "pollution-scan-apply":
             import tools as tools_mod
             return tools_mod.cmd_pollution_scan(req.scope, apply=True)

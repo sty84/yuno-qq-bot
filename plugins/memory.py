@@ -17,10 +17,10 @@ HELP = (
     "/忘记 关键词（不再提起相关记忆）｜/公开 关键词（允许跨场景提起）"
 )
 
-_binding_codes = {}  # type: ignore[var-annotated]
-_last_extract = {}  # type: ignore[var-annotated]
-_sess_buffer = {}   # type: ignore[var-annotated]  # key -> {"texts": [...], "reply": str, "last": ts} 低信息消息缓存
-_last_group_extract = {}  # type: ignore[var-annotated]
+_binding_codes: dict = {}
+_last_extract: dict = {}
+_sess_buffer: dict = {}  # key -> {"texts": [...], "reply": str, "last": ts} 低信息消息缓存
+_last_group_extract: dict = {}
 IGT_FLUSH_SEC = 600
 IGT_MAX_BUFFER = 5
 IGT_THRESHOLD = 0.3

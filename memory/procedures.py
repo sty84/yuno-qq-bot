@@ -63,7 +63,7 @@ def match(text, scope=None) -> dict | None:
     min_success = float(_cfg("system1_min_success", 0.75))
     min_overlap = float(_cfg("system1_min_overlap", 0.5))
     best = None
-    for r in _db.procedure_rows(min_tries=min_tries, limit=200):  # type: ignore[attr-defined]
+    for r in _db.procedure_rows(min_tries=min_tries, limit=200):
         st = _tokens(r["situation"])
         if not st:
             continue
@@ -84,7 +84,7 @@ def match(text, scope=None) -> dict | None:
 
 
 def stats() -> dict:
-    rows = _db.procedure_rows()  # type: ignore[attr-defined]
+    rows = _db.procedure_rows()
     if not rows:
         return {"count": 0}
     good = [r for r in rows if float(r.get("success", 0)) >= 0.75 and int(r.get("tries", 0)) >= 3]
@@ -96,7 +96,7 @@ def stats() -> dict:
 
 
 def report() -> str:
-    rows = _db.procedure_rows()  # type: ignore[attr-defined]
+    rows = _db.procedure_rows()
     if not rows:
         return "程序记忆为空（还没有学出习惯）"
     lines = [f"共 {len(rows)} 条习惯："]

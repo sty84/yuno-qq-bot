@@ -164,7 +164,7 @@ def data_dir() -> pathlib.Path:
 
 DATA_DIR = data_dir()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-_db.init(DATA_DIR)  # type: ignore[attr-defined]
+_db.init(DATA_DIR)
 _sync_config_deps()
 
 # ===== 昵称 / 群列表 =====
@@ -189,7 +189,7 @@ def group_list_add(gid):
 
 # ===== 情绪 =====
 MOODS = ["慵懒", "开心", "元气", "困倦", "想打牌", "有点饿"]
-state = _db.state_get() or {"mood": "慵懒"}  # type: ignore[attr-defined]
+state = _db.state_get() or {"mood": "慵懒"}
 
 
 def set_mood(mood):

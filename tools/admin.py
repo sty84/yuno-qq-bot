@@ -218,7 +218,7 @@ def cmd_internal_db_prune(days: int = 30) -> str:
 def cmd_data_dump_json(out: str) -> str:
     """全表 JSON 转储（v12）：数据可移植/可分析格式。"""
     from plugins import _db
-    data = _db.dump_all()  # type: ignore[attr-defined]
+    data = _db.dump_all()
     out = out or str(ROOT / "data" / "full-dump.json")
     pathlib.Path(out).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     return f"已导出全表 JSON 到 {out}（{sum(len(v) for v in data.values())} 行）"
@@ -236,8 +236,8 @@ def cmd_data_export(out: str = "", with_config: bool = False) -> str:
     with tempfile.TemporaryDirectory() as tmpd:
         tmp = pathlib.Path(tmpd)
         db_path = tmp / "bot.db"
-        _db.backup_to(db_path)  # type: ignore[attr-defined]
-        data = _db.dump_all()  # type: ignore[attr-defined]
+        _db.backup_to(db_path)
+        data = _db.dump_all()
         (tmp / "data.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         table_sizes = {t: len(rows) for t, rows in data.items()}
         total_rows = sum(table_sizes.values())
@@ -297,7 +297,7 @@ def cmd_data_import(path: str, replace: bool = False, dry_run: bool = False) -> 
         from datetime import datetime
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
         backup = ROOT / "data" / f"bot.pre-import-{ts}.db"
-        _db.backup_to(backup)  # type: ignore[attr-defined]
+        _db.backup_to(backup)
         dest = ROOT / "data" / "bot.db"
         dest.write_bytes(db_bytes)
         for suffix in ("-wal", "-shm"):
@@ -308,7 +308,7 @@ def cmd_data_import(path: str, replace: bool = False, dry_run: bool = False) -> 
 
     if data is None:
         return "没有可导入的数据"
-    counts = _db.restore_all(data, replace=replace)  # type: ignore[attr-defined]
+    counts = _db.restore_all(data, replace=replace)
     total = sum(v for v in counts.values() if isinstance(v, int) and v > 0)
     failed = [t for t, v in counts.items() if v == -1]
     if dry_run:

@@ -165,8 +165,8 @@ def report(force=False) -> dict:
     now = time.time()
     if _report_cache["data"] and not force and now - _report_cache["ts"] < 600:  # type: ignore[operator]
         return _report_cache["data"]  # type: ignore[return-value]
-    reviews = _db.conv_review_recent(limit=200)  # type: ignore[attr-defined]
-    dim_avg = {}  # type: ignore[var-annotated]
+    reviews = _db.conv_review_recent(limit=200)
+    dim_avg: dict = {}
     for r in reviews:
         try:
             s = json.loads(r.get("scores") or "{}")
@@ -210,7 +210,7 @@ def adjustments() -> dict:
 
 def current_adjustments() -> dict:
     """读取最近一次 memory-conv-adjust 写入的调参建议（默认 dry-run）。"""
-    return _db.kv_get("memory", "conv_adjustments") or {}  # type: ignore[attr-defined]
+    return _db.kv_get("memory", "conv_adjustments") or {}
 
 
 def auto_adjust_enabled() -> bool:
@@ -237,13 +237,13 @@ def apply_adjustments() -> dict:
     auto_adjust=true 时会根据 ADJUSTMENT_MAP 生成实际参数覆盖，trace 等模块可读取。"""
     data = report()
     sugg = adjustments().get("suggestions", {})
-    params = {}  # type: ignore[var-annotated]
+    params: dict = {}
     if auto_adjust_enabled():
         for dim in sugg:
             params.update(ADJUSTMENT_MAP.get(dim, {}))  # type: ignore[call-overload]
         params = _clamp_params(params)
         if params:
-            _db.audit_add(  # type: ignore[attr-defined]
+            _db.audit_add(
                 "conv_auto_adjust",
                 "auto_adjust=true",
                 f"应用参数覆盖：{params}；低分维度：{'、'.join(sugg)}",
@@ -257,11 +257,11 @@ def apply_adjustments() -> dict:
         "dimension_averages": data.get("dimension_averages", {}),
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
-    _db.kv_set("memory", "conv_adjustments", record)  # type: ignore[attr-defined]
+    _db.kv_set("memory", "conv_adjustments", record)
     return record
 
 
 def rollback_adjustments() -> dict:
     """回滚自动调参：清除已写入的 conv_adjustments，恢复默认行为。"""
-    _db.kv_set("memory", "conv_adjustments", None)  # type: ignore[attr-defined]
+    _db.kv_set("memory", "conv_adjustments", None)
     return {"rolled_back": True, "message": "已清除 conv_adjustments，自动调参回滚为默认行为"}

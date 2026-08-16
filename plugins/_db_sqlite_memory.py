@@ -460,8 +460,9 @@ def llm_cost_summary(days=30) -> dict:
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
     total = {"calls": len(rows), "prompt": 0, "completion": 0}
-    by_day, by_module = {}, {}  # type: ignore[var-annotated]
-    by_path = {}  # type: ignore[var-annotated]
+    by_day: dict = {}
+    by_module: dict = {}
+    by_path: dict = {}
     for r in rows:
         p, c = int(r["prompt_tokens"]), int(r["completion_tokens"])
         total["prompt"] += p
@@ -1694,5 +1695,4 @@ def topic_param_invalidate(value):
         c = _connect()
         c.execute("UPDATE topic_params SET confidence=MIN(confidence, 0.3) WHERE value=?", (str(value),))
         _maybe_commit()
-
 

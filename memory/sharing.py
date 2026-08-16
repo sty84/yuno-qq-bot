@@ -68,7 +68,7 @@ def _threshold() -> float:
 
 
 def _state() -> dict:
-    st = _db.kv_get("memory", "sharing_state") or {}  # type: ignore[attr-defined]
+    st = _db.kv_get("memory", "sharing_state") or {}
     if not st:
         st = {"S": 0.0, "ts": datetime.now().isoformat(timespec="seconds"),
               "last_trigger_ts": "", "day": "", "daily": 0, "week": "", "weekly": 0, "reasons": []}
@@ -134,7 +134,7 @@ def emotion_bonus() -> float:
 def _stage_mult(scope) -> float:
     """关系门槛：熟悉度 → 分享欲折算系数。"""
     try:
-        row = _db.relationship_get(scope)  # type: ignore[attr-defined]
+        row = _db.relationship_get(scope)
         if row:
             fam = float(row.get("familiarity", 0.0))
             stage = "深度伙伴" if fam >= 0.65 else ("熟悉" if fam >= 0.4 else ("初识" if fam >= 0.2 else "陌生"))
@@ -149,7 +149,7 @@ def _penalty_mult(scope) -> float:
     """嫌烦惩罚（分级 + 连续恢复）：mult = 1 - step×次数 × 0.5^(年龄/窗口)。"""
     if not scope:
         return 1.0
-    data = _db.kv_get("memory", f"sharing_penalty:{scope}") or {}  # type: ignore[attr-defined]
+    data = _db.kv_get("memory", f"sharing_penalty:{scope}") or {}
     count = max(0, int(data.get("count", 0)))
     if count <= 0:
         return 1.0
@@ -217,7 +217,7 @@ def desire(scope="") -> dict:
 
 
 def _sent_reasons(now) -> list:
-    data = _db.kv_get("memory", "sharing_sent") or {}  # type: ignore[attr-defined]
+    data = _db.kv_get("memory", "sharing_sent") or {}
     if data.get("date") != now.date().isoformat():
         return []
     return data.get("reasons") or []
@@ -240,7 +240,7 @@ def _schedule_events(now=None) -> list:
     if now.hour >= 22 or now.hour < 6:
         return []
     key = f"sharing_events:{now.date()}"
-    data = _db.kv_get("memory", key) or {"kinds": []}  # type: ignore[attr-defined]
+    data = _db.kv_get("memory", key) or {"kinds": []}
     kinds = set(data.get("kinds") or [])
     new = []
     try:
@@ -265,7 +265,7 @@ def _schedule_events(now=None) -> list:
                 kinds.add(act)
     # 昨晚的梦：有模糊梦记忆或当日梦日志 → 计一次
     try:
-        dream_rows = _db.memory_rows("ai", "dream")  # type: ignore[attr-defined]
+        dream_rows = _db.memory_rows("ai", "dream")
         if dream_rows and "dream" not in kinds:
             new.append("dream")
             kinds.add("dream")
@@ -292,7 +292,7 @@ def _schedule_events(now=None) -> list:
         _stats_err(e)
         pass
     if new:
-        _db.kv_set("memory", key, {"kinds": sorted(kinds)})  # type: ignore[attr-defined]
+        _db.kv_set("memory", key, {"kinds": sorted(kinds)})
     return new
 
 
@@ -505,7 +505,7 @@ def drive(scope="", now=None) -> dict:
     scheduled_at = ""
     if delay_s > 0:
         scheduled_at = (now + timedelta(seconds=delay_s)).isoformat(timespec="seconds")
-    _db.notif_add(target_type, target, msg, scheduled_at=scheduled_at)  # type: ignore[attr-defined]
+    _db.notif_add(target_type, target, msg, scheduled_at=scheduled_at)
     _mark_sent_reason(now, reason)
     try:
         from memory import interaction as interaction_mod
@@ -524,7 +524,7 @@ def drive(scope="", now=None) -> dict:
     st["reasons"] = []
     _save(st)
     try:
-        _db.memory_add(  # type: ignore[attr-defined]
+        _db.memory_add(
             "ai", "experience",
             f"给用户发了条消息：「{msg}」", now.isoformat(timespec="seconds"), None,
             confidence=0.6, source="sharing", mclass="short", audience="public", speaker="ai",
@@ -551,7 +551,7 @@ def drive_all(now=None) -> list:
     now = now or datetime.now()
     sent = []
     try:
-        rows = _db.relationship_rows()  # type: ignore[attr-defined]
+        rows = _db.relationship_rows()
     except Exception as e:
         _stats_err(e)
         return []

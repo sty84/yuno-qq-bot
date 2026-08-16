@@ -144,7 +144,7 @@ def sleep_mode(now=None) -> str:
 def queue_snapshot(scope) -> dict:
     if not scope:
         return {}
-    return _db.kv_get("memory", f"sleep_queue:{scope}") or {}  # type: ignore[attr-defined]
+    return _db.kv_get("memory", f"sleep_queue:{scope}") or {}
 
 
 def queue_add(scope, text, urgent=False):
@@ -246,7 +246,7 @@ def record_interrupt(scope, now=None):
 
 def interrupts_yesterday() -> int:
     y = (date.today() - timedelta(days=1)).isoformat()
-    data = _db.kv_get("memory", f"sleep_interrupts:{y}") or {}  # type: ignore[attr-defined]
+    data = _db.kv_get("memory", f"sleep_interrupts:{y}") or {}
     return int(data.get("count", 0))
 
 
@@ -262,7 +262,7 @@ def standby_block(scope="", text="") -> str:
 
 # ===== 睡眠周期控制 =====
 def last_sleep() -> dict:
-    return _db.kv_get("memory", "last_sleep") or {}  # type: ignore[attr-defined]
+    return _db.kv_get("memory", "last_sleep") or {}
 
 
 def _mark_slept():
@@ -302,8 +302,8 @@ def _deep_consolidate() -> dict:
         cutoff = last
     else:
         cutoff = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).isoformat(timespec="seconds")
-    buckets = {}  # type: ignore[var-annotated]
-    for r in _db.memory_rows():  # type: ignore[attr-defined]
+    buckets: dict = {}
+    for r in _db.memory_rows():
         sc = str(r.get("scope") or "")
         if not (sc.startswith("c2c:") or sc.startswith("group:") or sc.startswith("group_all:")):
             continue
@@ -337,7 +337,7 @@ def _deep_consolidate() -> dict:
             _stats_err(e)
             pass
         fact = f"{_today()}：{summary}"
-        _db.memory_add(  # type: ignore[attr-defined]
+        _db.memory_add(
             "ai", "recall", fact, _now_ts(), None,
             confidence=0.55, source="sleep:deep", mclass="long",
             audience="public", speaker="ai",
@@ -492,7 +492,7 @@ def night_run(force=False) -> dict:
         keyword = dreams[0]["sources"][0][:24]
     if remember:
         fact = f"昨晚做了个梦，好像和「{keyword or '什么'}」有关，但内容很模糊"
-        _db.memory_add(  # type: ignore[attr-defined]
+        _db.memory_add(
             "ai", "dream", fact, _now_ts(), None,
             confidence=0.3, source="sleep:rem", mclass="short",
             audience="public", speaker="ai",
@@ -500,7 +500,7 @@ def night_run(force=False) -> dict:
         from memory import policy
         policy.touch("ai", "dream", fact, importance=0.2)
 
-    _db.kv_set(  # type: ignore[attr-defined]
+    _db.kv_set(
         "memory", "dreams",
         {"date": _today(), "dreams": dreams, "told": False,
          "remembered": remember, "created_ts": _now_ts()},
@@ -529,12 +529,12 @@ def _age_hours(data) -> float:
 
 
 def _vague_dream_facts() -> list:
-    return [r["fact"] for r in _db.memory_rows("ai", "dream")]  # type: ignore[attr-defined]
+    return [r["fact"] for r in _db.memory_rows("ai", "dream")]
 
 
 def context_block(scope="", text="") -> str:
     """注入块：用户问梦 → 按记忆状态回应；没问 → 醒来后主动提一次（不重复）。"""
-    data = _db.kv_get("memory", "dreams") or {}  # type: ignore[attr-defined]
+    data = _db.kv_get("memory", "dreams") or {}
     if not data:
         return ""
     asked = any(w in (text or "") for w in ("梦", "做梦", "梦到", "梦见", "噩梦"))
@@ -564,7 +564,7 @@ def context_block(scope="", text="") -> str:
     except Exception as e:
         _stats_err(e)
         pass
-    _db.kv_set("memory", "dreams", {**data, "told": True})  # type: ignore[attr-defined]
+    _db.kv_set("memory", "dreams", {**data, "told": True})
     if data.get("remembered") and data.get("dreams"):
         sample = random.choice(data["dreams"])["text"][:60]
         return (

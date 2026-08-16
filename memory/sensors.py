@@ -39,10 +39,10 @@ SILENT_STATES = ("关", "安静")
 def _cfg(key, default):
     return _shared.core_cfg("sensors", key, default)
 def _data() -> dict:
-    d = _db.kv_get("memory", "sensors") or {}  # type: ignore[attr-defined]
+    d = _db.kv_get("memory", "sensors") or {}
     if not d.get("devices"):
         d = {"devices": dict(DEFAULT_DEVICES), "events": []}
-        _db.kv_set("memory", "sensors", d)  # type: ignore[attr-defined]
+        _db.kv_set("memory", "sensors", d)
     return d
 
 

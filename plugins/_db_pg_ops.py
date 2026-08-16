@@ -265,7 +265,9 @@ def llm_cost_summary(days=30) -> dict:
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
     total = {"calls": len(rows), "prompt": 0, "completion": 0}
-    by_day, by_module, by_path = {}, {}, {}  # type: ignore[var-annotated]
+    by_day: dict = {}
+    by_module: dict = {}
+    by_path: dict = {}
     for r in rows:
         p, c = int(r["prompt_tokens"]), int(r["completion_tokens"])
         total["prompt"] += p

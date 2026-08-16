@@ -73,7 +73,7 @@ def _decay_probe() -> dict:
     cap = confidence_cap()
     rows = []
     for n in registered():
-        rows += [r for r in _db.memory_rows(scope_of(n))]  # type: ignore[attr-defined]
+        rows += [r for r in _db.memory_rows(scope_of(n))]
     n = len(rows)
     if not n:
         return {"n": 0, "cap_rate": None, "source_ceiling_rate": None,
@@ -121,10 +121,10 @@ def eval_run(compare=False, save=False) -> dict:
 
     from plugins import _db
     names = registered()
-    write_ok = sum(1 for n in names if _db.memory_rows(scope_of(n)))  # type: ignore[attr-defined, misc]
+    write_ok = sum(1 for n in names if _db.memory_rows(scope_of(n)))  # type: ignore[misc]
     priv_leak = npc_total = 0
     for n in names:
-        for r in _db.memory_rows(scope_of(n)):  # type: ignore[attr-defined]
+        for r in _db.memory_rows(scope_of(n)):
             npc_total += 1
             if float(r.get("privacy", 0.0)) >= 0.8:
                 priv_leak += 1

@@ -37,7 +37,8 @@ def _fact_grounded(fact, user_text) -> bool:
         words = tokenize(cleaned)
     except Exception:
         words = cleaned.split()
-    multi, single = [], []  # type: ignore[var-annotated]
+    multi: list = []
+    single: list = []
     for seg in words:
         (multi if len(seg) >= 2 else single).append(seg)
     # 任一 >=2 字词字面在消息中 → 放行（"橘猫"⊂"我今天买了只橘猫"）
@@ -338,7 +339,7 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
     if not specific:
         return []
     candidates = set()
-    for r in _db.memory_rows(scope, key):  # type: ignore[attr-defined]
+    for r in _db.memory_rows(scope, key):
         if (extract.fact_keywords(r["fact"]) & specific) or (
             set(extract.tokenize(r["fact"])) & specific
         ):
@@ -360,35 +361,35 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
     details = []
     now_ts = datetime.now().isoformat(timespec="seconds")
     for fact in sorted(candidates)[:2]:  # 每次最多影响 2 条，防误伤扩散
-        row = next((r for r in _db.memory_rows(scope, key) if r["fact"] == fact), None)  # type: ignore[attr-defined]
+        row = next((r for r in _db.memory_rows(scope, key) if r["fact"] == fact), None)
         if not row:
             continue
         cur = float(row.get("confidence", 0.7))
         cls = policy.fact_class(scope, key, fact)
         if decision["action"] == "update":
             # 调查确认旧记忆过时 → 直接废弃（保留历史，不删除）
-            _db.memory_set_status(scope, key, fact, "superseded", valid_to=now_ts)  # type: ignore[attr-defined]
+            _db.memory_set_status(scope, key, fact, "superseded", valid_to=now_ts)
             # 时间纠错联动（v2.2）：update 时顺带改事件时间
             try:
                 from memory import time_extract, graph as _graph
                 _te = time_extract.extract(text or "", scope)
                 _nts = _te.get("start") or datetime.now()
-                _db.event_set_ts_by_title(  # type: ignore[attr-defined]
+                _db.event_set_ts_by_title(
                     scope, key, _graph.title_of(fact),
                     _nts.isoformat(timespec="seconds"),
                     "explicit" if _te.get("explicit") else "approx",
                 )
             except Exception as e:
                 _stats_err(e)
-            _db.history_add(  # type: ignore[attr-defined]
+            _db.history_add(
                 scope, key, fact, "supersede",
                 reason=f"用户纠正并经核查（update：{decision['reason']}）",
                 old_confidence=cur, new_confidence=0.0,
             )
             if row.get("mclass") == "core" or scope == "ai" or scope.startswith("ai:"):
-                _db.audit_add("review_required", fact[:100], "核心记忆被纠正并更新", operator="auto")  # type: ignore[attr-defined]
+                _db.audit_add("review_required", fact[:100], "核心记忆被纠正并更新", operator="auto")
             try:
-                _db.invalidation_add(scope, key, fact, "supersede")  # type: ignore[attr-defined]
+                _db.invalidation_add(scope, key, fact, "supersede")
             except Exception as e:
                 _stats_err(e)
             details.append(
@@ -398,13 +399,13 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
         elif decision["action"] == "uncertain":
             # 无法确认 → 冲突降权 + 标记 contested 待核查（按事实类型加阻力）
             new_conf = policy.update(cur, "conflict", resistance=policy.resistance_for(cls))
-            _db.memory_set_confidence(scope, key, fact, new_conf)  # type: ignore[attr-defined]
-            _db.memory_set_status(scope, key, fact, "contested")  # type: ignore[attr-defined]
+            _db.memory_set_confidence(scope, key, fact, new_conf)
+            _db.memory_set_status(scope, key, fact, "contested")
             try:
-                _db.invalidation_add(scope, key, fact, "conflict")  # type: ignore[attr-defined]
+                _db.invalidation_add(scope, key, fact, "conflict")
             except Exception as e:
                 _stats_err(e)
-            _db.history_add(  # type: ignore[attr-defined]
+            _db.history_add(
                 scope, key, fact, "conflict",
                 reason=f"纠正待核查（uncertain：{decision['reason']}）",
                 old_confidence=cur, new_confidence=new_conf,
@@ -415,7 +416,7 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
             reasoning.record_negative_feedback(fact, scope=scope)
         else:
             # 调查后纠正不成立 → 保留旧记忆，只记审计
-            _db.history_add(  # type: ignore[attr-defined]
+            _db.history_add(
                 scope, key, fact, "investigate",
                 reason=f"核查后保留旧记忆（keep：{decision['reason']}）",
                 old_confidence=cur,
@@ -453,13 +454,13 @@ def _supersede_old(scope, key, text, ts) -> int:
     if not new_ents:
         return 0
     n = 0
-    for r in _db.memory_rows(scope, key):  # type: ignore[attr-defined]
+    for r in _db.memory_rows(scope, key):
         if r.get("status") == "superseded":
             continue
         old_ents = [e.lower() for e in extract_entities(r["fact"])]
         if old_ents and new_ents:  # 双方都有专名 → 同一类话题的状态更新
-            _db.memory_set_status(scope, key, r["fact"], "superseded", valid_to=ts)  # type: ignore[attr-defined]
-            _db.history_add(  # type: ignore[attr-defined]
+            _db.memory_set_status(scope, key, r["fact"], "superseded", valid_to=ts)
+            _db.history_add(
                 scope, key, r["fact"], "supersede",
                 reason="状态变化（时间推理）", new_value=(text or "")[:100],
             )
@@ -522,7 +523,7 @@ def message_gain(text, scope, key="") -> dict:
         score += 0.3
         reasons.append("状态改变")
     existing = set()
-    for r in _db.memory_rows(scope, key):  # type: ignore[attr-defined]
+    for r in _db.memory_rows(scope, key):
         existing |= extract.fact_keywords(r["fact"])
     qt = extract.fact_keywords(t)
     if qt:
@@ -1032,7 +1033,7 @@ def _apply_ops(scope, key, ops) -> dict:
     applied = {"remember": 0, "forget": 0}
     if not ops:
         return applied
-    by_fact = {r["fact"]: r for r in _db.memory_rows(scope, key)}  # type: ignore[attr-defined]
+    by_fact = {r["fact"]: r for r in _db.memory_rows(scope, key)}
     for op in ops:
         fact = extract.nice_fact(str(op.get("fact", ""))).strip()
         if not fact:
@@ -1044,7 +1045,7 @@ def _apply_ops(scope, key, ops) -> dict:
                 target = "long"  # 防止绕过 promote_core 直接把非稳定事实塞进核心层
             row = by_fact.get(fact)
             if row:
-                _db.memory_add(  # type: ignore[attr-defined]
+                _db.memory_add(
                     scope, key, fact,
                     updated_at=row.get("updated_at") or "",
                     confidence=max(float(row.get("confidence", 0.7)), 0.6),
@@ -1057,15 +1058,15 @@ def _apply_ops(scope, key, ops) -> dict:
                     privacy=float(row.get("privacy", 0.0)),
                 )
             else:
-                _db.memory_add(scope, key, fact, confidence=0.6, source="ai_edit", mclass=target)  # type: ignore[attr-defined]
+                _db.memory_add(scope, key, fact, confidence=0.6, source="ai_edit", mclass=target)
             applied["remember"] += 1
         elif kind == "forget":
             if fact in by_fact:
-                _db.memory_set_status(scope, key, fact, "superseded")  # type: ignore[attr-defined]
-                _db.history_add(scope, key, fact, "forget", reason="AI 主动编辑：判定已过时")  # type: ignore[attr-defined]
+                _db.memory_set_status(scope, key, fact, "superseded")
+                _db.history_add(scope, key, fact, "forget", reason="AI 主动编辑：判定已过时")
                 applied["forget"] += 1
     if applied["remember"] or applied["forget"]:
-        _db.lexicon_sync(scope, key)  # type: ignore[attr-defined]
+        _db.lexicon_sync(scope, key)
     return applied
 
 
@@ -1090,13 +1091,13 @@ def reconcile(scope, key, fact, reason="") -> dict:
 
 def reconcile_pending(limit=100) -> dict:
     """惰性重算：消费失效队列（assemble_context 开头调用，量小不热）。"""
-    rows = _db.invalidation_rows(limit)  # type: ignore[attr-defined]
+    rows = _db.invalidation_rows(limit)
     n = 0
     for r in rows:
         reconcile(r.get("scope", ""), r.get("key", ""), r.get("fact", ""), r.get("reason", ""))
         n += 1
     if rows:
-        _db.invalidation_clear_all()  # type: ignore[attr-defined]
+        _db.invalidation_clear_all()
     return {"reconciled": n}
 
 
@@ -1328,17 +1329,17 @@ def touch(scope, key, text, summary=None) -> int:
 
     短社交/寒暄消息（如“你在干嘛”“在吗”）不会继承旧话题，避免被上一轮主题带偏。
     """
-    recent = _db.session_find_recent(scope, key, within_min=int(_session_cfg("window_min", 1440)))  # type: ignore[attr-defined]
+    recent = _db.session_find_recent(scope, key, within_min=int(_session_cfg("window_min", 1440)))
     if _is_social_message(text):
-        return _db.session_create(  # type: ignore[attr-defined]
+        return _db.session_create(
             scope, key, topic="", summary=summary or text[:100]
         )
     topic_name = _session_topic_of(text)
     if recent and _same_session_topic(text, recent):
-        _db.session_bump(recent["id"], topic=topic_name, summary=summary)  # type: ignore[attr-defined]
+        _db.session_bump(recent["id"], topic=topic_name, summary=summary)
         return recent["id"]
     fallback_topic = recent.get("topic", "") if recent else ""
-    return _db.session_create(  # type: ignore[attr-defined]
+    return _db.session_create(
         scope, key, topic=topic_name or fallback_topic, summary=summary or text[:100]
     )
 
@@ -1349,7 +1350,7 @@ def current(scope, key):
 
 
 def close_old(days=3) -> int:
-    return _db.session_close_old(days=days)  # type: ignore[attr-defined]
+    return _db.session_close_old(days=days)
 
 
 
