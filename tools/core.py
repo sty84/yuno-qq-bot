@@ -165,7 +165,7 @@ def run_ablation(probes, names=None) -> dict:
             if r.get(k) is not None and base_res.get(k) is not None
         }
         regression = any(v < -0.03 for v in delta.values())
-        _db.exp_log_add("ablation", detail=name, before=base_res, after=r, delta=delta, regression=regression)
+        _db.exp_log_add("ablation", detail=name, before=base_res, after=r, delta=delta, regression=regression)  # type: ignore[attr-defined]
         rows.append({"switch": name, "label": label, **r, "delta": delta, "regression": regression})
     core.clear()
     core.update(base)

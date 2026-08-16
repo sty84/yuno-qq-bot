@@ -107,7 +107,7 @@ def update(
 
 def describe(scope) -> str:
     """生成可注入 prompt 的关系描述；无记录返回空串。"""
-    row = _db.relationship_get(scope)
+    row = _db.relationship_get(scope)  # type: ignore[attr-defined]
     if not row:
         return ""
     try:
@@ -154,8 +154,8 @@ def note_return(scope, days=30) -> bool:
     if not scope:
         return False
     now = datetime.now()
-    last = _db.kv_get("memory", f"lastmsg:{scope}", "") or ""
-    flag = _db.kv_get("memory", f"user_return:{scope}") or {}
+    last = _db.kv_get("memory", f"lastmsg:{scope}", "") or ""  # type: ignore[attr-defined]
+    flag = _db.kv_get("memory", f"user_return:{scope}") or {}  # type: ignore[attr-defined]
     if flag.get("announced"):
         return False
     if not last:
@@ -166,7 +166,7 @@ def note_return(scope, days=30) -> bool:
         _stats_err(e)
         return False
     if age_days > float(days):
-        _db.kv_set("memory", f"user_return:{scope}", {"announced": True, "ts": now.isoformat(timespec="seconds")})
+        _db.kv_set("memory", f"user_return:{scope}", {"announced": True, "ts": now.isoformat(timespec="seconds")})  # type: ignore[attr-defined]
         return True
     return False
 

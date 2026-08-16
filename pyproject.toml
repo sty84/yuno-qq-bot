@@ -34,15 +34,12 @@ python_version = "3.10"
 follow_imports = "skip"
 ignore_missing_imports = true
 files = [
-  "memory/interfaces.py",
-  "memory/telemetry.py",
-  "agent/core.py",
-  "web/app.py",
-  "web/auth.py",
-  "web/routes_admin.py",
-  "web/routes_cognitive.py",
-  "web/routes_eval.py",
+  "agent",
+  "memory",
+  "plugins",
+  "scripts",
   "tools",
+  "web",
 ]
 
 [tool.pyright]

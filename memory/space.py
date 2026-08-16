@@ -93,7 +93,7 @@ def shortest_route(a, b) -> list:
     """房间间最短路径（BFS，按 home_edges）。"""
     if a == b:
         return [a]
-    adj = {}
+    adj = {}  # type: ignore[var-annotated]
     for x, y in home_edges():
         adj.setdefault(x, []).append(y)
         adj.setdefault(y, []).append(x)
@@ -128,11 +128,11 @@ def route_minutes(a, b) -> int:
 
 
 def _doors_data() -> dict:
-    d = _db.kv_get("memory", "space_doors") or {}
+    d = _db.kv_get("memory", "space_doors") or {}  # type: ignore[attr-defined]
     if not d.get("doors"):
         doors = _pack_world().get("doors") or _DOORS_DEFAULT
         d = {"doors": dict(doors)}
-        _db.kv_set("memory", "space_doors", d)
+        _db.kv_set("memory", "space_doors", d)  # type: ignore[attr-defined]
     return d
 
 
@@ -224,7 +224,7 @@ def cast_block(text, now=None) -> str:
 
 # ===== 家内房间移动状态机（P1-1：真实移动）=====
 def _room_state() -> dict:
-    st = _db.space_state_get()
+    st = _db.space_state_get()  # type: ignore[attr-defined]
     if not st:
         return {
         "room": "客厅", "state": "在场", "from": "", "to": "",
@@ -298,7 +298,7 @@ def room_now(now=None) -> str:
 
 
 def _get_pos() -> dict:
-    return _db.kv_get("memory", "space_position") or {}
+    return _db.kv_get("memory", "space_position") or {}  # type: ignore[attr-defined]
 
 
 def _set_pos(pos):
@@ -380,7 +380,7 @@ def _parse(ts):
 
 # ===== 空间事件流 =====
 def _events() -> dict:
-    return {"rows": _db.space_event_rows(limit=500)}
+    return {"rows": _db.space_event_rows(limit=500)}  # type: ignore[attr-defined]
 
 
 def _loc_from_detail(kind, detail):
@@ -564,7 +564,7 @@ def remember(scope, action, detail=""):
 def recent_actions(scope="", hours=24) -> list:
     out = []
     now = datetime.now()
-    for it in _db.ai_action_rows(scope or "", limit=60):
+    for it in _db.ai_action_rows(scope or "", limit=60):  # type: ignore[attr-defined]
         if scope and it.get("scope") != scope:
             continue
         try:

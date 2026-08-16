@@ -65,7 +65,7 @@ def goal_strength(goal) -> float:
 
 
 def _intention_data() -> dict:
-    return _db.mind_intention_rows()
+    return _db.mind_intention_rows()  # type: ignore[attr-defined]
 
 
 def _save_intention(data):
@@ -211,16 +211,16 @@ def appraise(text, scope="") -> dict:
     oppo = ("喜欢", "棒", "好耶", "太", "谢谢", "厉害", "夸", "记住", "礼物", "送", "一起", "去", "帮我", "约")
     if any(w in t for w in threat):
         out["stance"] = "威胁"
-        out["beliefs"].append("用户对我有负面情绪，先接住情绪再讲事")
-        out["wants"].append("保持边界但不激化")
+        out["beliefs"].append("用户对我有负面情绪，先接住情绪再讲事")  # type: ignore[attr-defined]
+        out["wants"].append("保持边界但不激化")  # type: ignore[attr-defined]
     elif any(w in t for w in oppo):
         out["stance"] = "机会"
-        out["beliefs"].append("用户带着好感或需求来，是拉近关系/推进目标的窗口")
-        out["wants"].append("回应需求并顺势推进当前意图")
+        out["beliefs"].append("用户带着好感或需求来，是拉近关系/推进目标的窗口")  # type: ignore[attr-defined]
+        out["wants"].append("回应需求并顺势推进当前意图")  # type: ignore[attr-defined]
     else:
         out["stance"] = "无关"
-        out["beliefs"].append("日常对话，按人设自然回应即可")
-        out["wants"].append("不硬找意义，别生硬推销")
+        out["beliefs"].append("日常对话，按人设自然回应即可")  # type: ignore[attr-defined]
+        out["wants"].append("不硬找意义，别生硬推销")  # type: ignore[attr-defined]
     return out
 
 

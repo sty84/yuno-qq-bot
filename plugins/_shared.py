@@ -42,7 +42,7 @@ deepseek = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
 def _load_persona() -> str:
     """人设单一来源：优先 .env 的 SYSTEM_PROMPT，否则读 Persona Pack 的 persona.md。"""
     if os.getenv("SYSTEM_PROMPT"):
-        return os.getenv("SYSTEM_PROMPT")
+        return os.getenv("SYSTEM_PROMPT")  # type: ignore[return-value]
     try:
         try:
             pk = str(
@@ -86,7 +86,7 @@ BASE_SYSTEM_PROMPT = _load_persona()  # 必须在 CONFIG 定义之后（读取 p
 try:
     _config_mtime = os.path.getmtime(CONFIG_PATH)
 except OSError:
-    _config_mtime = None
+    _config_mtime = None  # type: ignore[assignment]
 
 
 def _sync_config_deps():
@@ -164,7 +164,7 @@ def data_dir() -> pathlib.Path:
 
 DATA_DIR = data_dir()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-_db.init(DATA_DIR)
+_db.init(DATA_DIR)  # type: ignore[attr-defined]
 _sync_config_deps()
 
 # ===== 昵称 / 群列表 =====
@@ -189,7 +189,7 @@ def group_list_add(gid):
 
 # ===== 情绪 =====
 MOODS = ["慵懒", "开心", "元气", "困倦", "想打牌", "有点饿"]
-state = _db.state_get() or {"mood": "慵懒"}
+state = _db.state_get() or {"mood": "慵懒"}  # type: ignore[attr-defined]
 
 
 def set_mood(mood):
@@ -277,7 +277,7 @@ def ask_deepseek(
             print(f"[AI] DeepSeek 第 {attempt + 1} 次调用失败：{e}")
             if attempt < 2:
                 time.sleep(1 + attempt)
-    raise last_err
+    raise last_err  # type: ignore[misc]
 
 
 # ===== 身份 =====

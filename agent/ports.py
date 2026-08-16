@@ -142,14 +142,14 @@ def _extra_scopes(scopes) -> list[str]:
         if s.startswith("group:") or s.startswith("group_all:")
     }
     if gids:
-        for uid, groups in _db.bindings_all().items():
+        for uid, groups in _db.bindings_all().items():  # type: ignore[attr-defined]
             if any(gid in groups for gid in gids):
                 extra.append(f"c2c:{uid}")
         return extra
     for s in scopes:
         if s.startswith("c2c:"):
             uid = s.split(":", 1)[1]
-            for gid in (_db.binding_groups_for_user(uid) or {}):
+            for gid in (_db.binding_groups_for_user(uid) or {}):  # type: ignore[attr-defined]
                 extra.append(f"group:{gid}")
                 extra.append(f"group_all:{gid}")
             break

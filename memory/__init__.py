@@ -90,7 +90,7 @@ expression_profile = expression.profile_get
 expression_update = expression.profile_update
 expression_describe = expression.describe
 trace_record = trace.record
-trace_rows = _db.trace_rows
+trace_rows = _db.trace_rows  # type: ignore[attr-defined]
 trace_markdown = trace.render_markdown
 trace_prune = trace.prune
 trace_score = trace.score
@@ -210,8 +210,8 @@ def ai_memory_clear(kind=None):
         _db.memory_clear("ai")
 
 
-event_rows = _db.event_rows
-relations_for = _db.relations_for
+event_rows = _db.event_rows  # type: ignore[attr-defined]
+relations_for = _db.relations_for  # type: ignore[attr-defined]
 timeline = graph.timeline
 ancestors = graph.ancestors
 descendants = graph.descendants
@@ -244,7 +244,7 @@ vector_index = vecindex
 bm25_search = lexical.bm25_search
 rerank_light = reasoning.light_rerank
 reflect_beliefs = reflect.reflect_beliefs
-belief_log = _db.belief_log_rows
+belief_log = _db.belief_log_rows  # type: ignore[attr-defined]
 tokenize_text = extract.tokenize
 eval_run_file = backfill_mod.eval_run_file
 shortest_path = graph.shortest_path
@@ -258,9 +258,9 @@ relationship_update = relationship.update
 relationship_describe = relationship.describe
 relationship_rows = relationship.rows
 relationship_score = relationship.score_of
-history_rows = _db.history_rows
-feedback_rows = _db.feedback_rows
-policy_log_rows = _db.policy_log_rows
+history_rows = _db.history_rows  # type: ignore[attr-defined]
+feedback_rows = _db.feedback_rows  # type: ignore[attr-defined]
+policy_log_rows = _db.policy_log_rows  # type: ignore[attr-defined]
 character_build = character.build
 character_search = character.search
 character_list = character.list_names
@@ -273,21 +273,21 @@ sensitive_detect = sensitive.detect
 crypto_available = sensitive.available
 session_touch = controller.touch
 session_current = controller.current
-session_rows = _db.session_rows
+session_rows = _db.session_rows  # type: ignore[attr-defined]
 entity_build = graph.build_entities
 rollback_belief = reflect.rollback_belief
-purge_scope = _db.purge_scope
-query_log_pending = _db.query_log_pending
+purge_scope = _db.purge_scope  # type: ignore[attr-defined]
+query_log_pending = _db.query_log_pending  # type: ignore[attr-defined]
 backend_name = vecindex.backend_name
 
 
 def stats() -> dict:
     """记忆系统概览（调试/后台用）。"""
     return {
-        "memories": len(_db.memory_rows()),
-        "events": len(_db.event_rows()),
-        "ai_memory": len(_db.memory_rows("ai")),
-        "attrs": len(_db.attr_rows()),
+        "memories": len(_db.memory_rows()),  # type: ignore[attr-defined]
+        "events": len(_db.event_rows()),  # type: ignore[attr-defined]
+        "ai_memory": len(_db.memory_rows("ai")),  # type: ignore[attr-defined]
+        "attrs": len(_db.attr_rows()),  # type: ignore[attr-defined]
     }
 
 

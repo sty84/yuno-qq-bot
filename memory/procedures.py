@@ -53,9 +53,9 @@ def match(text, scope=None) -> dict | None:
     if not _cfg("system1", True) or not str(text or "").strip():
         return None
     ttl = float(_cfg("system1_cache_ttl", 30))
-    if _match_cache["text"] == text and time.time() - _match_cache["ts"] < ttl:
+    if _match_cache["text"] == text and time.time() - _match_cache["ts"] < ttl:  # type: ignore[operator]
         r = _match_cache["result"]
-        return dict(r) if r else None
+        return dict(r) if r else None  # type: ignore[call-overload]
     qt = _tokens(text)
     if not qt:
         return None
@@ -63,7 +63,7 @@ def match(text, scope=None) -> dict | None:
     min_success = float(_cfg("system1_min_success", 0.75))
     min_overlap = float(_cfg("system1_min_overlap", 0.5))
     best = None
-    for r in _db.procedure_rows(min_tries=min_tries, limit=200):
+    for r in _db.procedure_rows(min_tries=min_tries, limit=200):  # type: ignore[attr-defined]
         st = _tokens(r["situation"])
         if not st:
             continue
@@ -84,7 +84,7 @@ def match(text, scope=None) -> dict | None:
 
 
 def stats() -> dict:
-    rows = _db.procedure_rows()
+    rows = _db.procedure_rows()  # type: ignore[attr-defined]
     if not rows:
         return {"count": 0}
     good = [r for r in rows if float(r.get("success", 0)) >= 0.75 and int(r.get("tries", 0)) >= 3]
@@ -96,7 +96,7 @@ def stats() -> dict:
 
 
 def report() -> str:
-    rows = _db.procedure_rows()
+    rows = _db.procedure_rows()  # type: ignore[attr-defined]
     if not rows:
         return "程序记忆为空（还没有学出习惯）"
     lines = [f"共 {len(rows)} 条习惯："]

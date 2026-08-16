@@ -149,15 +149,15 @@ def run(compare=False, save=False) -> dict:
 
                 metrics["delta"] = {
                     "window_recall": _delta(
-                        metrics["window_recall"].get("recall"),
+                        metrics["window_recall"].get("recall"),  # type: ignore[attr-defined]
                         base.get("window_recall", {}).get("recall"),
                     ),
                     "timeline_order": _delta(
-                        metrics["timeline_order"].get("rate"),
+                        metrics["timeline_order"].get("rate"),  # type: ignore[attr-defined]
                         base.get("timeline_order", {}).get("rate"),
                     ),
                     "date_accuracy": _delta(
-                        metrics["date_accuracy"].get("accuracy"),
+                        metrics["date_accuracy"].get("accuracy"),  # type: ignore[attr-defined]
                         base.get("date_accuracy", {}).get("accuracy"),
                     ),
                 }

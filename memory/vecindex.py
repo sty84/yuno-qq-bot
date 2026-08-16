@@ -59,23 +59,23 @@ def _kmeans(vectors, nlist, max_iter=20, seed=42):
 
 def build(nlist=None, scope=None) -> dict:
     """用现有带向量的记忆重建索引。返回 {n, nlist, dim} 或 {error}。"""
-    rows = [r for r in _db.memory_rows(scope) if _db.vec_loads(r.get("embedding"))]
+    rows = [r for r in _db.memory_rows(scope) if _db.vec_loads(r.get("embedding"))]  # type: ignore[attr-defined]
     if not rows:
         return {"error": "没有带向量的记忆，先启用 embedder 并回填（tools.py memory-embed）"}
-    vectors = [_db.vec_loads(r["embedding"]) for r in rows]
+    vectors = [_db.vec_loads(r["embedding"]) for r in rows]  # type: ignore[attr-defined]
     dim = len(vectors[0])
     # v31：nlist 随数据量自动缩放（√n，夹在 4~128）；配置 >0 时以配置为准
     nlist = nlist or int(_cfg("nlist", 0))
     if nlist <= 0:
         nlist = max(4, min(128, int(len(vectors) ** 0.5)))
     centroids, assign = _kmeans(vectors, nlist)
-    _db.vec_clear()
-    _db.vec_centroids_set([(c, assign.count(i)) for i, c in enumerate(centroids)])
-    _db.vec_index_replace(
+    _db.vec_clear()  # type: ignore[attr-defined]
+    _db.vec_centroids_set([(c, assign.count(i)) for i, c in enumerate(centroids)])  # type: ignore[attr-defined]
+    _db.vec_index_replace(  # type: ignore[attr-defined]
         [(r["scope"], r["key"], r["fact"], assign[i], vectors[i]) for i, r in enumerate(rows)]
     )
     try:
-        _db.pgvector_build(
+        _db.pgvector_build(  # type: ignore[attr-defined]
             [(r["scope"], r["key"], r["fact"], vectors[i]) for i, r in enumerate(rows)]
         )
     except Exception as e:
@@ -85,7 +85,7 @@ def build(nlist=None, scope=None) -> dict:
 
 def enabled(scope=None) -> bool:
     try:
-        return _db.vec_index_count() > 0 and bool(_db.vec_centroids_get())
+        return _db.vec_index_count() > 0 and bool(_db.vec_centroids_get())  # type: ignore[attr-defined]
     except Exception as e:
         _stats_err(e)
         return False
@@ -111,12 +111,12 @@ def backend_name() -> str:
 def search(query_vec, scopes, top_k=5, nprobe=None) -> list:
     """优先 pgvector 原生检索；不可用时回退自研 IVF。"""
     try:
-        pg_rows = _db.pgvector_search(query_vec, scopes, top_k=top_k)
+        pg_rows = _db.pgvector_search(query_vec, scopes, top_k=top_k)  # type: ignore[attr-defined]
         if pg_rows:
             return pg_rows
     except Exception as e:
         _stats_err(e)
-    centroids = _db.vec_centroids_get()
+    centroids = _db.vec_centroids_get()  # type: ignore[attr-defined]
     if not centroids:
         return []
     # v31：nprobe 随质心数自动缩放（√nlist）；配置 >0 时以配置为准
@@ -129,10 +129,10 @@ def search(query_vec, scopes, top_k=5, nprobe=None) -> list:
     )
     probe_ids = [cid for _s, cid in scored[: max(1, nprobe)]]
     out = []
-    for r in _db.vec_index_by_centroid(probe_ids):
+    for r in _db.vec_index_by_centroid(probe_ids):  # type: ignore[attr-defined]
         if scopes and r["scope"] not in scopes:
             continue
-        vec = _db.vec_loads(r["embedding"])
+        vec = _db.vec_loads(r["embedding"])  # type: ignore[attr-defined]
         if vec:
             out.append(
                 {
@@ -150,11 +150,11 @@ def upsert(scope, key, fact, embedding=None) -> bool:
     """增量写一条向量索引（归到最近质心）。无质心/无向量时跳过（等下次 build 全量重建）。"""
     if not enabled(scope) or embedding is None:
         return False
-    centroids = _db.vec_centroids_get()
+    centroids = _db.vec_centroids_get()  # type: ignore[attr-defined]
     if not centroids:
         return False
     best = max(centroids, key=lambda c: _cosine(embedding, c["embedding"]))
-    _db.vec_index_upsert(scope, key, fact, best["id"], embedding)
+    _db.vec_index_upsert(scope, key, fact, best["id"], embedding)  # type: ignore[attr-defined]
     return True
 
 

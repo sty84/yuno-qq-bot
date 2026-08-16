@@ -69,14 +69,14 @@ def remember(scope, text) -> str | None:
     """检测并记住该用户时区（存 kv，按 scope 隔离）。"""
     tz = detect(text)
     if tz and scope:
-        _db.kv_set("memory", f"tz:{scope}", {"tz": tz})
+        _db.kv_set("memory", f"tz:{scope}", {"tz": tz})  # type: ignore[attr-defined]
     return tz
 
 
 def user_tz(scope=None) -> str:
     """该用户的时区：先查记忆，再用 TIMEZONE/默认。"""
     if scope:
-        data = _db.kv_get("memory", f"tz:{scope}") or {}
+        data = _db.kv_get("memory", f"tz:{scope}") or {}  # type: ignore[attr-defined]
         if data.get("tz"):
             return data["tz"]
     return _tz_setting()

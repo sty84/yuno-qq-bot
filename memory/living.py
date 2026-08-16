@@ -132,13 +132,13 @@ def places() -> dict:
 
 # ===== 物品存储（kv，SQLite 落盘）=====
 def _load() -> dict:
-    data = _db.kv_get("memory", "living_items") or {}
+    data = _db.kv_get("memory", "living_items") or {}  # type: ignore[attr-defined]
     if data and data.get("items") is not None:
         return data
     w = _pack_world().get("items")
     items = [dict(i) for i in w] if isinstance(w, list) and w else [dict(i) for i in DEFAULT_ITEMS]
     data = {"items": items, "moves": []}
-    _db.kv_set("memory", "living_items", data)
+    _db.kv_set("memory", "living_items", data)  # type: ignore[attr-defined]
     return data
 
 
@@ -156,7 +156,7 @@ def _move_log(data, action, name, n, detail=""):
 
 
 # ===== 物品位置历史 / 激活 / 找东西（P0-1 / P0-3）=====
-_SEE_LAST = {}  # 内存节流：see 事件同一物品 5 分钟内只记一次（重启丢失无影响）
+_SEE_LAST = {}  # type: ignore[var-annotated]  # 内存节流：see 事件同一物品 5 分钟内只记一次（重启丢失无影响）
 
 
 def container_room(container) -> str:
@@ -249,7 +249,7 @@ def touch_item(name, ts=None) -> None:
     if not name:
         return
     now = ts or datetime.now()
-    d = _db.item_activation_rows()
+    d = _db.item_activation_rows()  # type: ignore[attr-defined]
     a = d.get(name) or {"seen_ts": "", "count": 0}
     try:
         if a.get("seen_ts") and (now - datetime.fromisoformat(str(a["seen_ts"]))).total_seconds() < float(_cfg("see_throttle_s", 300)):
@@ -260,7 +260,7 @@ def touch_item(name, ts=None) -> None:
     a["seen_ts"] = now.isoformat(timespec="seconds")
     a["count"] = int(a.get("count", 0)) + 1
     d[name] = a
-    _db.item_activation_set(d)
+    _db.item_activation_set(d)  # type: ignore[attr-defined]
 
 
 def activation(name, now=None) -> float:
@@ -271,7 +271,7 @@ def activation(name, now=None) -> float:
     it = next((i for i in all_items() if str(i.get("name", "")) == name), None)
     if not it:
         return 0.0
-    d = _db.item_activation_rows()
+    d = _db.item_activation_rows()  # type: ignore[attr-defined]
     a = d.get(name) or {}
     count = int(a.get("count", 0))
     days = 9999.0
@@ -291,7 +291,7 @@ def activation(name, now=None) -> float:
 
 def item_history(name, limit=100) -> list:
     """物品事件流水（新→旧）。"""
-    return _db.item_event_rows(str(name or "").strip(), limit=int(limit))
+    return _db.item_event_rows(str(name or "").strip(), limit=int(limit))  # type: ignore[attr-defined]
 
 
 def position_at(name, ts=None) -> dict:
@@ -302,7 +302,7 @@ def position_at(name, ts=None) -> dict:
     now = ts or datetime.now()
     if isinstance(now, datetime):
         now = now.isoformat(timespec="seconds")
-    r = _db.item_position_at(name, now)
+    r = _db.item_position_at(name, now)  # type: ignore[attr-defined]
     if r:
         return r
     it = next((i for i in all_items() if str(i.get("name", "")) == name), None)
@@ -340,7 +340,7 @@ def _start_item_search(scope, name, now=None) -> str:
     it = next((i for i in all_items() if str(i.get("name", "")) == name), None)
     if not it:
         return ""
-    last = _db.item_position_at(name, now.isoformat(timespec="seconds"))
+    last = _db.item_position_at(name, now.isoformat(timespec="seconds"))  # type: ignore[attr-defined]
     containers = []
     for r, lv in home_layout().items():
         for c in (lv.get("furniture") or []):
@@ -353,7 +353,7 @@ def _start_item_search(scope, name, now=None) -> str:
     if not ordered:
         return f"【找东西·搜索】{name}不知道塞哪了，家里好像也没有能放它的地方。"
     queue = ordered[: int(_cfg("search_max_steps", 5))]
-    _db.item_search_set(str(scope), {
+    _db.item_search_set(str(scope), {  # type: ignore[attr-defined]
         "name": name, "queue": queue, "step": 0,
         "started_at": now.isoformat(timespec="seconds"),
     })
@@ -374,7 +374,7 @@ def where_is_block(scope, text, now=None) -> str:
         return ""
     # 搜索进行中：不重启，给进度并继续（重问不从头来）
     try:
-        d = _db.item_search_rows()
+        d = _db.item_search_rows()  # type: ignore[attr-defined]
         st = d.get(str(scope))
         if st and st.get("name") == name:
             step = int(st.get("step", 0))
@@ -429,9 +429,9 @@ def _persona_role() -> str:
 
 def cancel_search(scope) -> bool:
     """用户说别找了 → 取消进行中的搜索。"""
-    d = _db.item_search_rows()
+    d = _db.item_search_rows()  # type: ignore[attr-defined]
     if str(scope) in d:
-        _db.item_search_delete(str(scope))
+        _db.item_search_delete(str(scope))  # type: ignore[attr-defined]
         return True
     return False
 
@@ -454,7 +454,7 @@ def ask_npc(name, text, top_k=2) -> str:
 def search_progress(scope) -> dict:
     """搜索推进（broadcast 汇报循环调用）：当前容器找到→成功；否则下一处或失败。
     返回 {done, found, name, container, prompt}。"""
-    d = _db.item_search_rows()
+    d = _db.item_search_rows()  # type: ignore[attr-defined]
     st = d.get(str(scope))
     if not st:
         return {"done": True, "found": False, "name": "", "container": "", "prompt": ""}
@@ -462,7 +462,7 @@ def search_progress(scope) -> dict:
     try:
         started = datetime.fromisoformat(str(st.get("started_at", "")))
         if datetime.now() - started > timedelta(minutes=float(_cfg("search_ttl_min", 30))):
-            _db.item_search_delete(str(scope))
+            _db.item_search_delete(str(scope))  # type: ignore[attr-defined]
             return {"done": True, "found": False, "name": st.get("name", ""), "container": "",
                     "prompt": ""}
     except Exception as e:
@@ -470,7 +470,7 @@ def search_progress(scope) -> dict:
         pass
     # 话题转移暂停（不突兀）：搜索开始后用户发了不相关消息 → 停住，等用户再提起
     try:
-        last = _db.kv_get("memory", f"last_user_msg:{str(scope)}")
+        last = _db.kv_get("memory", f"last_user_msg:{str(scope)}")  # type: ignore[attr-defined]
         if last and last.get("text"):
             last_ts = None
             try:
@@ -532,7 +532,7 @@ def search_progress(scope) -> dict:
         }
     nxt_step = step + 1
     st["step"] = nxt_step
-    _db.item_search_set(str(scope), st)
+    _db.item_search_set(str(scope), st)  # type: ignore[attr-defined]
     _record_item_event(
         name, "search_miss", to_place=f"{container_room(container)}/{container}",
         cause="search", seen_by="ai",
@@ -727,7 +727,7 @@ _WORLD_PROMPT = (
 )
 _WORLD_KEYWORDS = ("拿", "喝", "吃", "买", "放", "扔", "开", "关", "冰箱", "床头柜", "零食柜", "储物箱",
                    "灯", "门铃", "快递", "外卖", "送", "薯片", "巧克力", "饮料", "牛奶")
-_WORLD_LAST = {}
+_WORLD_LAST = {}  # type: ignore[var-annotated]
 
 
 def _world_hint(text) -> bool:
@@ -831,7 +831,7 @@ def repair_spatial() -> dict:
     """空间一致性修复（P1-3）：物品 room 必须匹配容器所在房间；容器必须存在。"""
     data = _load()
     fixed = []
-    seen = {}
+    seen = {}  # type: ignore[var-annotated]
     for it in data["items"]:
         name = str(it.get("name", ""))
         # 数量与状态一致性
@@ -863,7 +863,7 @@ def repair_spatial() -> dict:
             fixed.append({"name": name, "issue": f"房间不符，修正为{croom}"})
     # 容器超容量：只记录不搬动（等人工整理）
     cap = _container_capacity()
-    per_container = {}
+    per_container = {}  # type: ignore[var-annotated]
     for it in data["items"]:
         if it.get("status") == "没有了":
             continue
@@ -898,7 +898,7 @@ def bootstrap_from_persona(scope="", now=None) -> dict:
             persona = str(p.read_text(encoding="utf-8"))[:800]
         extra = []
         try:
-            rows = _db.memory_rows("ai")
+            rows = _db.memory_rows("ai")  # type: ignore[attr-defined]
             rows.sort(key=lambda r: float(r.get("confidence", 0.0)), reverse=True)
             for r in rows[:8]:
                 if r.get("status") == "superseded":
@@ -908,7 +908,7 @@ def bootstrap_from_persona(scope="", now=None) -> dict:
             _stats_err(e)
             pass
         try:
-            for r in _db.attr_rows("ai"):
+            for r in _db.attr_rows("ai"):  # type: ignore[attr-defined]
                 v = str(r.get("value", ""))[:60]
                 if v and v not in extra:
                     extra.append(v)
@@ -930,7 +930,7 @@ def bootstrap_from_persona(scope="", now=None) -> dict:
     existing = {str(i.get("name", "")) for i in data["items"]}
     layout = home_layout()
     cap = _container_capacity()
-    added = []
+    added = []  # type: ignore[var-annotated]
     for it in (delta.get("items") or [])[:max_items]:
         name = str(it.get("name", "")).strip()
         room = str(it.get("room", "")).strip()
@@ -1145,7 +1145,7 @@ def target_place_of(dt) -> str:
         act = ""
     return {"performance": "演出场地", "rehearsal": "排练室", "work": "公司",
             "shopping": "便利店", "exercise": "公园", "friend": "公园",
-            "out_entertain": "外面"}.get(act, "家")
+            "out_entertain": "外面"}.get(act, "家")  # type: ignore[arg-type]
 
 
 # ===== 注入块 =====
@@ -1178,7 +1178,7 @@ def room_now(now=None) -> str:
     except Exception as e:
         _stats_err(e)
         act = ""
-    return _ACTIVITY_ROOM.get(act, "")
+    return _ACTIVITY_ROOM.get(act, "")  # type: ignore[arg-type]
 
 
 def visible(room) -> list:
@@ -1196,7 +1196,7 @@ def _container_room(container) -> str:
 
 
 def _inspect_pending(scope, container) -> bool:
-    data = _db.kv_get("memory", "inspect_pending") or {}
+    data = _db.kv_get("memory", "inspect_pending") or {}  # type: ignore[attr-defined]
     p = data.get(str(scope or ""), {})
     return bool(p and p.get("container") == container)
 
@@ -1241,7 +1241,7 @@ def schedule_inspection(scope, container, now=None, kind="container"):
 
 def due_inspections(now=None) -> list:
     now = now or datetime.now()
-    data = _db.kv_get("memory", "inspect_pending") or {}
+    data = _db.kv_get("memory", "inspect_pending") or {}  # type: ignore[attr-defined]
     out = []
     for scope, p in data.items():
         try:
@@ -1300,7 +1300,7 @@ def home_block(scope="", text="", now=None) -> str:
         from memory import space as space_mod
     except Exception as e:
         _stats_err(e)
-        space_mod = None
+        space_mod = None  # type: ignore[assignment]
     pos = space_mod.position(now) if space_mod else {}
     parts = []
     if pos.get("state") == "在途中":
@@ -1326,7 +1326,7 @@ def home_block(scope="", text="", now=None) -> str:
         containers = ("储物箱", "冰箱", "零食柜", "床头柜", "茶几", "电视柜")
         any_named = any(c in t for c in containers)
         generic = any(w in t for w in ("有什么", "还有", "找找", "看看", "箱", "抽屉"))
-        vis = set(visible(room) or [])
+        vis = set(visible(room) or [])  # type: ignore[assignment]
         for container in containers:
             named = container in t
             if not named and (not generic or any_named or container not in vis):
@@ -1493,7 +1493,7 @@ def birthday_celebrate(now=None) -> dict:
     if days_to_birthday(now) != 0:
         return {"celebrated": False}
     year = now.year
-    flag = _db.kv_get("memory", f"birthday_celebrated:{year}") or {}
+    flag = _db.kv_get("memory", f"birthday_celebrated:{year}") or {}  # type: ignore[attr-defined]
     if flag.get("done"):
         return {"celebrated": False, "already": True}
     age = ai_age(now)
@@ -1504,7 +1504,7 @@ def birthday_celebrate(now=None) -> dict:
     except Exception as e:
         _stats_err(e)
         pass
-    _db.kv_set("memory", f"birthday_celebrated:{year}", {"done": True, "detail": detail})
+    _db.kv_set("memory", f"birthday_celebrated:{year}", {"done": True, "detail": detail})  # type: ignore[attr-defined]
     return {"celebrated": True, "age": age, "detail": detail}
 
 

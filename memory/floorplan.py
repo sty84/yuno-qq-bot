@@ -35,10 +35,10 @@ def _raw(pack_name=None) -> dict:
         if _cache["key"] == key:
             return _cache["data"]
         if not p.exists():
-            _cache.update({"key": key, "data": {}})
+            _cache.update({"key": key, "data": {}})  # type: ignore[dict-item]
             return {}
         fp = json.loads(p.read_text(encoding="utf-8")).get("floorplan") or {}
-        _cache.update({"key": key, "data": fp})
+        _cache.update({"key": key, "data": fp})  # type: ignore[dict-item]
         return fp
     except Exception:
         return {}
@@ -346,7 +346,7 @@ def validate(pack_name=None) -> list:
         if d == 0:
             issues.append(f"房间 {name} 没有门（图不连通）")
     # 门图连通性
-    adj = {}
+    adj = {}  # type: ignore[var-annotated]
     for a, b in adjacency_edges(pack_name):
         adj.setdefault(a, set()).add(b)
         adj.setdefault(b, set()).add(a)

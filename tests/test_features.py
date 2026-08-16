@@ -1608,6 +1608,26 @@ def test_18_retrieval_eval_probes():
         _check("evp-file-items", len(items) == 12 and all("query" in it and "expected" in it for it in items), len(items))
 
 
+def test_20_reply_probes_offline_smoke():
+    """回复质量评测集离线冒烟：不调真实 LLM，用 stub 跑通全部 reply_probes。"""
+    e = _env()
+    _db, _shared, agent = e["_db"], e["_shared"], e["agent"]
+    import json as _json
+    import pathlib as _pathlib
+    p = _pathlib.Path(e["repo"]) / "data" / "reply_probes.json"
+    if not p.exists():
+        _check("reply-probes-file", False, p)
+        return
+    probes = _json.loads(p.read_text(encoding="utf-8"))["items"]
+    _orig = _shared.ask_deepseek
+    _shared.ask_deepseek = lambda *a, **k: "……嗯。"
+    try:
+        for probe in probes:
+            reply, meta = agent.ask(probe["query"], scopes=["c2c:reply"], learn=False)
+            _check(f"reply-ok-{probe.get('category', 'other')}", isinstance(reply, str) and bool(reply.strip()), reply[:40])
+    finally:
+        _shared.ask_deepseek = _orig
+
 
 if __name__ == "__main__":
     for fn in (
@@ -1618,6 +1638,7 @@ if __name__ == "__main__":
         test_10_pollution_scan_levels, test_11_pollution_scan_e2e,
         test_12_pollution_scan_due, test_13_question_extract_demote,
         test_14_conflict_scan, test_15_reply_rubric_judge,
+        test_20_reply_probes_offline_smoke,
         test_16_calendar_gate_and_check, test_17_feedback_calibration,
         test_18_retrieval_eval_probes, test_19_forgetful_reply_pool,
     ):

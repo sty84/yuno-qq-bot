@@ -39,7 +39,7 @@ def _last_key(scope):
 
 def _posterior(scope) -> dict:
     """每个策略的 Beta 后验参数与均值。"""
-    data = _db.kv_get("memory", _key(scope)) or {}
+    data = _db.kv_get("memory", _key(scope)) or {}  # type: ignore[attr-defined]
     params = data.get("params") or {}
     a0 = float(_cfg("alpha0", 1.0))
     b0 = float(_cfg("beta0", 1.0))
@@ -62,10 +62,10 @@ def select(scope, store=True) -> dict:
         sample = random.betavariate(p["alpha"], p["beta"])
         if sample > best_v:
             best, best_v = s, sample
-    out = {"id": best["id"], "label": best["label"], "hint": best["hint"],
-           "mean": post[best["id"]]["mean"]}
+    out = {"id": best["id"], "label": best["label"], "hint": best["hint"],  # type: ignore[index]
+           "mean": post[best["id"]]["mean"]}  # type: ignore[index]
     if store:
-        _db.kv_set("memory", _last_key(scope), {"id": out["id"], "ts": time.time()})
+        _db.kv_set("memory", _last_key(scope), {"id": out["id"], "ts": time.time()})  # type: ignore[attr-defined]
     return out
 
 
@@ -73,18 +73,18 @@ def update(scope, reward=0.5) -> dict:
     """用上次选择的策略 + 本次奖励更新后验（reward∈[0,1]）。"""
     if not scope:
         return {"updated": False}
-    last = _db.kv_get("memory", _last_key(scope)) or {}
+    last = _db.kv_get("memory", _last_key(scope)) or {}  # type: ignore[attr-defined]
     sid = last.get("id")
     if not sid:
         return {"updated": False}
-    data = _db.kv_get("memory", _key(scope)) or {}
+    data = _db.kv_get("memory", _key(scope)) or {}  # type: ignore[attr-defined]
     params = data.get("params") or {}
     p = dict(params.get(sid) or {"alpha": float(_cfg("alpha0", 1.0)), "beta": float(_cfg("beta0", 1.0))})
     r = max(0.0, min(1.0, float(reward)))
     p["alpha"] = round(float(p.get("alpha", 1.0)) + r, 3)
     p["beta"] = round(float(p.get("beta", 1.0)) + (1.0 - r), 3)
     params[sid] = p
-    _db.kv_set("memory", _key(scope), {"params": params, "ts": time.time()})
+    _db.kv_set("memory", _key(scope), {"params": params, "ts": time.time()})  # type: ignore[attr-defined]
     return {"updated": True, "strategy": sid, "reward": r}
 
 
@@ -107,9 +107,9 @@ def reward_from_message(text, an=None) -> float:
 def status(scope="") -> str:
     """策略后验一览（bandit-status 数据源）。"""
     post = _posterior(scope)
-    last = _db.kv_get("memory", _last_key(scope)) or {}
+    last = _db.kv_get("memory", _last_key(scope)) or {}  # type: ignore[attr-defined]
     rows = [{"id": s["id"], "label": s["label"], **post[s["id"]]} for s in STRATEGIES]
-    return {
+    return {  # type: ignore[return-value]
         "scope": scope or "default",
         "strategies": sorted(rows, key=lambda x: -x["mean"]),
         "last": last.get("id"),

@@ -80,7 +80,7 @@ def extract(text, scope=None) -> dict:
             out.update(start=s, end=e, explicit=True, detected=True, label=f"上周{_WEEK_CN[wd]}")
         else:
             s = datetime(last_monday.year, last_monday.month, last_monday.day)
-            out.update(start=s, end=s + timedelta(days=7), explicit=True, detected=True, label="上周")
+            out.update(start=s, end=s + timedelta(days=7), explicit=True, detected=True, label="上周")  # type: ignore[call-overload]
     elif "下下周" in t:
         next_monday = today - timedelta(days=today.weekday()) + timedelta(days=14)
         wd = _weekday_in(t)
@@ -89,12 +89,12 @@ def extract(text, scope=None) -> dict:
             out.update(start=s, end=e, explicit=True, detected=True, label=f"下下周{_WEEK_CN[wd]}")
         else:
             s = datetime(next_monday.year, next_monday.month, next_monday.day)
-            out.update(start=s, end=s + timedelta(days=7), explicit=True, detected=True, label="下下周")
+            out.update(start=s, end=s + timedelta(days=7), explicit=True, detected=True, label="下下周")  # type: ignore[call-overload]
     elif "下周末" in t:
         next_monday = today - timedelta(days=today.weekday()) + timedelta(days=7)
         sat = next_monday + timedelta(days=5)
         s = datetime(sat.year, sat.month, sat.day)
-        out.update(start=s, end=s + timedelta(days=2), explicit=True, detected=True, label="下周末")
+        out.update(start=s, end=s + timedelta(days=2), explicit=True, detected=True, label="下周末")  # type: ignore[call-overload]
     elif re.search(r"下周|下个星期|下一周", t):
         next_monday = today - timedelta(days=today.weekday()) + timedelta(days=7)
         wd = _weekday_in(t)
@@ -103,16 +103,16 @@ def extract(text, scope=None) -> dict:
             out.update(start=s, end=e, explicit=True, detected=True, label=f"下周{_WEEK_CN[wd]}")
         else:
             s = datetime(next_monday.year, next_monday.month, next_monday.day)
-            out.update(start=s, end=s + timedelta(days=7), explicit=True, detected=True, label="下周")
+            out.update(start=s, end=s + timedelta(days=7), explicit=True, detected=True, label="下周")  # type: ignore[call-overload]
     elif re.search(r"周末|这周末|本周末", t):
         monday = today - timedelta(days=today.weekday())
         sat = monday + timedelta(days=5)
         s = datetime(sat.year, sat.month, sat.day)
-        out.update(start=s, end=s + timedelta(days=2), explicit=True, detected=True, label="这周末")
+        out.update(start=s, end=s + timedelta(days=2), explicit=True, detected=True, label="这周末")  # type: ignore[call-overload]
     elif re.search(r"这周|本周|这个星期", t):
         monday = today - timedelta(days=today.weekday())
         s = datetime(monday.year, monday.month, monday.day)
-        out.update(start=s, end=s + timedelta(days=7), explicit=True, detected=True, label="这周")
+        out.update(start=s, end=s + timedelta(days=7), explicit=True, detected=True, label="这周")  # type: ignore[call-overload]
     elif re.search(r"下个月|下月", t):
         if today.month == 12:
             ny, nm = today.year + 1, 1
@@ -126,13 +126,13 @@ def extract(text, scope=None) -> dict:
         else:
             s = datetime(ny, nm, 1)
             end = _month_end(ny, nm)
-            out.update(start=s, end=datetime(end.year, end.month, end.day) + timedelta(days=1),
+            out.update(start=s, end=datetime(end.year, end.month, end.day) + timedelta(days=1),  # type: ignore[call-overload]
                        explicit=True, detected=True, label="下个月")
     elif "上个月" in t:
         first_this = today.replace(day=1)
         last_month_end = first_this - timedelta(days=1)
         s = datetime(last_month_end.year, last_month_end.month, 1)
-        out.update(start=s, end=datetime(first_this.year, first_this.month, 1),
+        out.update(start=s, end=datetime(first_this.year, first_this.month, 1),  # type: ignore[call-overload]
                    explicit=True, detected=True, label="上个月")
     elif re.search(r"月底|月末|这个月最后|本月最后|最后.{0,6}[周星期]", t):
         month_end = _month_end(today.year, today.month)
@@ -141,19 +141,19 @@ def extract(text, scope=None) -> dict:
         target = _find_weekday(month_end_start, month_end, wd) if wd is not None else None
         if target:
             s, e = _day_range(target)
-            out.update(start=s, end=e, explicit=True, detected=True, label=f"月底周{_WEEK_CN[wd]}")
+            out.update(start=s, end=e, explicit=True, detected=True, label=f"月底周{_WEEK_CN[wd]}")  # type: ignore[index]
         else:
             s = datetime(month_end_start.year, month_end_start.month, month_end_start.day)
-            out.update(start=s, end=datetime(month_end.year, month_end.month, month_end.day) + timedelta(days=1),
+            out.update(start=s, end=datetime(month_end.year, month_end.month, month_end.day) + timedelta(days=1),  # type: ignore[call-overload]
                        explicit=True, detected=True, label="月底")
     elif "前几天" in t or "几天前" in t:
         out.update(start=now - timedelta(days=7), end=now, explicit=True, detected=True, label="前几天")
     elif "去年" in t:
         s = datetime(today.year - 1, 1, 1)
-        out.update(start=s, end=datetime(today.year, 1, 1), explicit=True, detected=True, label="去年")
+        out.update(start=s, end=datetime(today.year, 1, 1), explicit=True, detected=True, label="去年")  # type: ignore[call-overload]
     elif "今年" in t:
         s = datetime(today.year, 1, 1)
-        out.update(start=s, end=datetime(today.year + 1, 1, 1), explicit=True, detected=True, label="今年")
+        out.update(start=s, end=datetime(today.year + 1, 1, 1), explicit=True, detected=True, label="今年")  # type: ignore[call-overload]
     elif re.search(r"那天|当时|之前|以前|上回|上次", t):
         # 指代/相对过去：无法确定具体日期 → 仅"检测到时间感"，不启用精确窗口
         out.update(detected=True, label="以前")

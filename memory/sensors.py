@@ -39,10 +39,10 @@ SILENT_STATES = ("关", "安静")
 def _cfg(key, default):
     return _shared.core_cfg("sensors", key, default)
 def _data() -> dict:
-    d = _db.kv_get("memory", "sensors") or {}
+    d = _db.kv_get("memory", "sensors") or {}  # type: ignore[attr-defined]
     if not d.get("devices"):
         d = {"devices": dict(DEFAULT_DEVICES), "events": []}
-        _db.kv_set("memory", "sensors", d)
+        _db.kv_set("memory", "sensors", d)  # type: ignore[attr-defined]
     return d
 
 
@@ -104,7 +104,7 @@ def recent_events(seconds=3600) -> list:
             _stats_err(e)
             continue
         if now - ts <= timedelta(seconds=seconds):
-            out.append(e)
+            out.append(e)  # type: ignore[misc]
     return out
 
 

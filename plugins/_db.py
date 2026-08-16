@@ -22,7 +22,7 @@ else:
     class _Impl:
         pass
 
-    _impl = _Impl()
+    _impl = _Impl()  # type: ignore[assignment]
     for _mod in (_core, _memory, _ops):
         for _name in dir(_mod):
             if not _name.startswith("__"):

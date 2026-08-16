@@ -79,15 +79,15 @@ def detect_expressions(text) -> list:
     out = []
     for word, spec in SLANG.items():
         if word.lower() in t:
-            best = max(m[1] for m in spec["meanings"])
+            best = max(m[1] for m in spec["meanings"])  # type: ignore[index]
             out.append(
                 {
                     "expression": word,
                     "possible_intents": [
-                        {"meaning": m[0], "confidence": m[1]} for m in spec["meanings"]
+                        {"meaning": m[0], "confidence": m[1]} for m in spec["meanings"]  # type: ignore[index]
                     ],
                     "confidence": best,
-                    "need_context": spec.get("need_context", False),
+                    "need_context": spec.get("need_context", False),  # type: ignore[attr-defined]
                 }
             )
     return out
@@ -152,9 +152,9 @@ def profile_update(scope, text) -> dict:
         and 2 <= len(str(text or "").strip()) <= 8
     ):
         raw = str(text).strip()
-        recent = {r["raw_expression"] for r in _db.expr_log_rows(limit=50)}
+        recent = {r["raw_expression"] for r in _db.expr_log_rows(limit=50)}  # type: ignore[attr-defined]
         if raw not in recent:
-            _db.expr_log_add(raw, "", [], 0.3, "候选：疑似网络词待收录")
+            _db.expr_log_add(raw, "", [], 0.3, "候选：疑似网络词待收录")  # type: ignore[attr-defined]
     cur = profile_get(scope)
     n = 0.1
     slang = float(cur["slang_frequency"]) * (1 - n) + (1.0 if an["expressions"] else 0.0) * n
@@ -182,7 +182,7 @@ def profile_update(scope, text) -> dict:
         "communication_style": comm,
         "formality_level": round(formal, 3),
     }
-    _db.expr_profile_upsert(scope, **row)
+    _db.expr_profile_upsert(scope, **row)  # type: ignore[attr-defined]
     return row
 
 

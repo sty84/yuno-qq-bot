@@ -35,9 +35,9 @@ def bm25_upsert(scope, key, facts):
 
 def bm25_rebuild() -> int:
     """全量重建 BM25 倒排。返回索引文档数。"""
-    _db.bm25_clear()
-    rows = _db.memory_rows()
-    by_scope_key = {}
+    _db.bm25_clear()  # type: ignore[attr-defined]
+    rows = _db.memory_rows()  # type: ignore[attr-defined]
+    by_scope_key = {}  # type: ignore[var-annotated]
     for r in rows:
         by_scope_key.setdefault((r["scope"], r["key"]), []).append(r["fact"])
     for (sc, k), facts in by_scope_key.items():
@@ -99,7 +99,7 @@ RULES = [
 
 
 def available() -> bool:
-    return _db.fts_available()
+    return _db.fts_available()  # type: ignore[attr-defined]
 
 
 def rule_match(query: str):

@@ -203,7 +203,7 @@ def extract(scope, text) -> dict:
         "poked": 0,
     }
     appts.append(appt)
-    _db.kv_set(KV_NS, KV_KEY, appts)
+    _db.kv_set(KV_NS, KV_KEY, appts)  # type: ignore[attr-defined]
     return {"added": 1, "appointment": appt}
 
 
@@ -221,7 +221,7 @@ def clean() -> dict:
             removed += 1
         new_appts.append(a)
     if removed:
-        _db.kv_set(KV_NS, KV_KEY, new_appts)
+        _db.kv_set(KV_NS, KV_KEY, new_appts)  # type: ignore[attr-defined]
     return {"cleaned": removed}
 
 
@@ -230,7 +230,7 @@ def clear_scope(scope) -> int:
     appts = _appts()
     kept = [a for a in appts if a.get("scope") != scope]
     if len(kept) != len(appts):
-        _db.kv_set(KV_NS, KV_KEY, kept)
+        _db.kv_set(KV_NS, KV_KEY, kept)  # type: ignore[attr-defined]
     return len(appts) - len(kept)
 
 
@@ -306,7 +306,7 @@ def check_and_poke(now=None) -> list:
         clean()  # 巡检：先清黑名单残留，防编造约定继续催（再读快照）
     except Exception as e:
         _stats_err(e)
-    raw = _db.kv_get_raw(KV_NS, KV_KEY)
+    raw = _db.kv_get_raw(KV_NS, KV_KEY)  # type: ignore[attr-defined]
     appts = json.loads(raw) if raw else []
     to_poke, new_appts = [], []
     changed = False
@@ -334,7 +334,7 @@ def check_and_poke(now=None) -> list:
         if now < t + grace:
             new_appts.append(a)
             continue
-        last = _db.kv_get(KV_NS, f"lastmsg:{a2['scope']}", "") or ""
+        last = _db.kv_get(KV_NS, f"lastmsg:{a2['scope']}", "") or ""  # type: ignore[attr-defined]
         try:
             last_dt = datetime.fromisoformat(last) if last else None
         except Exception as e:
@@ -402,18 +402,18 @@ def check_and_poke(now=None) -> list:
         # 只有状态变更（如用户已出现 → done）也要落盘
         if changed:
             new_raw = json.dumps(new_appts, ensure_ascii=False)
-            _db.kv_cas(KV_NS, KV_KEY, raw, new_raw)
+            _db.kv_cas(KV_NS, KV_KEY, raw, new_raw)  # type: ignore[attr-defined]
         return []
     # CAS 原子提交：并发时只有一方成功，另一方下次 tick 再处理
     new_raw = json.dumps(new_appts, ensure_ascii=False)
-    if not _db.kv_cas(KV_NS, KV_KEY, raw, new_raw):
+    if not _db.kv_cas(KV_NS, KV_KEY, raw, new_raw):  # type: ignore[attr-defined]
         return []
     sent = []
     for a2, target_type, target, msg, delay_s in to_poke:
         scheduled_at = ""
         if delay_s > 0:
             scheduled_at = (now + timedelta(seconds=delay_s)).isoformat(timespec="seconds")
-        _db.notif_add(target_type, target, msg, scheduled_at=scheduled_at)
+        _db.notif_add(target_type, target, msg, scheduled_at=scheduled_at)  # type: ignore[attr-defined]
         try:
             from memory import mistake
             mistake.record_no_show(a2["scope"], a2.get("text", ""))  # 迟到 = 一次“放鸽子”错误

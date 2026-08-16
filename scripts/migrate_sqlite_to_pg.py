@@ -46,7 +46,7 @@ def migrate(sqlite_path: str, pg_dsn: str, dry_run: bool = False) -> dict:
     src.row_factory = sqlite3.Row
     dst = psycopg2.connect(pg_dsn)
     dst.autocommit = False
-    report = {"tables": {}, "skipped": []}
+    report = {"tables": {}, "skipped": []}  # type: ignore[var-annotated]
 
     tables = src.execute(
         "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
@@ -57,10 +57,10 @@ def migrate(sqlite_path: str, pg_dsn: str, dry_run: bool = False) -> dict:
             name = row["name"]
             ddl = translate_ddl(row["sql"])
             if ddl is None:
-                report["skipped"].append(name)
+                report["skipped"].append(name)  # type: ignore[attr-defined]
                 continue
             if dry_run:
-                report["tables"][name] = "dry-run"
+                report["tables"][name] = "dry-run"  # type: ignore[index]
                 continue
             try:
                 cur.execute(f'DROP TABLE IF EXISTS "{name}" CASCADE')
@@ -76,10 +76,10 @@ def migrate(sqlite_path: str, pg_dsn: str, dry_run: bool = False) -> dict:
                         [tuple(r[c] for c in cols) for r in rows],
                         page_size=500,
                     )
-                report["tables"][name] = len(rows)
+                report["tables"][name] = len(rows)  # type: ignore[index]
             except Exception as e:
                 dst.rollback()
-                report["tables"][name] = f"ERROR: {e}"
+                report["tables"][name] = f"ERROR: {e}"  # type: ignore[index]
                 # 继续其他表
                 dst.rollback()
 

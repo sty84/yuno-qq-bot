@@ -107,7 +107,7 @@ def forgive_probability(rec, scope, now=None) -> float:
     """松口概率 = f(关系分/信任/熟悉度, 冷静程度, 犯错次数)。
     底线类未道歉 → 0（绝不松口）。"""
     now = now or datetime.now()
-    row = _db.relationship_get(scope) or {}
+    row = _db.relationship_get(scope) or {}  # type: ignore[attr-defined]
     trust = float(row.get("trust", 0.3))
     fam = float(row.get("familiarity", 0.0))
     try:

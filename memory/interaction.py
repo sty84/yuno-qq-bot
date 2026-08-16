@@ -27,7 +27,7 @@ def _scene_of(scope) -> str:
 def familiarity_effective(scope) -> float:
     """熟悉度（计算值）：存储值 × 0.5^(距上次互动天数/半衰期)，1 天内不衰减。"""
     try:
-        row = _db.relationship_get(scope)
+        row = _db.relationship_get(scope)  # type: ignore[attr-defined]
     except Exception as e:
         _stats_err(e)
         row = None
@@ -97,7 +97,7 @@ def user_mult(scope, now=None) -> dict:
         pass
     # 潜水：最近没消息 → 少打扰
     try:
-        last = _db.kv_get("memory", f"lastmsg:{scope}", "") or ""
+        last = _db.kv_get("memory", f"lastmsg:{scope}", "") or ""  # type: ignore[attr-defined]
         if last:
             days = (now - datetime.fromisoformat(last)).total_seconds() / 86400.0
             if days > float(_cfg("dormant_days", 3)):
@@ -109,7 +109,7 @@ def user_mult(scope, now=None) -> dict:
 
 
 # ===== 频率系数（刺激适应）=====
-_fatigue_cache = {}
+_fatigue_cache = {}  # type: ignore[var-annotated]
 
 
 def fatigue_mult(kind, now=None) -> float:
@@ -119,7 +119,7 @@ def fatigue_mult(kind, now=None) -> float:
     hit = _fatigue_cache.get(cache_key)
     if hit is not None:
         return float(_cfg("fatigue_decay", 0.8)) ** hit
-    counts = _db.kv_get("memory", f"interaction_counts:{now.date().isoformat()}") or {}
+    counts = _db.kv_get("memory", f"interaction_counts:{now.date().isoformat()}") or {}  # type: ignore[attr-defined]
     n = int(counts.get(kind, 0))
     _fatigue_cache[cache_key] = n
     return float(_cfg("fatigue_decay", 0.8)) ** n

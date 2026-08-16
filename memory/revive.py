@@ -51,7 +51,7 @@ def _evidence(scope=None) -> dict:
     """消息活跃度似然：最近有消息→活跃；沉默 4h+→需要关心；1 天+→疏远/需关心。"""
     if not scope:
         return {"active": 0.30, "busy": 0.30, "asleep": 0.15, "need_care": 0.25}
-    row = _db.kv_get("memory", f"last_user_msg:{scope}")
+    row = _db.kv_get("memory", f"last_user_msg:{scope}")  # type: ignore[attr-defined]
     last = None
     if isinstance(row, str):
         try:
@@ -116,7 +116,7 @@ def decide(scope=None, force=False) -> dict:
             return {"fire": False, "state": top, "posterior": post, "reason": f"用户{STATE_ZH[top]}", "p": round(p, 3)}
         if random.random() >= p:
             return {"fire": False, "state": top, "posterior": post, "reason": "泊松未命中", "p": round(p, 3)}
-    _db.kv_set("memory", "revive_last", {"ts": time.time()})
+    _db.kv_set("memory", "revive_last", {"ts": time.time()})  # type: ignore[attr-defined]
     return {"fire": True, "state": top, "posterior": post, "reason": "泊松命中" if not force else "强制触发", "p": round(p, 3)}
 
 

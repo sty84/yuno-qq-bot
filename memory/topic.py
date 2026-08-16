@@ -29,11 +29,11 @@ def topic_name_of(fact: str, etype=None) -> str:
 
 
 def find_or_create(scope, key, category, name, importance=0.5, confidence=0.7) -> int:
-    tid = _db.topic_find(scope, key, category, name)
+    tid = _db.topic_find(scope, key, category, name)  # type: ignore[attr-defined]
     if tid:
-        _db.topic_add(scope, key, category, name, importance=importance, confidence=confidence)
+        _db.topic_add(scope, key, category, name, importance=importance, confidence=confidence)  # type: ignore[attr-defined]
         return tid
-    return _db.topic_add(
+    return _db.topic_add(  # type: ignore[attr-defined]
         scope, key, category, name,
         importance=importance, confidence=confidence,
         started_at=datetime.now().isoformat(timespec="seconds"),
@@ -50,9 +50,9 @@ def link_fact(scope, key, fact, category, confidence=0.7, an=None) -> int:
         confidence=float(confidence),
     )
     ts = datetime.now().isoformat(timespec="seconds")
-    _db.topic_param_add(tid, "fact", fact, confidence, ts)
+    _db.topic_param_add(tid, "fact", fact, confidence, ts)  # type: ignore[attr-defined]
     if an.get("emotion") and an["emotion"] != "平静":
-        _db.topic_param_add(tid, "mood", an["emotion"], confidence, ts)
+        _db.topic_param_add(tid, "mood", an["emotion"], confidence, ts)  # type: ignore[attr-defined]
     # v2.2+ 情绪打通：mood 标签保留兼容，并行补存 VAD 向量 + 复合情绪（analysis 结果里本来就带 VAD）
     try:
         vad = [
@@ -60,14 +60,14 @@ def link_fact(scope, key, fact, category, confidence=0.7, an=None) -> int:
             round(float(an.get("arousal", 0.0)), 4),
             round(float(an.get("dominance", 0.0)), 4),
         ]
-        _db.topic_param_add(tid, "vad", json.dumps(vad, ensure_ascii=False), confidence, ts)
+        _db.topic_param_add(tid, "vad", json.dumps(vad, ensure_ascii=False), confidence, ts)  # type: ignore[attr-defined]
         from memory import emotion as emotion_mod
         compound = emotion_mod.compound_of(fact, an.get("emotion") or "")
         if compound:
-            _db.topic_param_add(tid, "compound", compound, confidence, ts)
+            _db.topic_param_add(tid, "compound", compound, confidence, ts)  # type: ignore[attr-defined]
     except Exception as e:
         _stats_err(e)
-    _db.topic_param_add(
+    _db.topic_param_add(  # type: ignore[attr-defined]
         tid, "playful",
         "true" if an.get("playful") else "false",
         1.0 if an.get("playful") else float(confidence),
@@ -82,7 +82,7 @@ def mood_centroid_from_params(params, window_days=180) -> dict:
     from memory import emotion as emotion_mod
     vads = [(i, p) for i, p in enumerate(params or []) if p.get("param") == "vad"]
     if not vads:
-        return None
+        return None  # type: ignore[return-value]
     n = len(vads)
     now = time.time()
     samples = []
@@ -101,9 +101,9 @@ def mood_centroid_from_params(params, window_days=180) -> dict:
             pass
         samples.append((age_days, v3))
     if not samples:
-        return None
+        return None  # type: ignore[return-value]
     c = emotion_mod.vad_centroid(samples, float(window_days))
-    s = c["vad"]
+    s = c["vad"]  # type: ignore[index]
     label, intensity, _ = emotion_mod.label_from_vad(s)
     compound = next((p.get("value") for p in reversed(params or []) if p.get("param") == "compound"), "")
     return {
@@ -111,7 +111,7 @@ def mood_centroid_from_params(params, window_days=180) -> dict:
         "label": label,
         "intensity": round(intensity, 2),
         "label_zh": emotion_mod.label_zh(s),
-        "trend": c["trend"],
+        "trend": c["trend"],  # type: ignore[index]
         "n": n,
         "compound": str(compound or ""),
     }
@@ -119,7 +119,7 @@ def mood_centroid_from_params(params, window_days=180) -> dict:
 
 def mood_centroid(topic_id, window_days=180) -> dict:
     """按 topic_id 取议题情绪质心。"""
-    return mood_centroid_from_params(_db.topic_params(topic_id), window_days)
+    return mood_centroid_from_params(_db.topic_params(topic_id), window_days)  # type: ignore[attr-defined]
 
 
 def mood_text(topic_id=None, params=None) -> str:
@@ -146,8 +146,8 @@ def mood_map(scopes, limit=200) -> dict:
     """fact → 议题情绪质心（供检索层心境一致性加权）。"""
     out = {}
     for scope in scopes or []:
-        for t in _db.topic_rows(scope, limit=limit):
-            params = _db.topic_params(t["id"])
+        for t in _db.topic_rows(scope, limit=limit):  # type: ignore[attr-defined]
+            params = _db.topic_params(t["id"])  # type: ignore[attr-defined]
             c = mood_centroid_from_params(params)
             if not c:
                 continue
@@ -166,11 +166,11 @@ def mood_eval(limit=200) -> dict:
     from memory import analysis, emotion as emotion_mod
     write_n = write_ok = centroid_n = centroid_ok = compound_n = 0
     samples = []
-    for t in _db.topic_rows(limit=limit):
-        params = _db.topic_params(t["id"])
+    for t in _db.topic_rows(limit=limit):  # type: ignore[attr-defined]
+        params = _db.topic_params(t["id"])  # type: ignore[attr-defined]
         moods = sorted({p.get("value") for p in params if p.get("param") == "mood"})
         # 写入一致性：同一 updated_at 组内 mood/vad 按插入顺序配对
-        by_ts = {}
+        by_ts = {}  # type: ignore[var-annotated]
         for p in params:
             by_ts.setdefault(str(p.get("updated_at") or ""), []).append(p)
         for ps in by_ts.values():
@@ -216,7 +216,7 @@ def mood_eval(limit=200) -> dict:
             "compound": comps[-1] if comps else "",
         })
     return {
-        "n": len(_db.topic_rows(limit=limit)),
+        "n": len(_db.topic_rows(limit=limit)),  # type: ignore[attr-defined]
         "write_consistency": round(write_ok / write_n, 3) if write_n else None,
         "write_n": write_n,
         "centroid_consistency": round(centroid_ok / centroid_n, 3) if centroid_n else None,
@@ -251,8 +251,8 @@ def backfill_vad(limit=200) -> dict:
     from memory import analysis, emotion as emotion_mod
     done = skipped = 0
     samples = []
-    for t in _db.topic_rows(limit=limit):
-        params = _db.topic_params(t["id"])
+    for t in _db.topic_rows(limit=limit):  # type: ignore[attr-defined]
+        params = _db.topic_params(t["id"])  # type: ignore[attr-defined]
         if any(p.get("param") == "vad" for p in params):
             skipped += 1
             continue
@@ -270,7 +270,7 @@ def backfill_vad(limit=200) -> dict:
                 round(float(m["arousal"]), 4),
                 round(float(m["dominance"]), 4),
             ]
-            _db.topic_param_add(
+            _db.topic_param_add(  # type: ignore[attr-defined]
                 t["id"], "vad", json.dumps(vad, ensure_ascii=False),
                 float(p.get("confidence") or 0.7), str(p.get("updated_at") or ""),
             )
@@ -282,7 +282,7 @@ def backfill_vad(limit=200) -> dict:
             fact = facts[-1] if facts else str(t.get("topic") or "")
             compound = emotion_mod.compound_of(fact, str(last_mood.get("value") or "") if last_mood else "")
             if compound and not any(pp.get("param") == "compound" for pp in params):
-                _db.topic_param_add(
+                _db.topic_param_add(  # type: ignore[attr-defined]
                     t["id"], "compound", compound, 0.6,
                     str(last_mood.get("updated_at") or "") if last_mood else "",
                 )
@@ -294,10 +294,10 @@ def backfill_vad(limit=200) -> dict:
 
 
 def package(topic_id) -> dict:
-    row = _db.topic_get(topic_id)
+    row = _db.topic_get(topic_id)  # type: ignore[attr-defined]
     if not row:
         return {}
-    row["params"] = _db.topic_params(topic_id)
+    row["params"] = _db.topic_params(topic_id)  # type: ignore[attr-defined]
     return row
 
 
@@ -306,7 +306,7 @@ def search(query, scopes, limit=5) -> list:
     qt = fact_keywords(query or "")
     out = []
     for scope in scopes:
-        for t in _db.topic_rows(scope):
+        for t in _db.topic_rows(scope):  # type: ignore[attr-defined]
             if not qt or (fact_keywords(t["topic"]) & qt):
                 p = package(t["id"])
                 out.append(p)
@@ -315,7 +315,7 @@ def search(query, scopes, limit=5) -> list:
 
 
 def list_topics(scope=None, limit=50) -> list:
-    return [_db.topic_get(t["id"]) for t in _db.topic_rows(scope, limit=limit)]
+    return [_db.topic_get(t["id"]) for t in _db.topic_rows(scope, limit=limit)]  # type: ignore[attr-defined]
 
 
 def invalidate_for_fact(scope, key, fact):
@@ -329,14 +329,14 @@ def invalidate_for_fact(scope, key, fact):
 def build(scope=None) -> int:
     """回填：为没有议题的事件建议题并挂参数、关联事件。返回新建/更新数。"""
     created = 0
-    for ev in _db.event_rows(scope, limit=1000):
+    for ev in _db.event_rows(scope, limit=1000):  # type: ignore[attr-defined]
         if ev.get("topic_id"):
             continue
         tid = link_fact(
             ev["scope"], ev["key"], ev["title"], ev["etype"],
             confidence=float(ev.get("importance", 0.5)),
         )
-        _db.event_set_topic(ev["id"], tid)
+        _db.event_set_topic(ev["id"], tid)  # type: ignore[attr-defined]
         created += 1
     return created
 

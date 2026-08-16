@@ -50,10 +50,10 @@ def build_for_fact(scope, key, fact, etype=None, importance=0.5, ts="", ts_sourc
 
 
 def _link_to_existing(scope, key, eid, fact, emb=None) -> int:
-    existing = _db.event_rows(scope, key, limit=MAX_LINK_CANDIDATES)
+    existing = _db.event_rows(scope, key, limit=MAX_LINK_CANDIDATES)  # type: ignore[attr-defined]
     tokens = fact_keywords(fact)
     connected = set()
-    for e in _db.relations_for([eid]):
+    for e in _db.relations_for([eid]):  # type: ignore[attr-defined]
         connected.add(e["src"])
         connected.add(e["dst"])
     linked = 0
@@ -62,14 +62,14 @@ def _link_to_existing(scope, key, eid, fact, emb=None) -> int:
             continue
         sim = 0.0
         if emb and ev.get("embedding"):
-            ev_vec = _db.vec_loads(ev["embedding"])
+            ev_vec = _db.vec_loads(ev["embedding"])  # type: ignore[attr-defined]
             if ev_vec:
                 sim = embedder.cosine(emb, ev_vec)
         if sim == 0.0:
             ev_tokens = fact_keywords(ev.get("title") or "")
             sim = _overlap(tokens, ev_tokens)
         if sim >= LINK_THRESHOLD:
-            _db.relation_add(eid, ev["id"], "related_to", weight=round(sim, 3))
+            _db.relation_add(eid, ev["id"], "related_to", weight=round(sim, 3))  # type: ignore[attr-defined]
             linked += 1
     return linked
 
@@ -94,8 +94,8 @@ def _link_previous(scope, key, eid):
 
 def link_follows(scope=None, key=None) -> int:
     """批量补全 follows 链（回填时调用，按事件 id 顺序连边，幂等）。"""
-    rows = _db.event_rows(scope, key, limit=500)
-    by_scope_key = {}
+    rows = _db.event_rows(scope, key, limit=500)  # type: ignore[attr-defined]
+    by_scope_key = {}  # type: ignore[var-annotated]
     for ev in rows:
         by_scope_key.setdefault((ev["scope"], ev["key"]), []).append(ev)
     linked = 0
@@ -103,7 +103,7 @@ def link_follows(scope=None, key=None) -> int:
         evs.sort(key=lambda x: x["id"])
         for i in range(1, len(evs)):
             prev, cur = evs[i - 1], evs[i]
-            edges = _db.relations_for([prev["id"], cur["id"]])
+            edges = _db.relations_for([prev["id"], cur["id"]])  # type: ignore[attr-defined]
             if any(
                 e["rel"] == "follows"
                 and (
@@ -113,7 +113,7 @@ def link_follows(scope=None, key=None) -> int:
                 for e in edges
             ):
                 continue
-            _db.relation_add(prev["id"], cur["id"], "follows", weight=1.0)
+            _db.relation_add(prev["id"], cur["id"], "follows", weight=1.0)  # type: ignore[attr-defined]
             linked += 1
     return linked
 
@@ -205,7 +205,7 @@ def weighted_neighbors(event_ids, rel=None, max_depth=2) -> dict:
     for depth in range(1, max_depth + 1):
         if not frontier:
             break
-        edges = _db.relations_for(frontier)
+        edges = _db.relations_for(frontier)  # type: ignore[attr-defined]
         if rel:
             edges = [e for e in edges if e["rel"] == rel]
         nxt = set()
@@ -249,9 +249,9 @@ def shortest_path(src, dst, max_depth=4):
 def cleanup_orphans(min_importance=0.2, limit=200) -> int:
     """清理低价值且无关联边的孤立事件（回填/维护时调用）。"""
     removed = 0
-    for ev in _db.event_rows(min_importance=min_importance, limit=limit):
-        if not _db.relations_for([ev["id"]]):
-            _db.event_delete(ev["id"])
+    for ev in _db.event_rows(min_importance=min_importance, limit=limit):  # type: ignore[attr-defined]
+        if not _db.relations_for([ev["id"]]):  # type: ignore[attr-defined]
+            _db.event_delete(ev["id"])  # type: ignore[attr-defined]
             removed += 1
     return removed
 
@@ -270,11 +270,11 @@ REL_TYPE_RULES = {
 
 def tag_relations(scope=None) -> int:
     """给 related_to 边补类型边（supports/influences/opposes），保留原边。返回补边数。"""
-    evs = _db.event_rows(scope, limit=1000)
+    evs = _db.event_rows(scope, limit=1000)  # type: ignore[attr-defined]
     by_id = {e["id"]: e for e in evs}
     tagged = 0
     for ev in evs:
-        for e in _db.relations_for([ev["id"]]):
+        for e in _db.relations_for([ev["id"]]):  # type: ignore[attr-defined]
             if e["rel"] != "related_to":
                 continue
             other_id = e["dst"] if e["src"] == ev["id"] else e["src"]
@@ -286,7 +286,7 @@ def tag_relations(scope=None) -> int:
             )
             if not rel:
                 continue
-            _db.relation_add(ev["id"], other_id, rel, weight=e.get("weight", 1.0))
+            _db.relation_add(ev["id"], other_id, rel, weight=e.get("weight", 1.0))  # type: ignore[attr-defined]
             tagged += 1
     return tagged
 
@@ -302,8 +302,8 @@ def _entity_name_of(title) -> str:
 def entity_for(scope, key, name) -> int:
     """找/建 canonical 实体：词元重叠 ≥0.6 视为同一实体。"""
     if not name:
-        return _db.entity_add(scope, key, "未命名")
-    existing = _db.entity_rows(scope, key)
+        return _db.entity_add(scope, key, "未命名")  # type: ignore[attr-defined]
+    existing = _db.entity_rows(scope, key)  # type: ignore[attr-defined]
     best, best_sim = None, 0.0
     for e in existing:
         a, b = set(tokenize(name)), set(tokenize(e["canonical"]))
@@ -312,23 +312,23 @@ def entity_for(scope, key, name) -> int:
             best, best_sim = e, sim
     if best and best_sim >= 0.6:
         if name != best["canonical"]:
-            _db.entity_alias_add(best["id"], name)
+            _db.entity_alias_add(best["id"], name)  # type: ignore[attr-defined]
         return best["id"]
-    return _db.entity_add(scope, key, name)
+    return _db.entity_add(scope, key, name)  # type: ignore[attr-defined]
 
 
 def build_entities(scope=None) -> int:
     """为事件建实体关联。返回处理事件数。"""
     linked = 0
-    for ev in _db.event_rows(scope, limit=1000):
+    for ev in _db.event_rows(scope, limit=1000):  # type: ignore[attr-defined]
         name = _entity_name_of(ev["title"])
         if not name:
             continue
         eid = entity_for(ev["scope"], ev["key"], name)
-        _db.entity_events_add(eid, ev["id"])
+        _db.entity_events_add(eid, ev["id"])  # type: ignore[attr-defined]
         linked += 1
     return linked
 
 
 def entity_count() -> int:
-    return len(_db.entity_rows())
+    return len(_db.entity_rows())  # type: ignore[attr-defined]

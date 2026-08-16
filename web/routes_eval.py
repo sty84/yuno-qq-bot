@@ -65,7 +65,7 @@ def register(app, state):
     @app.get("/api/public/trend")
     def public_trend(limit: int = 50):
         """公开只读趋势：返回各类评测的历史指标（不含敏感数据）。"""
-        hist = _db.kv_get("memory", "baseline_history") or []
+        hist = _db.kv_get("memory", "baseline_history") or []  # type: ignore[attr-defined]
         out = {}
         for kind in ("memory_eval", "space_eval", "time_eval", "emotion_eval", "subjects_eval"):
             items = [h for h in hist if h.get("kind") == kind][-max(1, int(limit)):]
@@ -81,7 +81,7 @@ def register(app, state):
     @app.get("/api/experiments")
     def experiments(limit: int = 50):
         """实验日志：基线前后与回归标记。"""
-        return _db.exp_log_rows(limit)
+        return _db.exp_log_rows(limit)  # type: ignore[attr-defined]
 
     @app.post("/api/tasks")
     def create_task(req: TaskRequest, request: Request):
@@ -149,12 +149,12 @@ def register(app, state):
     def save_score(req: ScoreRequest, request: Request):
         """保存一次人工五维评分。"""
         require_role(request, "ops", "admin")
-        return _db.scenario_score_add(req.scenario_id, req.scope, req.scores, req.comment, req.mode)
+        return _db.scenario_score_add(req.scenario_id, req.scope, req.scores, req.comment, req.mode)  # type: ignore[attr-defined]
 
     @app.get("/api/scenario-scores")
     def scenario_scores(limit: int = 100):
         """已保存的五维评分历史（人工 + LLM）。"""
-        return _db.scenario_score_rows(limit)
+        return _db.scenario_score_rows(limit)  # type: ignore[attr-defined]
 
     @app.get("/api/ablation/state")
     def ablation_state():
@@ -208,7 +208,7 @@ def register(app, state):
     @app.get("/api/costs")
     def costs(days: int = 30):
         """LLM token / 成本：总量、按天、按模块、按检索路径（rerank 归因）。"""
-        s = _db.llm_cost_summary(days)
+        s = _db.llm_cost_summary(days)  # type: ignore[attr-defined]
         s["total_cost"] = state.money(s["total"]["prompt"], s["total"]["completion"])
         for d in s["by_day"]:
             d["cost"] = state.money(d["prompt"], d["completion"])
@@ -241,10 +241,10 @@ def register(app, state):
                     "ai_text": (r.get("ai_text") or "")[:400],
                     "ts": r.get("ts"),
                 } for r in items[: max(1, int(limit))]],
-                "reviewed": len(_db.conv_review_recent(limit=1000)),
+                "reviewed": len(_db.conv_review_recent(limit=1000)),  # type: ignore[attr-defined]
             }
-        rows = _db.trace_rows(limit=300)
-        reviewed = _db.trace_review_map([r["id"] for r in rows])
+        rows = _db.trace_rows(limit=300)  # type: ignore[attr-defined]
+        reviewed = _db.trace_review_map([r["id"] for r in rows])  # type: ignore[attr-defined]
         TEST_MARK = ("guard", "ev:", "poke", "pdtest", "testg", "scenario", "c2c:t:", "c2c:priv")
         queue = [
             r for r in rows
@@ -264,7 +264,7 @@ def register(app, state):
                 "reasoning": (r.get("reasoning") or "")[:60],
                 "ts": r.get("ts"),
             } for r in queue[:max(1, int(limit))]],
-            "reviewed": len(_db.trace_review_recent(limit=1000)),
+            "reviewed": len(_db.trace_review_recent(limit=1000)),  # type: ignore[attr-defined]
         }
 
     @app.post("/api/review/submit")
@@ -282,13 +282,13 @@ def register(app, state):
             if not 1 <= v <= 5:
                 raise HTTPException(400, f"{k} 必须在 1~5")
         avg = sum(scores.values()) / 5
-        _db.trace_review_add(req.trace_id, round(avg, 2), scores, comment=req.comment or "", reviewer="web")
+        _db.trace_review_add(req.trace_id, round(avg, 2), scores, comment=req.comment or "", reviewer="web")  # type: ignore[attr-defined]
         try:
             from memory import trace
             trace.adjustments(force=True)  # 评分驱动参数立即生效
         except Exception as e:
             state.stats_err(e)
-        return {"ok": True, "score": round(avg, 2), "reviews": len(_db.trace_review_recent(limit=1000))}
+        return {"ok": True, "score": round(avg, 2), "reviews": len(_db.trace_review_recent(limit=1000))}  # type: ignore[attr-defined]
 
     @app.post("/api/convreview/submit")
     def convreview_submit(req: ConvReviewSubmit, request: Request):
@@ -307,4 +307,4 @@ def register(app, state):
         avg = sum(scores.values()) / 5
         from memory import convreview
         convreview.score(req.conv_id, scores, comment=req.comment or "", reviewer="web")
-        return {"ok": True, "score": round(avg, 2), "reviews": len(_db.conv_review_recent(limit=1000))}
+        return {"ok": True, "score": round(avg, 2), "reviews": len(_db.conv_review_recent(limit=1000))}  # type: ignore[attr-defined]

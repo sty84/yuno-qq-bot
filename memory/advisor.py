@@ -95,7 +95,7 @@ def consult_active(scope):
 def consult_related(scope, text) -> bool:
     """新消息是否还在进行中的咨询话题上（防顾问劫持无关话题）。
     极短回复（≤4字）视为回答顾问问题；否则按词元重叠判断。"""
-    sess = _db.consult_get(scope)
+    sess = _db.consult_get(scope)  # type: ignore[attr-defined]
     if not sess:
         return False
     t = str(text or "").strip()
@@ -177,7 +177,7 @@ def _consult_llm(system, prompt) -> str:
 
 def consult_turn(scope, text) -> str:
     """决策咨询一轮：开始/追问/收尾。返回顾问回复。"""
-    sess = _db.consult_get(scope)
+    sess = _db.consult_get(scope)  # type: ignore[attr-defined]
     if not sess:
         sess = {
             "scope": scope,
@@ -204,8 +204,8 @@ def consult_turn(scope, text) -> str:
             f"结尾给一个具体的第一步行动；不要用方案编号列表、不要标题模板、不要分点堆砌。"
         )
         reply = _consult_llm(_consult_system(), prompt)
-        _db.consult_save(scope, topic, "done", stage + 1, answers + [reply[:200]])
-        _db.memory_add(
+        _db.consult_save(scope, topic, "done", stage + 1, answers + [reply[:200]])  # type: ignore[attr-defined]
+        _db.memory_add(  # type: ignore[attr-defined]
             "ai", "reasoning",
             f"决策咨询《{topic}》：{reply[:100]}",
             datetime.now().isoformat(timespec="seconds"),
@@ -220,7 +220,7 @@ def consult_turn(scope, text) -> str:
         f"请针对最关键的未知信息，只问【一个问题】；如果信息已足够，可以直接给建议。"
     )
     reply = _consult_llm(_consult_system(), prompt)
-    _db.consult_save(scope, topic, "active", stage + 1, answers)
+    _db.consult_save(scope, topic, "active", stage + 1, answers)  # type: ignore[attr-defined]
     return reply
 
 
@@ -254,11 +254,11 @@ def _reflection_quality(line, evs, rels) -> bool:
 
 def daily_reflect(limit=20) -> int:
     """把近期事件/关系/目标整理成洞察，沉淀为 AI 记忆（reflection）。"""
-    evs = _db.event_rows(limit=limit)
+    evs = _db.event_rows(limit=limit)  # type: ignore[attr-defined]
     if not evs:
         return 0
     titles = "\n".join(f"- {e['title']}" for e in evs[:limit])
-    rels = _db.relationship_rows()
+    rels = _db.relationship_rows()  # type: ignore[attr-defined]
     rel_text = "；".join(f"{r['scope']}:{r['stage']}" for r in rels[:5])
     prompt = (
         "你是记忆反思器。基于近期事件与关系状态，写出 1-3 条值得记住的自我洞察"
@@ -295,9 +295,9 @@ def daily_reflect(limit=20) -> int:
     ts = datetime.now().isoformat(timespec="seconds")
     for line in lines[:3]:
         if 6 <= len(line) <= 80:
-            _db.memory_add("ai", "reflection", line, ts, None, 0.6, "reflection")
+            _db.memory_add("ai", "reflection", line, ts, None, 0.6, "reflection")  # type: ignore[attr-defined]
             # 反思闭环（v6 建议 §8）：洞察落策略日志，供复盘与后续 HITL 行为调整
-            _db.policy_log_add("reflection", "insight", 0.6, detail=line[:100])
+            _db.policy_log_add("reflection", "insight", 0.6, detail=line[:100])  # type: ignore[attr-defined]
             try:
                 import memory.stats as _st
                 _st.bump("reflect_insight")
@@ -310,11 +310,11 @@ def daily_reflect(limit=20) -> int:
 
 def weekly_reflect(limit=50) -> int:
     """分层反思：每周把近期事件/关系归纳成更高层信念，写入 ai:belief。"""
-    evs = _db.event_rows(limit=limit)
+    evs = _db.event_rows(limit=limit)  # type: ignore[attr-defined]
     if not evs:
         return 0
     titles = "\n".join(f"- {e['title']}" for e in evs[:limit])
-    rels = _db.relationship_rows()
+    rels = _db.relationship_rows()  # type: ignore[attr-defined]
     rel_text = "；".join(f"{r['scope']}:{r['stage']}" for r in rels[:10])
     prompt = (
         "你是记忆反思器。基于近一周事件与关系，写出 1-3 条关于用户/关系的稳定信念或长期判断。"
@@ -344,8 +344,8 @@ def weekly_reflect(limit=50) -> int:
     ts = datetime.now().isoformat(timespec="seconds")
     for line in lines[:3]:
         if 6 <= len(line) <= 80 and _reflection_quality(line, evs, rels):
-            _db.memory_add("ai", "belief", line, ts, None, 0.7, "reflection")
-            _db.policy_log_add("reflection", "weekly_belief", 0.7, detail=line[:100])
+            _db.memory_add("ai", "belief", line, ts, None, 0.7, "reflection")  # type: ignore[attr-defined]
+            _db.policy_log_add("reflection", "weekly_belief", 0.7, detail=line[:100])  # type: ignore[attr-defined]
             n += 1
     return n
 
@@ -447,7 +447,7 @@ def reflect_beliefs(limit=10) -> dict:
     result = {"checked": 0, "accepted": 0, "revised": 0, "rejected": 0}
     if not _refl_enabled():
         return result
-    beliefs = _db.memory_rows("ai", "belief")
+    beliefs = _db.memory_rows("ai", "belief")  # type: ignore[attr-defined]
     for b in beliefs[:limit]:
         fact, conf = b["fact"], float(b.get("confidence", 0.7))
         evidence = _evidence_for(fact)
@@ -457,42 +457,42 @@ def reflect_beliefs(limit=10) -> dict:
         note = verdict.get("note", "")
         if action == "accept":
             new_conf = policy.update(conf, "confirm")
-            _db.memory_set_confidence("ai", "belief", fact, new_conf)
-            _db.belief_log_add("belief", fact, "accept", new_conf, note, old_content=fact)
+            _db.memory_set_confidence("ai", "belief", fact, new_conf)  # type: ignore[attr-defined]
+            _db.belief_log_add("belief", fact, "accept", new_conf, note, old_content=fact)  # type: ignore[attr-defined]
             result["accepted"] += 1
         elif action == "revise":
             revised = (verdict.get("revised") or "").strip()
             if revised and revised != fact:
-                _db.memory_add(
+                _db.memory_add(  # type: ignore[attr-defined]
                     "ai", "belief", revised,
                     confidence=float(verdict.get("confidence", conf * 0.7)),
                     source="reflection",
                 )
-                _db.memory_set_confidence("ai", "belief", fact, max(0.2, conf * 0.5))
-                _db.belief_log_add("belief", revised, "revise", verdict.get("confidence"), note, old_content=fact)
+                _db.memory_set_confidence("ai", "belief", fact, max(0.2, conf * 0.5))  # type: ignore[attr-defined]
+                _db.belief_log_add("belief", revised, "revise", verdict.get("confidence"), note, old_content=fact)  # type: ignore[attr-defined]
             else:
                 new_conf = max(0.2, conf * 0.7)
-                _db.memory_set_confidence("ai", "belief", fact, new_conf)
-                _db.belief_log_add("belief", fact, "revise", new_conf, note, old_content=fact)
+                _db.memory_set_confidence("ai", "belief", fact, new_conf)  # type: ignore[attr-defined]
+                _db.belief_log_add("belief", fact, "revise", new_conf, note, old_content=fact)  # type: ignore[attr-defined]
             result["revised"] += 1
         else:
-            _db.memory_set_confidence("ai", "belief", fact, 0.05)
-            _db.belief_log_add("belief", fact, "reject", 0.05, note, old_content=fact)
+            _db.memory_set_confidence("ai", "belief", fact, 0.05)  # type: ignore[attr-defined]
+            _db.belief_log_add("belief", fact, "reject", 0.05, note, old_content=fact)  # type: ignore[attr-defined]
             result["rejected"] += 1
     return result
 
 
 def rollback_belief(log_id) -> str:
     """回滚 belief 到日志记录的旧版本（可审计）。"""
-    entry = _db.belief_log_get(log_id)
+    entry = _db.belief_log_get(log_id)  # type: ignore[attr-defined]
     if not entry or entry["kind"] != "belief":
         return "日志不存在或不是 belief"
     old = entry.get("old_content") or entry["content"]
     conf = float(entry.get("confidence") or 0.5)
-    _db.memory_add("ai", "belief", old, confidence=max(conf, 0.5), source="rollback")
+    _db.memory_add("ai", "belief", old, confidence=max(conf, 0.5), source="rollback")  # type: ignore[attr-defined]
     if entry["action"] in ("revise", "reject"):
-        _db.memory_set_confidence("ai", "belief", entry["content"], 0.05)
-    _db.belief_log_add(
+        _db.memory_set_confidence("ai", "belief", entry["content"], 0.05)  # type: ignore[attr-defined]
+    _db.belief_log_add(  # type: ignore[attr-defined]
         "belief", old, "rollback", conf,
         note=f"回滚自 #{log_id}", old_content=entry["content"],
     )

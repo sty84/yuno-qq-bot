@@ -13,8 +13,8 @@ from datetime import datetime
 from plugins import _db, _shared
 from memory import policy
 
-_snapshot_cache = {}
-_investigate_state = {}  # scope -> 上次调查时间（按 scope 节流，v6 建议 §2）
+_snapshot_cache = {}  # type: ignore[var-annotated]
+_investigate_state = {}  # type: ignore[var-annotated]  # scope -> 上次调查时间（按 scope 节流，v6 建议 §2）
 
 INVESTIGATE_PROMPT = (
     "用户纠正了一条旧记忆，请判断是否应更新。只输出 JSON："
@@ -41,11 +41,11 @@ def snapshot(scope, budget=None, force=False) -> str:
         return cached["text"]
 
     parts = []
-    rows = [r for r in _db.memory_rows(scope) if r.get("status", "active") == "active"]
+    rows = [r for r in _db.memory_rows(scope) if r.get("status", "active") == "active"]  # type: ignore[attr-defined]
     rows.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
     for r in rows[:10]:
         parts.append("· " + str(r["fact"])[:50])
-    evs = _db.event_rows(scope, limit=4)
+    evs = _db.event_rows(scope, limit=4)  # type: ignore[attr-defined]
     if evs:
         parts.append("最近动态：" + "；".join(str(e["title"])[:20] for e in evs))
     try:
@@ -67,7 +67,7 @@ def snapshot(scope, budget=None, force=False) -> str:
 def subject_gate(scope, key, fact) -> bool:
     """多主体可见性门控：私聊 / 高隐私事实不传播到 NPC 视角。"""
     try:
-        row = next((r for r in _db.memory_rows(scope, key or "") if r["fact"] == fact), None)
+        row = next((r for r in _db.memory_rows(scope, key or "") if r["fact"] == fact), None)  # type: ignore[attr-defined]
     except Exception:
         row = None
     if row is None:
@@ -118,14 +118,14 @@ def investigate_correction(scope, key, text, candidate_facts, an=None) -> dict:
     if not candidate_facts:
         return {"action": "keep", "reason": "无候选记忆"}
     row = next(
-        (r for r in _db.memory_rows(scope, key) if r["fact"] == candidate_facts[0]), None
+        (r for r in _db.memory_rows(scope, key) if r["fact"] == candidate_facts[0]), None  # type: ignore[attr-defined]
     )
     if not row:
         return {"action": "keep", "reason": "未找到旧记忆"}
     old_conf = float(row.get("confidence", 0.7))
     valid_from = row.get("valid_from") or row.get("updated_at") or ""
     access_count = 0
-    for m in _db.meta_rows(scope, key):
+    for m in _db.meta_rows(scope, key):  # type: ignore[attr-defined]
         if m["fact"] == row["fact"]:
             access_count = int(m.get("access_count", 0))
             break
@@ -182,7 +182,7 @@ def stats(scope=None) -> dict:
     """世界模型现状（治理/调试）。"""
     n_active = 0
     n_contested = 0
-    rows = _db.memory_rows(scope)
+    rows = _db.memory_rows(scope)  # type: ignore[attr-defined]
     for r in rows:
         st = r.get("status", "active")
         if st == "active":

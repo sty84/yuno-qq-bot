@@ -114,12 +114,12 @@ def profile() -> dict:
             if "fixed" in merged:
                 merged["fixed"] = {
                     int(k): {int(s): v for s, v in (v or {}).items()}
-                    for k, v in merged["fixed"].items()
+                    for k, v in merged["fixed"].items()  # type: ignore[attr-defined]
                 }
             if "slot_pool" in merged:
                 merged["slot_pool"] = {
                     int(k): {int(s): v for s, v in v.items()}
-                    for k, v in merged["slot_pool"].items()
+                    for k, v in merged["slot_pool"].items()  # type: ignore[attr-defined]
                 }
             return merged
     except Exception:
@@ -184,14 +184,14 @@ def generate_week(profile, week_key, rng=None) -> dict:
         fixed_marks[wd] = marks
     # 能量预算：一天高能耗 → 把第一个非固定高能耗槽换成休息
     for wd in range(7):
-        day_energy = sum(float(ACTIVITIES.get(a, {"energy": 0})["energy"]) for a in plan[wd])
+        day_energy = sum(float(ACTIVITIES.get(a, {"energy": 0})["energy"]) for a in plan[wd])  # type: ignore[call-overload, misc]
         if day_energy > 1.6:
             for slot in range(4):
                 if fixed_marks[wd][slot]:
                     continue
                 act = plan[wd][slot]
                 if act in ("rehearsal", "performance", "work", "exercise", "out_entertain", "friend"):
-                    plan[wd][slot] = "home_rest"
+                    plan[wd][slot] = "home_rest"  # type: ignore[call-overload]
                     break
     # 状态链（Persona Pack 配置）：{"activity": {"before": "x", "after": "y"}}
     _CHAIN_ALIAS = {"rest": "home_rest", "workday": "work", "class": "study"}
@@ -231,7 +231,7 @@ def _plan_night_ok(plan) -> bool:
     return True
 
 
-_plan_cache = {}
+_plan_cache = {}  # type: ignore[var-annotated]
 
 
 def get_week_plan() -> dict:
@@ -243,17 +243,17 @@ def get_week_plan() -> dict:
     hit = _plan_cache.get(pid)
     if hit and hit[0] == wk:
         return hit[1]
-    data = _db.kv_get("memory", "schedule_week") or {}
+    data = _db.kv_get("memory", "schedule_week") or {}  # type: ignore[attr-defined]
     if data.get("week") == wk and data.get("profile") == pid and data.get("plan"):
         # JSON 持久化后顶层键变成字符串，还原为 int（槽位索引仍为数组）
         plan = {int(k): v for k, v in data["plan"].items()}
         if not _plan_night_ok(plan):
             # 旧计划夜晚槽不合理（凌晨演出/外出）→ 重新生成
             plan = generate_week(profile(), wk)
-            _db.kv_set("memory", "schedule_week", {"week": wk, "profile": pid, "plan": plan})
+            _db.kv_set("memory", "schedule_week", {"week": wk, "profile": pid, "plan": plan})  # type: ignore[attr-defined]
     else:
         plan = generate_week(profile(), wk)
-        _db.kv_set("memory", "schedule_week", {"week": wk, "profile": pid, "plan": plan})
+        _db.kv_set("memory", "schedule_week", {"week": wk, "profile": pid, "plan": plan})  # type: ignore[attr-defined]
     _plan_cache[pid] = (wk, plan)
     return plan
 
@@ -290,7 +290,7 @@ def current_activity(now=None) -> dict:
         "label": meta["label"],
         "weekday": wd,
         "slot": slot,
-        "energy": float(meta["energy"]),
+        "energy": float(meta["energy"]),  # type: ignore[arg-type]
         "home": bool(meta["home"]),
     }
 
@@ -299,11 +299,11 @@ def _next_activity(plan, wd, slot) -> str:
     for s in range(slot + 1, 4):
         a = plan[wd][s]
         if a not in ("sleep", "home_rest", "idle"):
-            return ACTIVITIES.get(a, ACTIVITIES["idle"])["label"]
+            return ACTIVITIES.get(a, ACTIVITIES["idle"])["label"]  # type: ignore[return-value]
     for s in range(4):
         a = plan[(wd + 1) % 7][s]
         if a not in ("sleep", "home_rest", "idle"):
-            return "明天" + ACTIVITIES.get(a, ACTIVITIES["idle"])["label"]
+            return "明天" + ACTIVITIES.get(a, ACTIVITIES["idle"])["label"]  # type: ignore[operator]
     return ""
 
 
@@ -336,7 +336,7 @@ def _energy_hint(plan, wd) -> str:
     prev = plan[(wd - 1) % 7]
     if "performance" in prev:
         hints.append("昨天刚演出完，还没缓过来，很累")
-    day_energy = sum(float(ACTIVITIES.get(a, {"energy": 0})["energy"]) for a in plan[wd])
+    day_energy = sum(float(ACTIVITIES.get(a, {"energy": 0})["energy"]) for a in plan[wd])  # type: ignore[arg-type, misc]
     if day_energy > 1.4:
         hints.append("今天安排比较满，消耗大")
     if prof.get("nocturnal") and plan[wd][0] == "sleep" and slot_index(datetime.now().hour) == 0:
@@ -382,7 +382,7 @@ def today_summary(d=None) -> str:
         for a in plan[wd]
         if a not in ("sleep", "home_rest", "idle")
     ]
-    return "、".join(labels) if labels else ""
+    return "、".join(labels) if labels else ""  # type: ignore[arg-type]
 
 
 

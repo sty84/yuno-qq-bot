@@ -73,7 +73,7 @@ def _decay_probe() -> dict:
     cap = confidence_cap()
     rows = []
     for n in registered():
-        rows += [r for r in _db.memory_rows(scope_of(n))]
+        rows += [r for r in _db.memory_rows(scope_of(n))]  # type: ignore[attr-defined]
     n = len(rows)
     if not n:
         return {"n": 0, "cap_rate": None, "source_ceiling_rate": None,
@@ -121,10 +121,10 @@ def eval_run(compare=False, save=False) -> dict:
 
     from plugins import _db
     names = registered()
-    write_ok = sum(1 for n in names if _db.memory_rows(scope_of(n)))
+    write_ok = sum(1 for n in names if _db.memory_rows(scope_of(n)))  # type: ignore[attr-defined, misc]
     priv_leak = npc_total = 0
     for n in names:
-        for r in _db.memory_rows(scope_of(n)):
+        for r in _db.memory_rows(scope_of(n)):  # type: ignore[attr-defined]
             npc_total += 1
             if float(r.get("privacy", 0.0)) >= 0.8:
                 priv_leak += 1
@@ -160,16 +160,16 @@ def eval_run(compare=False, save=False) -> dict:
             if baseline_path.exists():
                 base = json.loads(baseline_path.read_text(encoding="utf-8"))
                 metrics["delta"] = {
-                    "write_rate": round(metrics["write_rate"] - float(base.get("write_rate", 0)), 3),
-                    "privacy_rate": round((metrics["privacy_rate"] or 0) - float(base.get("privacy_rate", 0) or 0), 3),
+                    "write_rate": round(metrics["write_rate"] - float(base.get("write_rate", 0)), 3),  # type: ignore[operator]
+                    "privacy_rate": round((metrics["privacy_rate"] or 0) - float(base.get("privacy_rate", 0) or 0), 3),  # type: ignore[operator]
                     "cap_rate": round(
-                        (metrics["decay"].get("cap_rate") or 0)
+                        (metrics["decay"].get("cap_rate") or 0)  # type: ignore[union-attr]
                         - float((base.get("decay") or {}).get("cap_rate", 0) or 0), 3,
                     ),
                     "decay_rate": round(
-                        (metrics["decay"].get("decay_rate") or 0)
+                        (metrics["decay"].get("decay_rate") or 0)  # type: ignore[union-attr]
                         - float((base.get("decay") or {}).get("decay_rate", 0) or 0), 3,
-                    ) if metrics["decay"].get("decay_eligible") else None,
+                    ) if metrics["decay"].get("decay_eligible") else None,  # type: ignore[union-attr]
                 }
             else:
                 metrics["delta"] = {"error": "无 baseline（先 --save）"}

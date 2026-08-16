@@ -32,8 +32,8 @@ def _where_recall() -> dict:
     避免"投影到事件自身时刻"的自证：那会让 recall 恒接近 100%，测不出遗忘/错位。"""
     from memory import living
     from datetime import datetime, timedelta
-    events = _db.item_event_rows(limit=500)
-    by_item = {}
+    events = _db.item_event_rows(limit=500)  # type: ignore[attr-defined]
+    by_item = {}  # type: ignore[var-annotated]
     for e in events:
         by_item.setdefault(str(e.get("item", "")), []).append(e)
     total, hit = 0, 0
@@ -66,7 +66,7 @@ def _where_recall() -> dict:
                 ok = not p.get("known")  # 丢失事件的 ground truth = 未知
             else:
                 ok = (
-                    bool(to_place)
+                    bool(to_place)  # type: ignore[assignment]
                     and p.get("known")
                     and f"{p.get('room', '')}/{p.get('container', '')}" == to_place
                 )

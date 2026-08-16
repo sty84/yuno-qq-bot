@@ -209,13 +209,13 @@ def calibrate_train(probes, k=5) -> dict:
     samples = []
     for p in probes:
         scopes = [p["scope"]] if p.get("scope") else list(
-            dict.fromkeys(r["scope"] for r in _db.memory_rows())
+            dict.fromkeys(r["scope"] for r in _db.memory_rows())  # type: ignore[attr-defined]
         )
         hits = reasoning.retrieve(p["query"], scopes, top_k=k, min_score=0.0)
         expected = p["expected"]
         for fact, _s, _sc in hits:
             conf = 0.7
-            for r in _db.memory_rows(_sc):
+            for r in _db.memory_rows(_sc):  # type: ignore[attr-defined]
                 if r["fact"] == fact:
                     conf = float(r.get("confidence", 0.7))
                     break
@@ -236,15 +236,15 @@ def calibrate_train(probes, k=5) -> dict:
             mapping[(lo, hi)] = round(min(0.99, max(0.05, acc)), 3)
     if samples:
         naive = sum(label for _c, label in samples) / len(samples)
-        report["naive_accuracy"] = round(naive, 3)
-        report["samples"] = len(samples)
-    _db.kv_set(*_calibration_key(), {"mapping": [[lo, hi, v] for (lo, hi), v in mapping.items()]})
+        report["naive_accuracy"] = round(naive, 3)  # type: ignore[arg-type]
+        report["samples"] = len(samples)  # type: ignore[assignment]
+    _db.kv_set(*_calibration_key(), {"mapping": [[lo, hi, v] for (lo, hi), v in mapping.items()]})  # type: ignore[attr-defined]
     return report
 
 
 def calibrate_adjust(confidence) -> float:
     """用已训练映射校准置信度；未训练时原样返回。"""
-    data = _db.kv_get(*_calibration_key())
+    data = _db.kv_get(*_calibration_key())  # type: ignore[attr-defined]
     if not data or not data.get("mapping"):
         return float(confidence)
     for lo, hi, v in data["mapping"]:
@@ -262,7 +262,7 @@ def calibrate_from_feedback(limit=500) -> dict:
     分桶统计"该置信度段的实际正确率" → 覆盖校准映射。此前 calibrate_train 只吃
     手工评测集，feedback 数据从不回流；本函数让真实对话的纠错/确认自动校正
     置信度标定，检索打分（calibrate_adjust）随之更贴合实际。"""
-    rows = _db.feedback_rows(limit=max(10, int(limit)))
+    rows = _db.feedback_rows(limit=max(10, int(limit)))  # type: ignore[attr-defined]
     samples = []  # (confidence, label)
     for r in rows:
         kind = str(r.get("kind") or "")
@@ -277,14 +277,14 @@ def calibrate_from_feedback(limit=500) -> dict:
             continue
         conf = 0.7
         try:
-            for row in _db.memory_rows(scope):
+            for row in _db.memory_rows(scope):  # type: ignore[attr-defined]
                 if row["fact"] == fact:
                     conf = float(row.get("confidence", 0.7))
                     break
         except Exception:
             pass
         samples.append((conf, label))
-    report = {}
+    report = {}  # type: ignore[var-annotated]
     if not samples:
         return report
     buckets = {b: {"n": 0.0, "pos": 0.0} for b in BUCKETS}
@@ -301,19 +301,19 @@ def calibrate_from_feedback(limit=500) -> dict:
         report[f"{lo:.1f}-{hi:.1f}"] = {"n": int(v["n"]), "accuracy": round(acc, 3) if acc is not None else None}
         if v["n"] >= 2 and acc is not None:
             mapping[(lo, hi)] = round(min(0.99, max(0.05, acc)), 3)
-    report["samples"] = len(samples)
-    report["naive_accuracy"] = round(sum(label for _c, label in samples) / len(samples), 3)
+    report["samples"] = len(samples)  # type: ignore[assignment]
+    report["naive_accuracy"] = round(sum(label for _c, label in samples) / len(samples), 3)  # type: ignore[arg-type]
     if mapping:
-        _db.kv_set(*_calibration_key(), {"mapping": [[lo, hi, v] for (lo, hi), v in mapping.items()],
+        _db.kv_set(*_calibration_key(), {"mapping": [[lo, hi, v] for (lo, hi), v in mapping.items()],  # type: ignore[attr-defined]
                                           "source": "feedback"})
-        report["trained"] = True
+        report["trained"] = True  # type: ignore[assignment]
     else:
-        report["trained"] = False
+        report["trained"] = False  # type: ignore[assignment]
     return report
 
 
 def calibrate_report() -> str:
-    data = _db.kv_get(*_calibration_key())
+    data = _db.kv_get(*_calibration_key())  # type: ignore[attr-defined]
     if not data:
         return "尚未训练标定（用评测集跑 memory-calibrate）"
     return "置信度标定已启用：" + str(data.get("mapping", []))
@@ -359,7 +359,7 @@ def touch(scope, key, fact, importance=0.5):
 
 
 def _current_confidence(scope, key, fact) -> float:
-    for r in _db.memory_rows(scope, key):
+    for r in _db.memory_rows(scope, key):  # type: ignore[attr-defined]
         if r["fact"] == fact:
             return float(r.get("confidence", 0.7))
     return 0.7
@@ -382,7 +382,7 @@ def dispute(scope, key, fact):
 
 
 BASE_DENSITY = 4.0  # 条/天：常规活跃度基准
-_density_cache = {}
+_density_cache = {}  # type: ignore[var-annotated]
 _DENSITY_TTL = 60.0
 
 
@@ -395,7 +395,7 @@ def _activity_density(scope, window_days=7.0) -> float:
     if hit and now - hit["ts"] < _DENSITY_TTL:
         return hit["density"]
     cutoff = (datetime.now() - timedelta(days=window_days)).isoformat(timespec="seconds")
-    n = sum(1 for r in _db.memory_rows(scope) if (r.get("updated_at") or "") >= cutoff)
+    n = sum(1 for r in _db.memory_rows(scope) if (r.get("updated_at") or "") >= cutoff)  # type: ignore[attr-defined, misc]
     density = n / window_days
     _density_cache[scope] = {"ts": now, "density": density}
     return density
@@ -437,9 +437,9 @@ def retrieval_strength(access_count) -> float:
 
 def stats_for(scope, key, facts) -> dict:
     """批量取统计，返回 {fact: {access_count, importance, recency, arousal}}；recency 已含情绪锚定。"""
-    rows = _db.meta_rows(scope, key)
+    rows = _db.meta_rows(scope, key)  # type: ignore[attr-defined]
     by_fact = {r["fact"]: r for r in rows}
-    mem_map = {r["fact"]: r for r in _db.memory_rows(scope, key)}
+    mem_map = {r["fact"]: r for r in _db.memory_rows(scope, key)}  # type: ignore[attr-defined]
     out = {}
     for f in facts:
         row = by_fact.get(f)
@@ -484,8 +484,8 @@ def forget(scope=None) -> dict:
     fuzzy = forgotten = 0
     th = fuzzy_strength()
     cutoff = datetime.now().isoformat(timespec="seconds")
-    rows = {(r["scope"], r["key"], r["fact"]): r for r in _db.memory_rows(scope)}
-    for m in _db.meta_rows(scope):
+    rows = {(r["scope"], r["key"], r["fact"]): r for r in _db.memory_rows(scope)}  # type: ignore[attr-defined]
+    for m in _db.meta_rows(scope):  # type: ignore[attr-defined]
         row = rows.get((m["scope"], m["key"], m["fact"]))
         if not row:
             continue
@@ -500,18 +500,18 @@ def forget(scope=None) -> dict:
                 # 稳定事实/偏好：只降模糊，不硬删除（宁可用"待核实"也不丢）
                 cur = float(row.get("confidence", 0.7))
                 if cur > 0.25:
-                    _db.memory_set_confidence(row["scope"], row["key"], row["fact"], 0.25)
+                    _db.memory_set_confidence(row["scope"], row["key"], row["fact"], 0.25)  # type: ignore[attr-defined]
                     fuzzy += 1
             else:
-                _db.memory_delete(row["scope"], row["key"], row["fact"])
-                _db.meta_delete(row["scope"], row["key"], row["fact"])
+                _db.memory_delete(row["scope"], row["key"], row["fact"])  # type: ignore[attr-defined]
+                _db.meta_delete(row["scope"], row["key"], row["fact"])  # type: ignore[attr-defined]
                 forgotten += 1
         elif strength < th:
             cur = float(row.get("confidence", 0.7))
             if cur > 0.25:
-                _db.memory_set_confidence(row["scope"], row["key"], row["fact"], 0.25)
+                _db.memory_set_confidence(row["scope"], row["key"], row["fact"], 0.25)  # type: ignore[attr-defined]
                 fuzzy += 1
-    _db.policy_log_add("forget", f"fuzzy={fuzzy} forgotten={forgotten}", detail="类别化遗忘")
+    _db.policy_log_add("forget", f"fuzzy={fuzzy} forgotten={forgotten}", detail="类别化遗忘")  # type: ignore[attr-defined]
     return {"fuzzy": fuzzy, "forgotten": forgotten}
 
 
@@ -520,13 +520,13 @@ def promote(scope=None) -> int:
     n = 0
     min_access = promote_min_access()
     min_imp = promote_min_importance()
-    rows = {(r["scope"], r["key"], r["fact"]): r for r in _db.memory_rows(scope)}
-    for m in _db.meta_rows(scope):
+    rows = {(r["scope"], r["key"], r["fact"]): r for r in _db.memory_rows(scope)}  # type: ignore[attr-defined]
+    for m in _db.meta_rows(scope):  # type: ignore[attr-defined]
         row = rows.get((m["scope"], m["key"], m["fact"]))
         if not row or row.get("mclass") != "short":
             continue
         if m["access_count"] >= min_access and float(m["importance"]) >= min_imp:
-            _db.memory_add(
+            _db.memory_add(  # type: ignore[attr-defined]
                 row["scope"],
                 row["key"],
                 row["fact"],
@@ -540,7 +540,7 @@ def promote(scope=None) -> int:
                 valence=float(row.get("valence", 0.0)),
             )
             n += 1
-    _db.policy_log_add("promote", f"promoted={n}", detail="短期→长期巩固")
+    _db.policy_log_add("promote", f"promoted={n}", detail="短期→长期巩固")  # type: ignore[attr-defined]
     return n
 
 
@@ -554,7 +554,7 @@ def promote_core(scope=None, cap=None) -> int:
     # 核心层语义只对私聊（c2c）成立：群聊/多主体按 speaker 分存，注入"关于用户"会混淆身份
     if not (scope or "").startswith("c2c:"):
         return 0
-    rows = _db.memory_rows(scope)
+    rows = _db.memory_rows(scope)  # type: ignore[attr-defined]
     core_count = sum(
         1 for r in rows
         if r.get("mclass") == "core" and r.get("status") not in ("superseded", "contested")
@@ -573,7 +573,7 @@ def promote_core(scope=None, cap=None) -> int:
             continue
         if fact_class(r.get("scope", scope), r.get("key", ""), r["fact"]) != "stable":
             continue
-        _db.memory_add(
+        _db.memory_add(  # type: ignore[attr-defined]
             r["scope"],
             r["key"],
             r["fact"],
@@ -589,7 +589,7 @@ def promote_core(scope=None, cap=None) -> int:
         )
         n += 1
     if n:
-        _db.policy_log_add("promote_core", f"promoted_core={n}", detail="稳定事实→核心常驻")
+        _db.policy_log_add("promote_core", f"promoted_core={n}", detail="稳定事实→核心常驻")  # type: ignore[attr-defined]
     return n
 
 
@@ -597,21 +597,21 @@ def prune(scope=None, key=None) -> int:
     """回收低价值记忆：重要度低于阈值则删除事实与元数据。返回删除条数。"""
     removed = 0
     threshold = prune_importance()
-    for r in _db.meta_rows(scope, key):
+    for r in _db.meta_rows(scope, key):  # type: ignore[attr-defined]
         if float(r["importance"]) >= threshold:
             continue
         fact, sc, k = r["fact"], r["scope"], r["key"]
-        if fact in _db.memory_get(sc, k):
-            _db.memory_delete(sc, k, fact)
-            _db.meta_delete(sc, k, fact)
+        if fact in _db.memory_get(sc, k):  # type: ignore[attr-defined]
+            _db.memory_delete(sc, k, fact)  # type: ignore[attr-defined]
+            _db.meta_delete(sc, k, fact)  # type: ignore[attr-defined]
             removed += 1
-    _db.policy_log_add("prune", f"removed={removed}", detail="低价值记忆回收")
+    _db.policy_log_add("prune", f"removed={removed}", detail="低价值记忆回收")  # type: ignore[attr-defined]
     return removed
 
 
 def governance(scope=None) -> dict:
     """Memory Governance 报告（v3.1 §9）：遗忘/巩固/冲突/隐私 现状。"""
-    rows = _db.memory_rows(scope)
+    rows = _db.memory_rows(scope)  # type: ignore[attr-defined]
     return {
         "total": len(rows),
         "core": sum(1 for r in rows if r.get("mclass") == "core"),
@@ -619,8 +619,8 @@ def governance(scope=None) -> dict:
         "short": sum(1 for r in rows if r.get("mclass") == "short"),
         "low_confidence": sum(1 for r in rows if float(r.get("confidence", 0.7)) < 0.3),
         "private": sum(1 for r in rows if float(r.get("privacy", 0.0)) >= 0.6),
-        "recent_history_entries": len(_db.history_rows(scope, limit=100)),
-        "policy_log_entries": len(_db.policy_log_rows(100)),
+        "recent_history_entries": len(_db.history_rows(scope, limit=100)),  # type: ignore[attr-defined]
+        "policy_log_entries": len(_db.policy_log_rows(100)),  # type: ignore[attr-defined]
     }
 
 

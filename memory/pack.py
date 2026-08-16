@@ -12,7 +12,7 @@ import pathlib
 from plugins import _shared
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-_cache = {}
+_cache = {}  # type: ignore[var-annotated]
 
 
 def active() -> str:

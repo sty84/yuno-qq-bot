@@ -95,7 +95,7 @@ def detect_modules(scope, key="", text="") -> list:
 
 def prune(days=None) -> int:
     """清理超过保留期的轨迹（默认 7 天）。"""
-    return _db.trace_prune(int(days if days is not None else _cfg("retention_days", 7)))
+    return _db.trace_prune(int(days if days is not None else _cfg("retention_days", 7)))  # type: ignore[attr-defined]
 
 
 def score(trace_id, scores=None, comment="", reviewer="", total=None):
@@ -126,8 +126,8 @@ _adjust_cache = {"ts": 0.0, "data": None}
 
 def _compute_adjustments() -> dict:
     """按近期人工评分聚合各维度平均分，推导行为调整参数。"""
-    reviews = _db.trace_review_recent(limit=100)
-    dim_avg = {}
+    reviews = _db.trace_review_recent(limit=100)  # type: ignore[attr-defined]
+    dim_avg = {}  # type: ignore[var-annotated]
     for r in reviews:
         try:
             s = json.loads(r.get("scores") or "{}")
@@ -156,11 +156,11 @@ def _compute_adjustments() -> dict:
 def adjustments(force=False) -> dict:
     """当前评分驱动的行为调整（10 分钟缓存）。"""
     now = time.time()
-    if _adjust_cache["data"] and not force and now - _adjust_cache["ts"] < 600:
-        return _adjust_cache["data"]
+    if _adjust_cache["data"] and not force and now - _adjust_cache["ts"] < 600:  # type: ignore[operator]
+        return _adjust_cache["data"]  # type: ignore[return-value]
     data = _compute_adjustments()
     try:
-        conv = _db.kv_get("memory", "conv_adjustments") or {}
+        conv = _db.kv_get("memory", "conv_adjustments") or {}  # type: ignore[attr-defined]
         if conv:
             data["convreview"] = {
                 "auto_adjust": bool(conv.get("auto_adjust", False)),
@@ -173,7 +173,7 @@ def adjustments(force=False) -> dict:
                 data["convreview_applied"] = True
     except Exception:
         pass
-    _adjust_cache.update({"ts": now, "data": data})
+    _adjust_cache.update({"ts": now, "data": data})  # type: ignore[dict-item]
     return data
 
 

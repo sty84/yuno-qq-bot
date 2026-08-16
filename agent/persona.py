@@ -218,7 +218,7 @@ def sync_identity() -> str:
         return ""
     fields = parse_persona(text)
     for key in PERSONA_KEYS:
-        _db.memory_clear(_ai_scope(), key)
+        _db.memory_clear(_ai_scope(), key)  # type: ignore[attr-defined]
     added = 0
     for key, conf, imp, content in fields:
         memory_controller.add_fact(
@@ -232,7 +232,7 @@ def sync_identity() -> str:
 
 def _identity() -> str:
     """优先读记忆库里的 identity 字段，否则回退到 persona.md。"""
-    rows = _db.memory_rows(_ai_scope(), "identity")
+    rows = _db.memory_rows(_ai_scope(), "identity")  # type: ignore[attr-defined]
     if rows:
         return "\n".join(r["fact"] for r in rows)
     return (_shared.BASE_SYSTEM_PROMPT or "").strip()

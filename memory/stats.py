@@ -12,7 +12,7 @@ from plugins import _db
 
 _log = logging.getLogger(__name__)
 
-_buf = {}
+_buf = {}  # type: ignore[var-annotated]
 _last_flush = [0.0]
 _FLUSH_INTERVAL = 30.0  # 秒：计数器缓冲落盘周期
 
@@ -47,7 +47,7 @@ def counters() -> dict:
     """落盘并返回全部计数器。"""
     _flush()
     try:
-        return _db.kv_get("memory", "run_stats") or {}
+        return _db.kv_get("memory", "run_stats") or {}  # type: ignore[attr-defined]
     except Exception:
         return {}
 

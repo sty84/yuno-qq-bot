@@ -4,7 +4,7 @@ from plugins import _db, _shared
 from memory import extract, graph, reasoning, topic
 
 # 证据门控 v2：最近一次检索命中的 fact（供 core.ask 生成后验证用）
-_last_evidence = []
+_last_evidence = []  # type: ignore[var-annotated]
 
 
 def related_events(query, scopes, top_n=3) -> list[str]:
@@ -12,7 +12,7 @@ def related_events(query, scopes, top_n=3) -> list[str]:
     qt = extract.fact_keywords(query)
     out = []
     for scope in scopes:
-        evs = _db.event_rows(scope, limit=100)
+        evs = _db.event_rows(scope, limit=100)  # type: ignore[attr-defined]
         seed = [
             ev["id"]
             for ev in evs
@@ -29,7 +29,7 @@ def related_events(query, scopes, top_n=3) -> list[str]:
 
 def ai_memory_block(limit=4) -> str:
     """AI 自身记忆（统一格式）：experience / belief，标注可信度。"""
-    rows = _db.memory_rows("ai")
+    rows = _db.memory_rows("ai")  # type: ignore[attr-defined]
     if not rows:
         return ""
     rows.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
@@ -63,7 +63,7 @@ def core_memory_block(scope, limit=None) -> str:
     limit = int(limit or _core_layer_cfg("budget_chars", 600))
     min_conf = float(_core_layer_cfg("min_confidence", 0.3))
     rows = [
-        r for r in _db.memory_rows(scope)
+        r for r in _db.memory_rows(scope)  # type: ignore[attr-defined]
         if _resident_core(r.get("mclass", "short"), r.get("status", "active"))
         and not str(r.get("fact", "")).startswith("enc:")
         and float(r.get("confidence", 0.7)) >= min_conf
@@ -102,13 +102,13 @@ def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, r
         _last_evidence = _hits_facts
     if hits:
         conf_map = {}
-        src_map = {}
-        status_map = {}
-        mclass_map = {}
+        src_map = {}  # type: ignore[var-annotated]
+        status_map = {}  # type: ignore[var-annotated]
+        mclass_map = {}  # type: ignore[var-annotated]
         time_map = {}
         _hit_facts = {f for f, _s, _sc in hits}
         for scope in list(scopes) + list(extra_scopes or []):
-            for r in _db.memory_rows_by_facts(scope, _hit_facts):
+            for r in _db.memory_rows_by_facts(scope, _hit_facts):  # type: ignore[attr-defined]
                 conf_map[r["fact"]] = float(r.get("confidence", 0.7))
                 src_map.setdefault(r["fact"], r.get("source", ""))
                 status_map.setdefault(r["fact"], r.get("status", "active"))
@@ -156,7 +156,7 @@ def _memory_block(query, scopes, top_k, min_score, extra_scopes, expand_query, r
             lines.append("- " + tag + label + ch_label + src_label)
             shown += 1
         # 证据门控（v2.3）：按来源统计证据状态，注入分桶说明
-        src_buckets = {}
+        src_buckets = {}  # type: ignore[var-annotated]
         for f, _s, _sc in hits:
             s = src_map.get(f, "")
             if s in ("user", "pack", "ai_speculation", "news"):
@@ -262,7 +262,7 @@ def user_state_block(scope) -> str:
     """用户近期状态：从最近记忆的情绪维度判断，注入 prompt 供 AI 调整语气（v3 §14）。"""
     if not scope or not scope.startswith("c2c:"):
         return ""
-    rows = [r for r in _db.memory_rows(scope) if abs(float(r.get("valence", 0.0))) > 0.01]
+    rows = [r for r in _db.memory_rows(scope) if abs(float(r.get("valence", 0.0))) > 0.01]  # type: ignore[attr-defined]
     rows.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
     if not rows:
         return ""
