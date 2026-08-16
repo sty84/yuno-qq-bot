@@ -717,7 +717,7 @@ def _migrate_legacy(data_dir):
                 c.execute("INSERT OR IGNORE INTO state(k,v) VALUES(?,?)", (k, json.dumps(v)))
         mem = d / "memory"
         if mem.exists() and _count("facts") == 0:
-            from plugins._db_sqlite_data import facts_replace, kv_set
+            from plugins._db_sqlite_memory import facts_replace, kv_set
             users = mem / "users"
             if users.exists():
                 for f in users.glob("*.json"):
