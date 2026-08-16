@@ -215,7 +215,8 @@ def scenario_replay(path: str = "", score: bool = False, scenario_id=None, revie
     results = []
     for sc in scenarios or []:
         scope = str(sc.get("scope") or "c2c:scenario")
-        history, replies = [], []
+        history: list[dict] = []
+        replies: list[dict] = []
         for m in (sc.get("messages") or []):
             if "user" not in m:
                 continue
@@ -258,9 +259,9 @@ def scenario_replay(path: str = "", score: bool = False, scenario_id=None, revie
                 SCENARIO_RUBRIC + "\n对话：\n" + conv,
                 max_tokens=200, temperature=0.2, module="scenario",
             )
-            s, e = raw.find("{"), raw.rfind("}")
-            if s >= 0:
-                s2 = json.loads(raw[s:e + 1])
+            start, end = raw.find("{"), raw.rfind("}")
+            if start >= 0:
+                s2 = json.loads(raw[start:end + 1])
                 s2["avg"] = round(
                     sum(float(s2.get(k, 0)) for k in ("recall", "precision", "coherence", "consistency", "naturalness")) / 5,
                     2,
@@ -268,8 +269,8 @@ def scenario_replay(path: str = "", score: bool = False, scenario_id=None, revie
         except Exception as ex:
             s2 = {"error": str(ex)}
         scored.append({"id": r["id"], "scores": s2})
-    avg = {}
-    vals = {k: [] for k in ("recall", "precision", "coherence", "consistency", "naturalness")}
+    avg: dict[str, float] = {}
+    vals: dict[str, list[float]] = {k: [] for k in ("recall", "precision", "coherence", "consistency", "naturalness")}
     for r in scored:
         s = r.get("scores") or {}
         for k in vals:

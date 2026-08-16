@@ -29,8 +29,31 @@ python_files = ["test_*.py"]
 select = ["E4", "E7", "E9", "F"]
 ignore = [
   "E402",  # 模块级 import 顺序（历史代码较多，后续分批修）
-  "E741",  # 单字母变量名（历史代码）
-  "F841",  # 未使用变量（测试中常见）
   "F811",  # 重复导入/重定义（测试中常见）
   "E702",  # 单行多条语句（历史代码）
+]
+
+[tool.mypy]
+python_version = "3.10"
+follow_imports = "skip"
+ignore_missing_imports = true
+files = [
+  "memory/interfaces.py",
+  "agent/core.py",
+  "web/app.py",
+  "web/auth.py",
+  "web/routes_admin.py",
+  "web/routes_cognitive.py",
+  "web/routes_eval.py",
+  "tools/core.py",
+]
+
+[tool.pyright]
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+include = [
+  "memory/interfaces.py",
+  "agent/core.py",
+  "web",
+  "tools/core.py",
 ]

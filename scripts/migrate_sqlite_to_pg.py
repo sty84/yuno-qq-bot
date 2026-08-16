@@ -69,7 +69,6 @@ def migrate(sqlite_path: str, pg_dsn: str, dry_run: bool = False) -> dict:
                 rows = src.execute(f'SELECT * FROM "{name}"').fetchall()
                 if rows:
                     cols = list(rows[0].keys())
-                    placeholders = ",".join(["%s"] * len(cols))
                     col_sql = ",".join(f'"{c}"' for c in cols)
                     execute_values(
                         cur,

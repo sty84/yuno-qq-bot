@@ -197,7 +197,6 @@ def build(name, llm=None) -> dict:
     if not dossier:
         return {"name": name, "scope": scope, "added": 0, "error": "档案生成失败（LLM 无返回或格式错误）"}
     _clear_scope(scope)
-    ts = datetime.now().isoformat(timespec="seconds")
     added = 0
     for kind, (mkey, category) in KIND_META.items():
         for content in dossier.get(kind, []):

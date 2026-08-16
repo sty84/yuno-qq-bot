@@ -235,7 +235,7 @@ def calibrate_train(probes, k=5) -> dict:
         if v["n"] >= 3 and acc is not None:
             mapping[(lo, hi)] = round(min(0.99, max(0.05, acc)), 3)
     if samples:
-        naive = sum(l for _c, l in samples) / len(samples)
+        naive = sum(label for _c, label in samples) / len(samples)
         report["naive_accuracy"] = round(naive, 3)
         report["samples"] = len(samples)
     _db.kv_set(*_calibration_key(), {"mapping": [[lo, hi, v] for (lo, hi), v in mapping.items()]})
@@ -302,7 +302,7 @@ def calibrate_from_feedback(limit=500) -> dict:
         if v["n"] >= 2 and acc is not None:
             mapping[(lo, hi)] = round(min(0.99, max(0.05, acc)), 3)
     report["samples"] = len(samples)
-    report["naive_accuracy"] = round(sum(l for _c, l in samples) / len(samples), 3)
+    report["naive_accuracy"] = round(sum(label for _c, label in samples) / len(samples), 3)
     if mapping:
         _db.kv_set(*_calibration_key(), {"mapping": [[lo, hi, v] for (lo, hi), v in mapping.items()],
                                           "source": "feedback"})

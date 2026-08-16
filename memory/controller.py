@@ -337,7 +337,6 @@ def _decay_conflicts(scope, key, text, an=None) -> list:
     ) | (extract.fact_keywords(text or "") - _CORRECTION_STOP_BIGRAMS)
     if not specific:
         return []
-    kind = "dispute" if strong else "conflict"
     candidates = set()
     for r in _db.memory_rows(scope, key):
         if (extract.fact_keywords(r["fact"]) & specific) or (

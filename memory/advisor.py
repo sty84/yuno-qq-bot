@@ -277,11 +277,11 @@ def daily_reflect(limit=20) -> int:
             detail="reflect",
         )
         raw_lines = [
-            l.strip().lstrip("-• ")
-            for l in (resp.choices[0].message.content or "").splitlines()
-            if l.strip()
+            line.strip().lstrip("-• ")
+            for line in (resp.choices[0].message.content or "").splitlines()
+            if line.strip()
         ]
-        lines = [l for l in raw_lines if _reflection_quality(l, evs, rels)][:3]
+        lines = [line for line in raw_lines if _reflection_quality(line, evs, rels)][:3]
         try:
             import memory.stats as _st
             _st.bump("reflect_raw", len(raw_lines))
@@ -293,11 +293,11 @@ def daily_reflect(limit=20) -> int:
         return 0
     n = 0
     ts = datetime.now().isoformat(timespec="seconds")
-    for l in lines[:3]:
-        if 6 <= len(l) <= 80:
-            _db.memory_add("ai", "reflection", l, ts, None, 0.6, "reflection")
+    for line in lines[:3]:
+        if 6 <= len(line) <= 80:
+            _db.memory_add("ai", "reflection", line, ts, None, 0.6, "reflection")
             # 反思闭环（v6 建议 §8）：洞察落策略日志，供复盘与后续 HITL 行为调整
-            _db.policy_log_add("reflection", "insight", 0.6, detail=l[:100])
+            _db.policy_log_add("reflection", "insight", 0.6, detail=line[:100])
             try:
                 import memory.stats as _st
                 _st.bump("reflect_insight")
@@ -333,19 +333,19 @@ def weekly_reflect(limit=50) -> int:
             detail="weekly_reflect",
         )
         lines = [
-            l.strip().lstrip("-• ")
-            for l in (resp.choices[0].message.content or "").splitlines()
-            if l.strip()
+            line.strip().lstrip("-• ")
+            for line in (resp.choices[0].message.content or "").splitlines()
+            if line.strip()
         ]
     except Exception as e:
         _stats_err(e)
         return 0
     n = 0
     ts = datetime.now().isoformat(timespec="seconds")
-    for l in lines[:3]:
-        if 6 <= len(l) <= 80 and _reflection_quality(l, evs, rels):
-            _db.memory_add("ai", "belief", l, ts, None, 0.7, "reflection")
-            _db.policy_log_add("reflection", "weekly_belief", 0.7, detail=l[:100])
+    for line in lines[:3]:
+        if 6 <= len(line) <= 80 and _reflection_quality(line, evs, rels):
+            _db.memory_add("ai", "belief", line, ts, None, 0.7, "reflection")
+            _db.policy_log_add("reflection", "weekly_belief", 0.7, detail=line[:100])
             n += 1
     return n
 

@@ -51,10 +51,10 @@ def cmd_emotion_train(file: str, out: str = "") -> str:
     texts, labels = [], []
     for r in rows:
         t = str(r.get("text", "")).strip()
-        l = str(r.get("emotion", "")).strip()
-        if t and l:
+        label = str(r.get("emotion", "")).strip()
+        if t and label:
             texts.append(t)
-            labels.append(l)
+            labels.append(label)
     if len(texts) < 30:
         return f"训练样本太少（{len(texts)} 条），建议 ≥300 条覆盖长尾情绪"
 

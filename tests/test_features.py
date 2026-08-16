@@ -677,7 +677,6 @@ def test_06_retrieval_rewrite():
 def test_07_evidence_gate_appointment():
     e = _env()
     _db, _shared, agent, memory, lexical, reasoning = e["_db"], e["_shared"], e["agent"], e["memory"], e["lexical"], e["reasoning"]
-    repo = e["repo"]
     _ts = datetime.now().isoformat(timespec="seconds")  # 原由 test_06 区块定义，跨函数补定义
     context_mod, tools_mod = e["context_mod"], e["tools_mod"]
     # ---- 证据门控管道（v2.3）----
@@ -1190,7 +1189,7 @@ def test_09_lazy_topic_night_compound():
     e = _env()
     pack_mod = e["pack_mod"]
     living, _db, _shared, stats_mod, sharing = e["living"], e["_db"], e["_shared"], e["stats_mod"], e["sharing"]
-    context_mod, tools_mod, repo = e["context_mod"], e["tools_mod"], e["repo"]
+    context_mod, repo = e["context_mod"], e["repo"]
     persona_mod = e["persona_mod"]
     # ---- lazy_label 收进 pack（去人设残留）----
     tr = living.travel_time("排练室", mode="walk", now=datetime.now())
@@ -1344,7 +1343,6 @@ def test_09_lazy_topic_night_compound():
 def test_10_pollution_scan_levels():
     """污染扫描分级（v2.3 防自我强化循环）：source=user 事实必须能在用户历史消息中
     找到字面出处——问句不能算陈述出处（语义反转）；无出处=提取幻觉固化候选。"""
-    e = _env()
     from memory import controller as ctl
     stmt = ["我养了只橘猫叫煤球，上周刚接回家", "我是你们乐队新来的经纪人助手"]
     quest = ["你有玩过怪物猎人吗", "阿拉蕾是不是雪貂", "仲町阿拉蕾上次在哪见过那把伞？"]
@@ -1423,8 +1421,6 @@ def test_13_question_extract_demote():
     e = _env()
     _db, memory = e["_db"], e["memory"]
     from memory import extract as extract_mod
-
-    captured = {}
 
     def _fake_ews(conv):
         return ["玩过怪物猎人", "用户喜欢玩游戏"]
@@ -1541,7 +1537,6 @@ def test_16_calendar_gate_and_check():
 def test_19_forgetful_reply_pool():
     """记不清兜底表达池（v2.3）：按话题类型随机多变，全部句子过证据门不自我触发
     （否则兜底会再次重写死循环）；否认句（"没听你说过/没约过"）不被误拦。"""
-    e = _env()
     from agent import evidence_gate as eg
     import random
     random.seed(3)

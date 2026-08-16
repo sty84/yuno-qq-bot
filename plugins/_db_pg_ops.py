@@ -713,7 +713,6 @@ def restore_all(data, replace=False) -> dict:
                     cur.execute(f'DELETE FROM "{t}"')
                 if rows:
                     cols = list(rows[0].keys())
-                    placeholders = ",".join(["%s"] * len(cols))
                     col_sql = ",".join(f'"{c}"' for c in cols)
                     from psycopg2.extras import execute_values
                     execute_values(

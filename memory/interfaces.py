@@ -16,7 +16,7 @@ class MemoryInterface(Protocol):
     def add(self, scope: str, key: str, fact: str, **kwargs) -> Any:
         ...
 
-    def forget(self, scope: str = None) -> dict:
+    def forget(self, scope: str | None = None) -> dict:
         ...
 
 
