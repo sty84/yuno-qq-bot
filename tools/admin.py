@@ -96,6 +96,71 @@ def cmd_recover(notify: bool) -> int:
     return 0
 
 
+def cmd_pg_guard(notify: bool = False):
+    """PG 故障守护：检查 PostgreSQL 健康，离线时写审计并可选播报。
+
+    返回 (退出码, 文本)，供 cron 使用：0=正常，1=故障。
+    """
+    import os
+    _capability, _db, _shared = _plugins()
+    if os.getenv("YUNO_DB_BACKEND", "postgresql").strip().lower() == "sqlite":
+        return 0, "当前后端为 SQLite，无需 PG 守护。"
+    try:
+        pg = _db.health()
+    except Exception as e:
+        pg = {"ok": False, "error": str(e)}
+    ts = datetime.now().isoformat(timespec="seconds")
+    if pg.get("ok"):
+        _db.kv_set("memory", "pg_health", {"ok": True, "ts": ts, "detail": pg.get("version", "")[:200]})
+        return 0, f"PostgreSQL [在线] {pg.get('version', '')[:60]} 表数={pg.get('table_count')}"
+    _db.kv_set("memory", "pg_health", {"ok": False, "ts": ts, "error": str(pg.get("error", ""))[:200]})
+    _db.audit_add("pg_guard.fail", "PostgreSQL", str(pg.get("error", "连接失败"))[:300])
+    text = f"PostgreSQL [离线] {pg.get('error', '')[:100]}"
+    if notify:
+        try:
+            if target := _notify_group():
+                _capability.notify_send("group", target, f"【PG 故障告警】\n{text}")
+            else:
+                text += "\n未配置播报目标群，跳过 QQ 通知。"
+        except Exception as e:
+            text += f"\n通知失败：{e}"
+    return 1, text
+
+
+def cmd_recover_drill() -> str:
+    """恢复演练：不实际覆盖数据，只验证最新备份可读/可恢复。"""
+    import os
+    _capability, _db, _shared = _plugins()
+    backup_dir = _shared.DATA_DIR / "backups"
+    backups = sorted(backup_dir.glob("bot-*"), key=lambda x: x.stat().st_mtime, reverse=True)
+    if not backups:
+        return "没有可用备份，无法演练。"
+    latest = backups[0]
+    if latest.suffix == ".dump":
+        import subprocess
+        env = os.environ.copy()
+        password = os.getenv("YUNO_PG_PASSWORD", "")
+        if password:
+            env["PGPASSWORD"] = password
+        proc = subprocess.run(
+            ["pg_restore", "--list", str(latest)],
+            capture_output=True, text=True, env=env, timeout=60,
+        )
+        if proc.returncode != 0:
+            return f"恢复演练失败：备份文件不可读。\n{proc.stderr[:500]}"
+        entries = [ln for ln in proc.stdout.splitlines() if ln and not ln.startswith(";")]
+        return f"恢复演练通过：{latest.name} 可读，包含 {len(entries)} 个对象。"
+    import sqlite3
+    conn = sqlite3.connect(f"file:{latest}?mode=ro", uri=True)
+    try:
+        row = conn.execute("PRAGMA integrity_check").fetchone()
+    finally:
+        conn.close()
+    if row and row[0] == "ok":
+        return f"恢复演练通过：{latest.name} SQLite 完整性检查 OK。"
+    return f"恢复演练失败：{latest.name} SQLite 完整性检查异常：{row}"
+
+
 def cmd_config_validate() -> str:
     """校验 config.json：未知段、数值字段类型、窗口类字段长度、分享参数取值。"""
     _capability, _db, _shared = _plugins()

@@ -15,7 +15,9 @@ from tools.admin import (
     cmd_persona_freshcheck,
     cmd_persona_smoke,
     cmd_persona_switch,
+    cmd_pg_guard,
     cmd_recover,
+    cmd_recover_drill,
 )
 from tools.core import _emit
 from tools.eval import (
@@ -101,6 +103,13 @@ def main() -> int:
     p = sub.add_parser("recover", help="一键恢复服务")
     p.add_argument("--notify", action="store_true", help="结果播报到 QQ")
     p.set_defaults(func=lambda a: cmd_recover(a.notify))
+
+    p = sub.add_parser("pg-guard", help="PG 故障守护：检查健康，离线时审计/可选播报")
+    p.add_argument("--notify", action="store_true", help="故障时播报到 QQ")
+    p.set_defaults(func=lambda a: _emit(cmd_pg_guard(a.notify)) or 0)
+
+    p = sub.add_parser("recover-drill", help="恢复演练：验证最新备份可读，不覆盖数据")
+    p.set_defaults(func=lambda a: _emit(cmd_recover_drill()) or 0)
 
     p = sub.add_parser("memory-embed", help="为缺少向量的记忆回填 embedding")
     p.add_argument("--batch", type=int, default=64)

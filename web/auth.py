@@ -13,6 +13,15 @@ class LoginRequest(BaseModel):
     password: str
 
 
+def require_role(request: Request, *roles: str):
+    """接口级权限检查：未开启鉴权时放行；开启后要求角色在 roles 内。"""
+    role = getattr(request.state, "role", None)
+    if role is None:
+        return
+    if role not in roles:
+        raise HTTPException(403, f"需要 {'/'.join(roles)} 权限")
+
+
 def install_auth(app, state):
     """安装可选 token 中间件和登录路由。"""
     web_token = os.getenv("YUNO_WEB_TOKEN", "")
@@ -43,17 +52,21 @@ def install_auth(app, state):
             if role is None:
                 return JSONResponse({"detail": "未授权"}, status_code=401)
             request.state.role = role
-            if request.method not in ("GET", "HEAD", "OPTIONS") and role != "admin":
-                return JSONResponse({"detail": "需要管理员权限"}, status_code=403)
+            # 写操作默认至少 ops；高风险接口会在路由内再要求 admin。
+            if request.method not in ("GET", "HEAD", "OPTIONS") and role not in ("ops", "admin"):
+                return JSONResponse({"detail": "需要运维或管理员权限"}, status_code=403)
             return await call_next(request)
 
     @app.post("/api/auth/login")
     def login(req: LoginRequest):
-        """使用管理密码或只读密码换取短期会话 token。"""
+        """使用管理员/运维/只读密码换取短期会话 token。"""
         admin_pw = os.getenv("YUNO_WEB_PASSWORD", "")
+        ops_pw = os.getenv("YUNO_WEB_OPS_PASSWORD", "")
         readonly_pw = os.getenv("YUNO_WEB_READONLY_PASSWORD", "")
         if admin_pw and req.password == admin_pw:
             role = "admin"
+        elif ops_pw and req.password == ops_pw:
+            role = "ops"
         elif readonly_pw and req.password == readonly_pw:
             role = "readonly"
         else:

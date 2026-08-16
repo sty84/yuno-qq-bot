@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from plugins import _db, _shared
+from web.auth import require_role
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STATIC_DIR = ROOT / "static"
@@ -174,13 +175,15 @@ def register(app, state):
         return out
 
     @app.get("/api/data/dump")
-    def data_dump():
+    def data_dump(request: Request):
         """全量数据 JSON 导出（只读，含用户数据表；索引类由 grow 重建）。"""
+        require_role(request, "ops", "admin")
         return _db.dump_all()
 
     @app.post("/api/data/import")
     def data_import(req: DataImportRequest, request: Request):
         """Web 数据导入（高危）：必须 confirm=true，导入前写审计。"""
+        require_role(request, "admin")
         state.check_rate(
             f"import:{request.client.host if request.client else 'unknown'}",
             limit=5, window=60,
@@ -200,6 +203,7 @@ def register(app, state):
     @app.post("/api/ops/notify")
     def notify(req: NotifyRequest, request: Request):
         """发送运维/告警播报（高危/易骚扰，必须 confirm=true）。"""
+        require_role(request, "admin")
         state.check_rate(
             f"notify:{request.client.host if request.client else 'unknown'}",
             limit=5, window=60,
@@ -214,6 +218,7 @@ def register(app, state):
 
     @app.post("/api/tools")
     def run_tool(req: ToolRun, request: Request):
+        require_role(request, "ops", "admin")
         state.check_rate(
             f"tools:{request.client.host if request.client else 'unknown'}",
             limit=20, window=60,
@@ -229,6 +234,7 @@ def register(app, state):
         if req.name in _HIGH_RISK and not req.confirm:
             raise HTTPException(400, "高危操作需要 confirm=true")
         if req.name in _HIGH_RISK:
+            require_role(request, "admin")
             _db.audit_add(
                 "web.high_risk", req.name,
                 f"uid={req.uid} scope={req.scope}",

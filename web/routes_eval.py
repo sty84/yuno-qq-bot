@@ -4,10 +4,11 @@ import json
 import pathlib
 import shutil
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
 from plugins import _db, _shared
+from web.auth import require_role
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -83,7 +84,8 @@ def register(app, state):
         return _db.exp_log_rows(limit)
 
     @app.post("/api/tasks")
-    def create_task(req: TaskRequest):
+    def create_task(req: TaskRequest, request: Request):
+        require_role(request, "ops", "admin")
         try:
             fn = state.task_fn(req.kind)
         except HTTPException:
@@ -135,16 +137,18 @@ def register(app, state):
         }
 
     @app.post("/api/scenarios/replay")
-    def replay(req: ReplayRequest):
+    def replay(req: ReplayRequest, request: Request):
         """回放场景（可选 DeepSeek 五维评分）。异步任务，前端轮询。"""
+        require_role(request, "ops", "admin")
         def fn():
             from tools import scenario_replay
             return scenario_replay(scenario_id=req.scenario_id or None, score=req.score)
         return {"task_id": state.submit("scenario_replay", fn)}
 
     @app.post("/api/scenarios/score")
-    def save_score(req: ScoreRequest):
+    def save_score(req: ScoreRequest, request: Request):
         """保存一次人工五维评分。"""
+        require_role(request, "ops", "admin")
         return _db.scenario_score_add(req.scenario_id, req.scope, req.scores, req.comment, req.mode)
 
     @app.get("/api/scenario-scores")
@@ -159,14 +163,16 @@ def register(app, state):
         return _state()
 
     @app.post("/api/ablation/toggle")
-    def ablation_toggle(req: AblationToggle):
+    def ablation_toggle(req: AblationToggle, request: Request):
         """热插拔开关：改 config 并落盘（bot 进程 reload_if_changed 生效）。"""
+        require_role(request, "ops", "admin")
         from tools import apply_switch
         return apply_switch(req.switch, req.value)
 
     @app.post("/api/ablation/run")
-    def ablation_run(req: AblationRun):
+    def ablation_run(req: AblationRun, request: Request):
         """按选定开关跑消融矩阵（异步任务）。"""
+        require_role(request, "ops", "admin")
         def fn():
             from tools import run_ablation
             probes = state.load_probes()
@@ -262,8 +268,9 @@ def register(app, state):
         }
 
     @app.post("/api/review/submit")
-    def review_submit(req: ReviewSubmit):
+    def review_submit(req: ReviewSubmit, request: Request):
         """提交五维评分并刷新评分驱动缓存（confidence_factor/igt/privacy/extraction）。"""
+        require_role(request, "ops", "admin")
         scores = {
             "extraction": float(req.extraction),
             "decision": float(req.decision),
@@ -284,8 +291,9 @@ def register(app, state):
         return {"ok": True, "score": round(avg, 2), "reviews": len(_db.trace_review_recent(limit=1000))}
 
     @app.post("/api/convreview/submit")
-    def convreview_submit(req: ConvReviewSubmit):
+    def convreview_submit(req: ConvReviewSubmit, request: Request):
         """提交对话五维评分（v33）：写 conv_review + 低分审计归因（不自动调参）。"""
+        require_role(request, "ops", "admin")
         scores = {
             "remember": float(req.remember),
             "natural": float(req.natural),
