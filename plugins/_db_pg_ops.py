@@ -56,7 +56,7 @@ def session_find_recent(scope, key, within_min=1440):
     with _lock:
         cur = _connect().cursor(cursor_factory=RealDictCursor)
         cur.execute(
-            "SELECT * FROM sessions WHERE scope=%s AND key=%s AND closed=0 ORDER BY updated_at DESC LIMIT 1",
+            "SELECT * FROM sessions WHERE scope=%s AND key=%s AND closed=0 ORDER BY updated_at DESC, id DESC LIMIT 1",
             (scope, key or ""),
         )
         row = cur.fetchone()

@@ -1271,6 +1271,27 @@ def _session_cfg(key, default):
     return core.get(key, default)
 
 
+_SOCIAL_WORDS = (
+    "在吗", "在么", "在不在", "你在吗", "你在么", "你在干嘛", "在干嘛",
+    "干嘛呢", "干什么呢", "忙吗", "忙不忙", "你忙吗", "有空吗", "你有空吗",
+    "你好", "嗨", "哈喽", "在忙吗", "干嘛",
+)
+
+
+def _is_social_message(text) -> bool:
+    """判断是否为短社交/寒暄消息。
+
+    这类消息没有可延续的主题，不应继承上一轮会话主题，
+    否则会出现用户问“你在干嘛”却被旧话题带偏的回复。
+    """
+    t = re.sub(r"\s+", "", str(text or "")).strip("？?。！!，,、")
+    if not t:
+        return True
+    if t in _SOCIAL_WORDS:
+        return True
+    return re.fullmatch(r"(?:你|您)?(?:在|忙|有空|干嘛|干什么|咋|怎么)[吗么呢吧]?", t) is not None
+
+
 def _session_topic_of(text) -> str:
     from memory.extract import extract_entities
     ents = extract_entities(text or "")
@@ -1286,6 +1307,8 @@ def _session_similar(a, b) -> float:
 
 def _same_session_topic(text, sess) -> bool:
     """规则版：与最近会话主题/摘要词元重叠 ≥0.5；LLM 版可选。"""
+    if _is_social_message(text):
+        return False
     if _session_cfg("llm", False):
         try:
             from memory.backfill import _llm_one
@@ -1301,8 +1324,15 @@ def _same_session_topic(text, sess) -> bool:
 
 
 def touch(scope, key, text, summary=None) -> int:
-    """把一条消息归入会话：窗口内且同主题 → 续接；否则新开会话。返回 session_id。"""
+    """把一条消息归入会话：窗口内且同主题 → 续接；否则新开会话。返回 session_id。
+
+    短社交/寒暄消息（如“你在干嘛”“在吗”）不会继承旧话题，避免被上一轮主题带偏。
+    """
     recent = _db.session_find_recent(scope, key, within_min=int(_session_cfg("window_min", 1440)))  # type: ignore[attr-defined]
+    if _is_social_message(text):
+        return _db.session_create(  # type: ignore[attr-defined]
+            scope, key, topic="", summary=summary or text[:100]
+        )
     topic_name = _session_topic_of(text)
     if recent and _same_session_topic(text, recent):
         _db.session_bump(recent["id"], topic=topic_name, summary=summary)  # type: ignore[attr-defined]

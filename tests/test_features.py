@@ -1629,6 +1629,23 @@ def test_20_reply_probes_offline_smoke():
         _shared.ask_deepseek = _orig
 
 
+def test_21_social_message_resets_topic():
+    """短社交/寒暄消息不应继承旧会话主题，避免“你在干嘛”被旧话题带偏。"""
+    e = _env()
+    _db = e["_db"]
+    from memory import session as session_mod
+    scope = "c2c:soc"
+    _db.kv_set("memory", "lastmsg:" + scope, None)
+    _db.session_close_old(days=0)  # type: ignore[attr-defined]
+    _db.session_create(scope, "", topic="月底演出/曲子准备", summary="月底演出曲子准备")  # type: ignore[attr-defined]
+    old = session_mod.current(scope, "")
+    _check("social-old-topic-exists", bool(old and old.get("topic")), old)
+    session_mod.touch(scope, "", "你在干嘛")
+    cur = session_mod.current(scope, "")
+    _check("social-reset-topic", cur is not None and not cur.get("topic"), cur)
+    _check("social-not-old-topic", cur is None or "月底" not in str(cur.get("topic", "")), cur)
+
+
 if __name__ == "__main__":
     for fn in (
         test_01_items_search_space, test_02_mind_procedures, test_03_time_subjects,
@@ -1639,6 +1656,7 @@ if __name__ == "__main__":
         test_12_pollution_scan_due, test_13_question_extract_demote,
         test_14_conflict_scan, test_15_reply_rubric_judge,
         test_20_reply_probes_offline_smoke,
+        test_21_social_message_resets_topic,
         test_16_calendar_gate_and_check, test_17_feedback_calibration,
         test_18_retrieval_eval_probes, test_19_forgetful_reply_pool,
     ):
