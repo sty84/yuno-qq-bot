@@ -245,16 +245,20 @@ def create_app():
     @app.middleware("http")
     async def _log_request(request, call_next):
         rid = telemetry.request_id()
+        telemetry.set_request_id(rid)
         request.state.request_id = rid
         start = time.time()
         response = await call_next(request)
+        duration_ms = round((time.time() - start) * 1000, 2)
+        telemetry.inc("web_requests_total")
+        telemetry.observe("web_request_duration_ms", duration_ms)
         telemetry.log_event(
             "web.request",
             request_id=rid,
             method=request.method,
             path=request.url.path,
             status=response.status_code,
-            duration_ms=round((time.time() - start) * 1000, 2),
+            duration_ms=duration_ms,
         )
         return response
 

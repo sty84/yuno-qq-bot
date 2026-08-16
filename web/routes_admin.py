@@ -5,7 +5,7 @@ import os
 import pathlib
 import time
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -41,6 +41,12 @@ def register(app, state):
     @app.get("/api/health")
     def health():
         return {"status": "ok"}
+
+    @app.get("/metrics")
+    def metrics():
+        """Prometheus 文本指标（供 Prometheus 抓取）。"""
+        from memory import telemetry
+        return Response(content=telemetry.metrics_text(), media_type="text/plain")
 
     @app.get("/api/status")
     def status():
